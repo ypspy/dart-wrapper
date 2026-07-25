@@ -18,6 +18,10 @@ class BadRequest(DartWrapperError):
     """잘못된 요청 파라미터(예: 손상된 cursor)일 때 발생한다."""
 
 
+class Unauthorized(DartWrapperError):
+    """Admin 인증이 없거나 토큰이 일치하지 않을 때 발생한다."""
+
+
 class SourceFetchError(DartWrapperError):
     """DART 원문을 가져오지 못했을 때 발생한다."""
 
@@ -29,6 +33,7 @@ class ParseError(DartWrapperError):
 _STATUS_BY_EXCEPTION: dict[type[DartWrapperError], int] = {
     CatalogNotFound: 404,
     BadRequest: 400,
+    Unauthorized: 401,
     SourceFetchError: 502,
     ParseError: 502,
 }

@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     dart_fetch_timeout_seconds: float = 15.0
     dart_fetch_max_retries: int = 2
 
+    # Admin 운영: 1인 운영을 전제로 공유 토큰 하나만 사용한다.
+    admin_token: str = "dev-admin-token"
+    # 공시 1건이 일시 오류로 실패했을 때 다시 시도하는 횟수
+    disclosure_max_retries: int = 3
+    # 연속 차단성 응답이 이만큼 이어지면 슬라이스를 blocked로 두고 쉬어간다.
+    block_streak_threshold: int = 5
+    # blocked 상태에서 재개까지 기다리는 시간(초)
+    block_wait_seconds: float = 60.0
+
 
 @lru_cache
 def get_settings() -> Settings:

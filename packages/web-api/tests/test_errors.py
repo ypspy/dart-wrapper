@@ -49,3 +49,22 @@ async def test_bad_request_returns_400(client_factory) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "커서 값이 올바르지 않습니다."
+
+
+async def test_unauthorized_returns_401(client_factory) -> None:
+    from fastapi import FastAPI
+
+    from app.errors import Unauthorized, register_exception_handlers
+
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.get("/secret")
+    async def secret() -> None:
+        raise Unauthorized("Admin 토큰이 필요합니다.")
+
+    async with client_factory(app) as client:
+        response = await client.get("/secret")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Admin 토큰이 필요합니다."
