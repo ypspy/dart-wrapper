@@ -14,6 +14,10 @@ class CatalogNotFound(DartWrapperError):
     """요청한 공시/섹션이 카탈로그에 없을 때 발생한다."""
 
 
+class BadRequest(DartWrapperError):
+    """잘못된 요청 파라미터(예: 손상된 cursor)일 때 발생한다."""
+
+
 class SourceFetchError(DartWrapperError):
     """DART 원문을 가져오지 못했을 때 발생한다."""
 
@@ -24,6 +28,7 @@ class ParseError(DartWrapperError):
 
 _STATUS_BY_EXCEPTION: dict[type[DartWrapperError], int] = {
     CatalogNotFound: 404,
+    BadRequest: 400,
     SourceFetchError: 502,
     ParseError: 502,
 }
