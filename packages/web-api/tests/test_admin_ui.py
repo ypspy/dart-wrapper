@@ -149,8 +149,8 @@ async def test_admin_index_renders_heatmap_links_and_legend(client_factory) -> N
         'href="/admin?report_type=F001&amp;start_date=20260725'
         '&amp;end_date=20260725"' in response.text
     )
-    assert "미수집" in response.text
-    assert "미완료" in response.text
+    assert "미입수" in response.text
+    assert "미완성" in response.text
     assert "완료" in response.text
 
 
@@ -160,6 +160,19 @@ async def test_heatmap_partial_requires_cookie_token(client_factory) -> None:
 
     assert response.status_code == 307
     assert response.headers["location"].endswith("/admin/token")
+
+
+async def test_heatmap_partial_renders_for_authenticated_admin(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/heatmap")
+
+    assert response.status_code == 200
+    assert "F001" in response.text
+    assert "미입수" in response.text
+    assert "미완성" in response.text
+    assert "완료" in response.text
+    assert 'href="/admin/slices/s1"' in response.text
 
 
 async def test_admin_query_prefills_collect_form(client_factory) -> None:

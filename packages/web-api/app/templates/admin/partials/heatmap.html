@@ -18,11 +18,11 @@
         {% elif cell.slice_id %}
         <a class="heatmap-cell heatmap-{{ cell.level }}"
            href="/admin/slices/{{ cell.slice_id }}"
-           title="{{ cell.slice_date }} · {% if cell.level == 'complete' %}완료{% else %}미완료{% endif %} · 성공 {{ cell.succeeded }}/{{ cell.listed_count if cell.listed_count is not none else '?' }}"></a>
+           title="{{ cell.slice_date }} · {% if cell.level == 'complete' %}완료{% else %}미완성{% endif %} · 성공 {{ cell.succeeded }}/{{ cell.listed_count if cell.listed_count is not none else '?' }}"></a>
         {% else %}
         <a class="heatmap-cell heatmap-missing"
            href="/admin?report_type={{ row.report_type }}&amp;start_date={{ cell.slice_date }}&amp;end_date={{ cell.slice_date }}"
-           title="{{ cell.slice_date }} · 미수집"></a>
+           title="{{ cell.slice_date }} · 미입수"></a>
         {% endif %}
       {% endfor %}
     {% endfor %}
@@ -31,7 +31,7 @@
 {% endfor %}
 
 <div class="heatmap-legend">
-  <span><i class="heatmap-cell heatmap-missing"></i> 미수집</span>
-  <span><i class="heatmap-cell heatmap-incomplete"></i> 미완료</span>
+  <span><i class="heatmap-cell heatmap-missing"></i> 미입수</span>
+  <span><i class="heatmap-cell heatmap-incomplete"></i> 미완성</span>
   <span><i class="heatmap-cell heatmap-complete"></i> 완료</span>
 </div>
