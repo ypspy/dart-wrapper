@@ -9,9 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # packages/web-api/app/config.py → 모노레포 루트
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_COLLECTOR_SCRIPT = (
-    REPO_ROOT / "packages" / "entry-extractor" / "bin" / "collect-entries.js"
-)
+DEFAULT_COLLECTOR_SCRIPT = REPO_ROOT / "packages" / "entry-extractor" / "bin" / "collect-entries.js"
 
 
 class Settings(BaseSettings):
