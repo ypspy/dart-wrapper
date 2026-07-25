@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dart-wrapper-web-api"
+version = "0.1.0"
+description = "DART 공시 카탈로그 Admin 수집 및 Public Viewer API"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "pydantic-settings",
+    "httpx",
+    "beautifulsoup4",
+    "lxml",
+    "SQLAlchemy",
+    "aiosqlite",
+    "greenlet",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg"]
+transform = ["pandas"]
+dev = ["pytest", "pytest-asyncio", "black", "flake8"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

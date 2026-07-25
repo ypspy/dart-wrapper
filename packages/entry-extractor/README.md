@@ -135,6 +135,22 @@ const all = await collectEntries({ reportType: 'F001', startDate, endDate });
 
 중간 노드(`(첨부)재무제표` 등)까지 필요하면 `leafOnly: false`.
 
+## CLI 브릿지 (Python 연동)
+
+`bin/collect-entries.js`는 Python Admin 수집기가 호출하는 브릿지입니다.
+stdin으로 JSON 파라미터를 받고, stdout에는 엔트리 배열 JSON만 출력합니다(진행 로그는 stderr).
+
+```bash
+echo {"report_type":"F001","start_date":"20260724","end_date":"20260724","max_total":2} | node bin/collect-entries.js
+```
+
+| 파라미터 | 설명 |
+|----------|------|
+| `report_type` | 공시 유형 (필수) |
+| `start_date` / `end_date` | YYYYMMDD (필수) |
+| `max_total` | 최대 수집 건수 (옵션) |
+| `include_attachments` | 첨부 포함 여부 (기본 true) |
+
 ## 예제 실행
 
 ```bash
