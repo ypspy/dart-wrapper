@@ -14,7 +14,7 @@ from app.api.admin import ui as admin_ui
 from app.api.v1 import catalog as catalog_query
 from app.api.v1 import viewer
 from app.config import get_settings
-from app.db.session import create_all, create_db_engine, create_sessionmaker
+from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
 from app.errors import register_exception_handlers
 
 # DART는 일반 브라우저 요청과 유사한 헤더를 기대한다.
@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
 
     engine = create_db_engine(settings.database_url)
-    await create_all(engine)
+    await ensure_schema(engine)
 
     http_client = httpx.AsyncClient(headers=_DEFAULT_HEADERS, follow_redirects=True)
 
