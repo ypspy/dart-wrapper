@@ -58,6 +58,12 @@ class JobRepository:
         """작업을 조회한다. 없으면 None."""
         return await self._session.get(CatalogJob, job_id)
 
+    async def latest(self) -> CatalogJob | None:
+        """가장 최근에 만들어진 작업을 반환한다. 작업이 없으면 None."""
+        statement = select(CatalogJob).order_by(CatalogJob.created_at.desc()).limit(1)
+        result = await self._session.execute(statement)
+        return result.scalars().first()
+
     async def mark_running(self, job_id: str) -> None:
         """작업을 실행 중으로 전환한다."""
         job = await self._require(job_id)
