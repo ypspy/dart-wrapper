@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -80,6 +80,40 @@ class DisclosureAttemptItem(BaseModel):
     attempt: int = 0
     last_error: str | None = None
     updated_at: datetime | None = None
+
+
+class HeatmapCell(BaseModel):
+    """보고서 유형·날짜 한 칸의 완전성."""
+
+    slice_date: str
+    level: Literal["complete", "incomplete", "missing", "future"]
+    slice_id: str | None = None
+    status: str | None = None
+    succeeded: int = 0
+    listed_count: int | None = None
+
+
+class HeatmapMonthLabel(BaseModel):
+    """월 이름을 표시할 주 인덱스."""
+
+    week_index: int
+    label: str
+
+
+class HeatmapRow(BaseModel):
+    """보고서 유형 하나의 53주 격자."""
+
+    report_type: str
+    weeks: list[list[HeatmapCell]]
+
+
+class HeatmapResponse(BaseModel):
+    """연간 완전성 히트맵 응답."""
+
+    start_date: str
+    end_date: str
+    month_labels: list[HeatmapMonthLabel] = Field(default_factory=list)
+    rows: list[HeatmapRow] = Field(default_factory=list)
 
 
 class SliceDetailResponse(BaseModel):

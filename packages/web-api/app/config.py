@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     block_streak_threshold: int = 5
     # blocked 상태에서 재개까지 기다리는 시간(초)
     block_wait_seconds: float = 60.0
+    heatmap_report_types: str = "A001,F001"
+
+    @property
+    def heatmap_report_type_list(self) -> tuple[str, ...]:
+        """히트맵 고정 보고서 유형을 중복 없이 정규화한다."""
+        return tuple(
+            dict.fromkeys(
+                item.strip().upper()
+                for item in self.heatmap_report_types.split(",")
+                if item.strip()
+            )
+        )
 
 
 @lru_cache

@@ -89,9 +89,15 @@ def get_catalog_service(
     return service
 
 
-def get_slice_query_service(session: AsyncSession = Depends(get_session)) -> SliceQueryService:
+def get_slice_query_service(
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings_dep),
+) -> SliceQueryService:
     """슬라이스 완전성 조회 서비스를 제공한다."""
-    return SliceQueryService(SliceRepository(session))
+    return SliceQueryService(
+        SliceRepository(session),
+        settings.heatmap_report_type_list,
+    )
 
 
 def get_catalog_query_service(
