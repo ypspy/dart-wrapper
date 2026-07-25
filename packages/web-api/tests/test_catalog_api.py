@@ -44,7 +44,7 @@ async def test_extract_accepts_request_and_schedules_job(client_factory) -> None
         response = await client.post("/admin/catalog/extract", json=PAYLOAD)
 
     assert response.status_code == 202
-    assert response.json() == {"job_id": "job-1", "status": "pending"}
+    assert response.json() == {"job_id": "job-1", "status": "pending", "mode": "collect"}
     assert service.executed == ["job-1"]
 
 

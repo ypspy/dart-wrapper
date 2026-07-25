@@ -102,6 +102,19 @@ class SliceRepository:
         await self._session.flush()
         return attempt
 
+    async def reassign_attempt(self, rcept_no: str, slice_id: str) -> None:
+        """이미 성공한 공시를 현재 슬라이스 소속으로 옮긴다.
+
+        같은 접수번호가 다른 날짜 목록에 나타나도 슬라이스 완전성 계산이 어긋나지 않게 한다.
+        재파싱은 하지 않으므로 시도 횟수는 올리지 않는다.
+        """
+        attempt = await self._session.get(DisclosureAttempt, rcept_no)
+        if attempt is None or attempt.slice_id == slice_id:
+            return
+        attempt.slice_id = slice_id
+        attempt.updated_at = _now()
+        await self._session.flush()
+
     async def get_attempt(self, rcept_no: str) -> DisclosureAttempt | None:
         """공시 1건의 마지막 처리 결과를 조회한다."""
         return await self._session.get(DisclosureAttempt, rcept_no)

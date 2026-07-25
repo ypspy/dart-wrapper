@@ -24,9 +24,21 @@ class JobRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def create(self, job_id: str, params: dict[str, Any], params_key: str) -> CatalogJob:
+    async def create(
+        self,
+        job_id: str,
+        params: dict[str, Any],
+        params_key: str,
+        mode: str = "collect",
+    ) -> CatalogJob:
         """대기 상태의 새 작업을 만든다."""
-        job = CatalogJob(job_id=job_id, params=params, params_key=params_key, status="pending")
+        job = CatalogJob(
+            job_id=job_id,
+            params=params,
+            params_key=params_key,
+            status="pending",
+            mode=mode,
+        )
         self._session.add(job)
         await self._session.flush()
         return job
@@ -58,6 +70,23 @@ class JobRepository:
         job.status = "succeeded"
         job.total_entries = total_entries
         job.saved_entries = saved_entries
+        job.finished_at = _now()
+
+    async def mark_finished(
+        self,
+        job_id: str,
+        status: str,
+        *,
+        total_entries: int,
+        saved_entries: int,
+        error_message: str | None = None,
+    ) -> None:
+        """작업을 마감한다. 미완료 슬라이스가 남으면 partial로 남긴다."""
+        job = await self._require(job_id)
+        job.status = status
+        job.total_entries = total_entries
+        job.saved_entries = saved_entries
+        job.error_message = error_message
         job.finished_at = _now()
 
     async def mark_failed(self, job_id: str, error_message: str) -> None:

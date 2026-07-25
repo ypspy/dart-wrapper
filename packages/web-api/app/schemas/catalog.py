@@ -14,11 +14,20 @@ class ExtractRequest(CollectRequest):
     """수집 트리거 요청. 수집 포트 요청과 동일한 범위를 받는다."""
 
 
+class ResumeRequest(BaseModel):
+    """미완료·실패분 재개 요청. 범위를 좁히려면 슬라이스나 유형을 지정한다."""
+
+    slice_id: str | None = None
+    report_type: str | None = None
+    include_attachments: bool = True
+
+
 class ExtractResponse(BaseModel):
     """수집 트리거 응답. 즉시 반환된다."""
 
     job_id: str
     status: str
+    mode: str = "collect"
 
 
 class JobLogItem(BaseModel):
@@ -36,6 +45,7 @@ class JobStatusResponse(BaseModel):
 
     job_id: str
     status: str
+    mode: str = "collect"
     params: dict[str, Any] = Field(default_factory=dict)
     total_entries: int = 0
     saved_entries: int = 0
