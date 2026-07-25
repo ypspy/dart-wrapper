@@ -77,6 +77,21 @@ DART는 차단·점검·지연으로 수집이 자주 끊깁니다. 그래서 �
 처음 열면 토큰 입력 화면으로 이동하며, 입력한 토큰은 HttpOnly 쿠키에 저장됩니다.
 기본 수집 기간은 지연 등록·정정 공시를 잡기 위해 최근 7일을 겹쳐 잡습니다.
 
+### 연간 완전성 히트맵
+
+대시보드는 GitHub contribution 그래프처럼 최근 53주 수집 상태를 보고서 유형별로 보여줍니다.
+
+- **초록**: 목록 건수와 성공 건수가 일치하고 실패가 없는 `complete`
+- **빨강**: 슬라이스가 있으나 아직 미완성
+- **회색**: 슬라이스가 없어 아직 입수하지 않은 날짜
+
+회색 칸을 선택하면 해당 보고서·날짜 수집 폼의 시작일·종료일이 채워지고, 색이 있는 칸을 선택하면
+슬라이스 상세로 이동합니다. 항상 표시되는 유형은 `.env`의
+`HEATMAP_REPORT_TYPES=A001,F001`로 지정합니다.
+
+월·수·금 요일 라벨과 월 표시가 GitHub 스타일 그리드에 맞춰지며, 창이 좁으면 히트맵 영역만 가로 스크롤됩니다.
+30초마다 HTMX로 `/admin/heatmap`을 갱신합니다.
+
 ## disclosures backfill
 
 이미 `entries`만 있는 DB에는 한 번 실행합니다.
@@ -104,4 +119,5 @@ DART는 차단·점검·지연으로 수집이 자주 끊깁니다. 그래서 �
 
 `.env.example`을 참고해 `.env`를 만듭니다. 개발은 SQLite, 배포는 Neon PostgreSQL을 쓰며 `DATABASE_URL`만 교체하면 됩니다.
 
-Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`입니다.
+Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`, `HEATMAP_REPORT_TYPES`입니다.
+`HEATMAP_REPORT_TYPES`는 히트맵에 고정 표시할 보고서 유형(쉼표 구분, 기본 `A001,F001`)입니다.
