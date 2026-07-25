@@ -1,0 +1,14 @@
+<div class="job-logs">
+  {% if logs %}
+  <ul class="job-log-list">
+    {% for log in logs %}
+    <li class="job-log job-log-{{ log.level }}">
+      <span class="job-log-level">{{ log.level|upper }}</span>
+      <span class="job-log-message">{{ log.message }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">표시할 로그가 없습니다.</p>
+  {% endif %}
+</div>

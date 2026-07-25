@@ -19,7 +19,12 @@ from app.api.deps import (
     get_slice_query_service,
 )
 from app.config import Settings
-from app.schemas.catalog import ExtractRequest, ResumeRequest
+from app.schemas.catalog import (
+    ExtractRequest,
+    JobLogItem,
+    JobStatusResponse,
+    ResumeRequest,
+)
 from app.services.catalog_service import CatalogService
 from app.services.slice_query_service import SliceQueryService
 
@@ -28,6 +33,8 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # 지연 등록·정정 공시를 놓치지 않도록 기본 수집 범위는 최근 7일을 겹쳐 잡는다.
 DEFAULT_RESCAN_DAYS = 7
+# 로그 패널은 기본적으로 주의가 필요한 줄만 보여준다.
+DEFAULT_LOG_LEVELS = "warn,error"
 
 router = APIRouter(prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
@@ -35,6 +42,17 @@ router = APIRouter(prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 def _has_valid_token(request: Request, settings: Settings) -> bool:
     """쿠키에 담긴 Admin 토큰이 설정과 일치하는지 확인한다."""
     return request.cookies.get(ADMIN_TOKEN_COOKIE) == settings.admin_token
+
+
+def _filter_logs(job: JobStatusResponse | None, levels: str) -> list[JobLogItem]:
+    """작업 로그에서 요청한 레벨만 남긴다."""
+    if job is None:
+        return []
+
+    allowed = {level.strip().lower() for level in levels.split(",") if level.strip()}
+    if not allowed:
+        return list(job.logs)
+    return [log for log in job.logs if log.level.lower() in allowed]
 
 
 def _default_range() -> tuple[str, str]:
@@ -121,6 +139,58 @@ async def heatmap_partial(
         "admin/partials/heatmap.html",
         {"heatmap": heatmap},
     )
+
+
+@router.get("/job-status", response_class=HTMLResponse, summary="최신 작업 상태 카드")
+async def job_status_partial(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+    service: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """가장 최근 수집 작업의 상태 카드를 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    job = await service.get_latest_status()
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/job_card.html",
+        {"job": job},
+    )
+
+
+@router.get("/job-logs", response_class=HTMLResponse, summary="최신 작업 로그")
+async def job_logs_partial(
+    request: Request,
+    levels: str = DEFAULT_LOG_LEVELS,
+    settings: Settings = Depends(get_settings_dep),
+    service: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """가장 최근 작업의 로그를 지정한 레벨만 걸러 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    job = await service.get_latest_status()
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/job_logs.html",
+        {"logs": _filter_logs(job, levels)},
+    )
+
+
+@router.post("/jobs/{job_id}/soft-stop", summary="작업 중단 요청")
+async def soft_stop_job(
+    request: Request,
+    job_id: str,
+    settings: Settings = Depends(get_settings_dep),
+    service: CatalogService = Depends(get_catalog_service),
+) -> RedirectResponse:
+    """진행 중인 작업을 다음 공시 경계에서 멈추도록 요청한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    await service.request_soft_stop(job_id)
+    return RedirectResponse("/admin", status_code=303)
 
 
 @router.get("/slices", response_class=HTMLResponse, summary="슬라이스 표 부분 갱신")
