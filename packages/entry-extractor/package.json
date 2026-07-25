@@ -1,0 +1,23 @@
+{
+  "name": "@dart-wrapper/entry-extractor",
+  "version": "0.1.0",
+  "description": "dart-wrapper의 대상 문서 단위(entry) 추출 모듈",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "example": "node examples/run.js",
+    "example:entries": "node examples/entries.js"
+  },
+  "keywords": [
+    "dart",
+    "fss",
+    "disclosure",
+    "entry-extractor",
+    "전자공시"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0"
+  }
+}

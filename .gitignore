@@ -1,0 +1,18 @@
+﻿node_modules/
+*.log
+.env
+.DS_Store
+progress.json
+output/
+
+# Worktrees
+.worktrees/
+
+# Python (web-api)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+packages/web-api/dart_catalog.db

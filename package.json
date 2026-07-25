@@ -1,0 +1,14 @@
+{
+  "name": "dart-wrapper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DART 공시 소스를 재가공·제공하기 위한 모노레포",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "example": "npm run example -w @dart-wrapper/entry-extractor",
+    "example:entries": "npm run example:entries -w @dart-wrapper/entry-extractor"
+  },
+  "license": "MIT"
+}
