@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.errors import CatalogNotFound
+from app.models.disclosure import Disclosure
 from app.ports.entry_collector import EntryCollector
+from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
 from app.repositories.job_repository import JobRepository
 from app.schemas.catalog import ExtractRequest, ExtractResponse, JobLogItem, JobStatusResponse
+from app.schemas.entry import EntryRecord
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,34 @@ logger = logging.getLogger(__name__)
 def _params_key(request: ExtractRequest) -> str:
     """같은 범위의 중복 수집을 판별하기 위한 정규화 키를 만든다."""
     return json.dumps(request.model_dump(), sort_keys=True, ensure_ascii=False)
+
+
+def disclosures_from_records(records: Sequence[EntryRecord]) -> list[Disclosure]:
+    """수집된 leaf를 접수번호별로 묶어 disclosure 행을 만든다."""
+    by_rcp: dict[str, list[EntryRecord]] = {}
+    for record in records:
+        by_rcp.setdefault(record.rcept_no, []).append(record)
+
+    rows: list[Disclosure] = []
+    for rcept_no, group in by_rcp.items():
+        sample = group[0]
+        rows.append(
+            Disclosure(
+                rcept_no=rcept_no,
+                corp_code=sample.corp_code,
+                corp_name=sample.corp_name,
+                report_nm=sample.report_nm,
+                report_type=sample.report_type,
+                correction_type=sample.correction_type,
+                submitter=sample.submitter,
+                rcept_dt=sample.rcept_dt or "",
+                bsns_year=sample.bsns_year,
+                year_end=sample.year_end,
+                disclosure_url=sample.disclosure_url,
+                entry_count=len(group),
+            )
+        )
+    return rows
 
 
 class CatalogService:
@@ -73,6 +105,7 @@ class CatalogService:
         async with self._sessionmaker() as session:
             jobs = JobRepository(session)
             saved = await EntryRepository(session).upsert_many(records)
+            await DisclosureRepository(session).upsert_many(disclosures_from_records(records))
             await jobs.mark_succeeded(job_id, total_entries=len(records), saved_entries=saved)
             await jobs.add_log(job_id, "info", f"엔트리 {saved}건을 카탈로그에 저장했습니다.")
             await session.commit()

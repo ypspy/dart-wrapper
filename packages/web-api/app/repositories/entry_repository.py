@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entry import Entry
@@ -29,6 +29,21 @@ class EntryRepository:
     async def list_by_rcept_no(self, rcept_no: str) -> list[Entry]:
         """해당 접수번호의 모든 엔트리를 entry_id 순으로 반환한다."""
         statement = select(Entry).where(Entry.rcept_no == rcept_no).order_by(Entry.entry_id)
+        result = await self._session.execute(statement)
+        return list(result.scalars().all())
+
+    async def list_toc_by_rcept_no(self, rcept_no: str) -> list[Entry]:
+        """목차용 leaf 목록을 본문 우선·문서·섹션 순으로 반환한다."""
+        statement = (
+            select(Entry)
+            .where(Entry.rcept_no == rcept_no)
+            .order_by(
+                case((Entry.source == "body", 0), else_=1),
+                Entry.dcm_no,
+                Entry.ele_id,
+                Entry.entry_id,
+            )
+        )
         result = await self._session.execute(statement)
         return list(result.scalars().all())
 

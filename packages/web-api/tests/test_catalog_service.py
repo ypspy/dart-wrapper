@@ -26,11 +26,36 @@ class FakeCollector:
             EntryRecord(
                 entry_id="e_1",
                 rcept_no="20260724000650",
+                report_type="F001",
+                corp_name="테스트",
+                rcept_dt="20260724",
                 source="body",
                 section_name="재무상태표",
                 path=["감사보고서", "재무상태표"],
                 viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=1",
-            )
+            ),
+            EntryRecord(
+                entry_id="e_2",
+                rcept_no="20260724000650",
+                report_type="F001",
+                corp_name="테스트",
+                rcept_dt="20260724",
+                source="body",
+                section_name="주석",
+                path=["감사보고서", "주석"],
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=1",
+            ),
+            EntryRecord(
+                entry_id="e_3",
+                rcept_no="20260725000001",
+                report_type="F001",
+                corp_name="다른회사",
+                rcept_dt="20260725",
+                source="body",
+                section_name="재무상태표",
+                path=["감사보고서", "재무상태표"],
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=2",
+            ),
         ]
 
 
@@ -76,8 +101,17 @@ async def test_run_job_saves_entries_and_marks_success(sessionmaker_fixture) -> 
     status = await service.get_status(response.job_id)
 
     assert status.status == "succeeded"
-    assert (status.total_entries, status.saved_entries) == (1, 1)
+    assert (status.total_entries, status.saved_entries) == (3, 3)
     assert collector.calls[0].report_type == "F001"
+
+    from app.repositories.disclosure_repository import DisclosureRepository
+
+    async with sessionmaker_fixture() as session:
+        d1 = await DisclosureRepository(session).get("20260724000650")
+        d2 = await DisclosureRepository(session).get("20260725000001")
+
+    assert d1 is not None and d1.entry_count == 2
+    assert d2 is not None and d2.entry_count == 1
     assert any("수집" in log.message for log in status.logs)
 
 
