@@ -34,7 +34,7 @@
     </p>
     <div class="heatmap-scroll"
          hx-get="/admin/heatmap?report_type={{ report_type }}&amp;year={{ selected_year }}"
-         hx-trigger="every 30s"
+         hx-trigger="every 5s"
          hx-swap="innerHTML">
       {% include "admin/partials/heatmap.html" %}
     </div>
