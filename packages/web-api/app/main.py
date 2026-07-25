@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from app.errors import register_exception_handlers
+
 
 def create_app() -> FastAPI:
     """DART 공시 파이프라인 API 앱을 생성한다."""
@@ -12,6 +14,7 @@ def create_app() -> FastAPI:
         description="Admin 카탈로그 수집과 Public Viewer(Lazy Retrieval)를 제공합니다.",
         version="0.1.0",
     )
+    register_exception_handlers(app)
 
     @app.get("/health", tags=["시스템"])
     async def health() -> dict[str, str]:

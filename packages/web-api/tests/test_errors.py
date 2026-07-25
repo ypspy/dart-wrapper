@@ -1,0 +1,32 @@
+"""도메인 예외가 HTTP 응답으로 변환되는지 검증한다."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.errors import CatalogNotFound, ParseError, SourceFetchError
+from app.main import create_app
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_status", "expected_detail"),
+    [
+        (CatalogNotFound("카탈로그에 없습니다."), 404, "카탈로그에 없습니다."),
+        (SourceFetchError("원문을 가져오지 못했습니다."), 502, "원문을 가져오지 못했습니다."),
+        (ParseError("본문 파싱에 실패했습니다."), 502, "본문 파싱에 실패했습니다."),
+    ],
+)
+async def test_domain_exception_maps_to_http_response(
+    client_factory, exception: Exception, expected_status: int, expected_detail: str
+) -> None:
+    app = create_app()
+
+    @app.get("/_test/raise")
+    async def _raise() -> None:
+        raise exception
+
+    async with client_factory(app) as client:
+        response = await client.get("/_test/raise")
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
