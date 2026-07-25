@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -109,3 +110,29 @@ async def test_collect_raises_when_process_fails(failing_script: Path) -> None:
         )
 
     assert "수집 실패" in str(error.value)
+
+
+async def test_collect_raises_when_executable_missing(tmp_path: Path) -> None:
+    collector = NodeEntryCollector("존재하지-않는-실행파일", tmp_path / "none.js")
+
+    with pytest.raises(SourceFetchError) as error:
+        await collector.collect(
+            CollectRequest(report_type="F001", start_date="20260701", end_date="20260724")
+        )
+
+    assert "실행할 수 없습니다" in str(error.value)
+
+
+def test_collect_runs_on_selector_event_loop(fake_script: Path) -> None:
+    """uvicorn이 Windows에서 쓰는 SelectorEventLoop에서도 수집이 동작해야 한다."""
+    loop = asyncio.SelectorEventLoop()
+    try:
+        records = loop.run_until_complete(
+            NodeEntryCollector(sys.executable, fake_script).collect(
+                CollectRequest(report_type="F001", start_date="20260701", end_date="20260724")
+            )
+        )
+    finally:
+        loop.close()
+
+    assert [record.entry_id for record in records] == ["r1_d1_5", "r2_d2_att"]

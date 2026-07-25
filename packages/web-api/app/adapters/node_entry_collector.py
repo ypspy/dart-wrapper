@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import subprocess
 from pathlib import Path
 
 from app.errors import SourceFetchError
@@ -18,6 +19,10 @@ class NodeEntryCollector:
     """CLI 브릿지 스크립트를 실행해 엔트리 JSON을 받아온다.
 
     stdout은 엔트리 배열 JSON 전용이고, 진행 로그는 stderr로 들어온다.
+
+    프로세스 실행은 워커 스레드에 위임한다. uvicorn은 Windows에서
+    SelectorEventLoop를 사용하는데, 이 루프는 asyncio 서브프로세스를
+    지원하지 않아 NotImplementedError가 발생하기 때문이다.
     """
 
     def __init__(
@@ -36,37 +41,37 @@ class NodeEntryCollector:
         :raises SourceFetchError: 프로세스 실패, 시간 초과, 출력 파싱 실패
         """
         payload = json.dumps(request.model_dump(), ensure_ascii=False)
-        process = await asyncio.create_subprocess_exec(
-            self._node_executable,
-            str(self._script_path),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
 
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(payload.encode("utf-8")),
+            completed = await asyncio.to_thread(
+                subprocess.run,
+                [self._node_executable, str(self._script_path)],
+                input=payload.encode("utf-8"),
+                capture_output=True,
                 timeout=self._timeout_seconds,
             )
-        except asyncio.TimeoutError as exc:
-            process.kill()
+        except subprocess.TimeoutExpired as exc:
             raise SourceFetchError(
                 f"엔트리 수집이 {self._timeout_seconds}초 안에 끝나지 않아 중단했습니다."
             ) from exc
+        except OSError as exc:
+            raise SourceFetchError(
+                f"엔트리 수집기를 실행할 수 없습니다({self._node_executable} "
+                f"{self._script_path}): {exc}"
+            ) from exc
 
-        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+        stderr_text = completed.stderr.decode("utf-8", errors="replace").strip()
         if stderr_text:
             logger.info("수집기 진행 로그: %s", stderr_text)
 
-        if process.returncode != 0:
+        if completed.returncode != 0:
             raise SourceFetchError(
-                f"엔트리 수집 프로세스가 비정상 종료했습니다(코드 {process.returncode}): "
+                f"엔트리 수집 프로세스가 비정상 종료했습니다(코드 {completed.returncode}): "
                 f"{stderr_text or '추가 정보 없음'}"
             )
 
         try:
-            raw_entries = json.loads(stdout.decode("utf-8"))
+            raw_entries = json.loads(completed.stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise SourceFetchError(f"수집 결과 JSON을 해석하지 못했습니다: {exc}") from exc
 
