@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from types import SimpleNamespace
 
+from app.schemas.catalog import YearSummaryResponse
 from app.services.slice_query_service import SliceQueryService
 
 
@@ -92,3 +93,34 @@ async def test_heatmap_normalizes_database_report_type_into_fixed_row() -> None:
     )
     assert cell.level == "complete"
     assert cell.slice_id == "f001-20260721"
+
+
+async def test_year_summary_marks_levels_and_selects_latest_incomplete() -> None:
+    rows = [
+        _slice("F001", "20240115", "complete", succeeded=1, listed_count=1),
+        _slice("F001", "20250110", "blocked", succeeded=0, listed_count=2),
+        _slice("F001", "20250301", "complete", succeeded=1, listed_count=1),
+        _slice("A001", "20260101", "complete", succeeded=1, listed_count=1),
+    ]
+    service = SliceQueryService(FakeSliceRepository(rows), ("F001",))
+
+    result = await service.year_summary(report_type="F001", today=date(2026, 7, 26))
+
+    assert isinstance(result, YearSummaryResponse)
+    by_year = {item.year: item.level for item in result.items}
+    assert by_year[2024] == "complete"
+    assert by_year[2025] == "incomplete"
+    assert by_year[2026] == "missing"
+    assert result.selected_year == 2025
+    assert result.items[0].year <= result.items[-1].year
+
+
+async def test_year_summary_empty_uses_fallback_range() -> None:
+    service = SliceQueryService(FakeSliceRepository([]), ("F001",))
+
+    result = await service.year_summary(today=date(2026, 7, 26))
+
+    assert result.items[0].year == 1999
+    assert result.items[-1].year == 2026
+    assert all(item.level == "missing" for item in result.items)
+    assert result.selected_year == 2026

@@ -18,10 +18,14 @@ from app.schemas.catalog import (
     SliceDetailResponse,
     SliceListResponse,
     SliceSummary,
+    YearSummaryItem,
+    YearSummaryResponse,
 )
 
 WEEK_COUNT = 53
 DAY_COUNT = 7
+# 수집 이력이 없을 때 연도 요약 바가 보여줄 시작 연도
+FALLBACK_START_YEAR = 1999
 MONTH_LABELS = (
     "Jan",
     "Feb",
@@ -80,6 +84,48 @@ class SliceQueryService:
             slice=SliceSummary.model_validate(row),
             attempts=[DisclosureAttemptItem.model_validate(item) for item in attempts],
         )
+
+    async def year_summary(
+        self,
+        *,
+        report_type: str | None = None,
+        today: date | None = None,
+    ) -> YearSummaryResponse:
+        """연도별 완전성 요약과 기본 선택 연도를 만든다."""
+        end = today or date.today()
+        rows = await self._slices.list_slices_between(
+            f"{FALLBACK_START_YEAR}0101",
+            end.strftime("%Y%m%d"),
+        )
+        if report_type:
+            key = report_type.strip().upper()
+            rows = [row for row in rows if row.report_type.strip().upper() == key]
+
+        statuses_by_year: dict[int, list[str]] = {}
+        for row in rows:
+            statuses_by_year.setdefault(int(row.slice_date[:4]), []).append(row.status)
+
+        first_year = min(statuses_by_year) if statuses_by_year else FALLBACK_START_YEAR
+        items = [
+            YearSummaryItem(year=year, level=self._year_level(statuses_by_year.get(year, [])))
+            for year in range(first_year, end.year + 1)
+        ]
+
+        selected_year = end.year
+        for item in reversed(items):
+            if item.level == "incomplete":
+                selected_year = item.year
+                break
+        return YearSummaryResponse(items=items, selected_year=selected_year)
+
+    @staticmethod
+    def _year_level(statuses: list[str]) -> str:
+        """한 해의 슬라이스 상태들을 연 단위 완전성으로 접는다."""
+        if not statuses:
+            return "missing"
+        if any(status != "complete" for status in statuses):
+            return "incomplete"
+        return "complete"
 
     async def heatmap(self, today: date | None = None) -> HeatmapResponse:
         """오늘 기준 최근 53주 완전성 격자를 만든다."""

@@ -116,6 +116,20 @@ class HeatmapResponse(BaseModel):
     rows: list[HeatmapRow] = Field(default_factory=list)
 
 
+class YearSummaryItem(BaseModel):
+    """연도 하나의 완전성 요약."""
+
+    year: int
+    level: Literal["complete", "incomplete", "missing"]
+
+
+class YearSummaryResponse(BaseModel):
+    """연도 요약 바와 기본 선택 연도."""
+
+    items: list[YearSummaryItem] = Field(default_factory=list)
+    selected_year: int
+
+
 class SliceDetailResponse(BaseModel):
     """슬라이스 상세: 요약과 공시별 처리 결과."""
 
