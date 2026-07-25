@@ -14,9 +14,11 @@ const { parseDisclosureRow } = require('./parse');
  * @param {number} [params.maxTotal=null] 전체 최대 수집 건수(옵션)
  * @param {string|number} [params.year=null] 사업연도 태깅용(옵션)
  * @param {(info: object) => void} [params.onProgress] 진행 콜백(옵션)
- * @returns {Promise<object[]>} 공시 메타데이터 배열(각 항목에 main.do url 포함)
+ * @returns {Promise<{listedCount: number, disclosures: object[], error: Error|null}>}
+ *   원천이 알려준 총건수와 공시 메타데이터 배열(각 항목에 main.do url 포함).
+ *   수집 도중 요청이 실패하면 error에 마지막 오류가 담긴다.
  */
-async function fetchDisclosureList({
+async function fetchDisclosureListResult({
   reportType,
   startDate,
   endDate,
@@ -33,6 +35,7 @@ async function fetchDisclosureList({
 
   let currentPage = 1;
   let totalCount = 0;
+  let lastError = null;
 
   while (true) {
     const params = new URLSearchParams({
@@ -51,6 +54,7 @@ async function fetchDisclosureList({
       response = await safeGet(url);
     } catch (err) {
       if (onProgress) onProgress({ type: 'error', reportType, currentPage, message: err.message });
+      lastError = err;
       break;
     }
 
@@ -89,7 +93,24 @@ async function fetchDisclosureList({
     currentPage++;
   }
 
-  return maxTotal ? allDisclosures.slice(0, maxTotal) : allDisclosures;
+  const disclosures = maxTotal ? allDisclosures.slice(0, maxTotal) : allDisclosures;
+  // 총건수를 못 읽었으면 실제 수집 건수를 기대치로 삼는다.
+  const listedCount = maxTotal
+    ? Math.min(maxTotal, totalCount || disclosures.length)
+    : totalCount || disclosures.length;
+
+  return { listedCount, disclosures, error: lastError };
 }
 
-module.exports = { fetchDisclosureList };
+/**
+ * 기존 호출부 호환용 래퍼. 공시 배열만 반환한다.
+ *
+ * @param {object} params fetchDisclosureListResult와 동일
+ * @returns {Promise<object[]>} 공시 메타데이터 배열
+ */
+async function fetchDisclosureList(params = {}) {
+  const { disclosures } = await fetchDisclosureListResult(params);
+  return disclosures;
+}
+
+module.exports = { fetchDisclosureList, fetchDisclosureListResult };

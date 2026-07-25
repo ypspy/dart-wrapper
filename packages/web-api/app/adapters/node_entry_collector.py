@@ -7,9 +7,14 @@ import json
 import logging
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from app.errors import SourceFetchError
-from app.ports.entry_collector import CollectRequest
+from app.ports.entry_collector import (
+    CollectRequest,
+    DisclosureListItem,
+    DisclosureListResult,
+)
 from app.schemas.entry import EntryRecord
 
 logger = logging.getLogger(__name__)
@@ -36,17 +41,59 @@ class NodeEntryCollector:
         self._timeout_seconds = timeout_seconds
 
     async def collect(self, request: CollectRequest) -> list[EntryRecord]:
-        """수집 스크립트를 실행하고 엔트리 목록으로 변환한다.
+        """기간 전체를 한 번에 수집한다(예제·수동 실행용).
 
         :raises SourceFetchError: 프로세스 실패, 시간 초과, 출력 파싱 실패
         """
-        payload = json.dumps(request.model_dump(), ensure_ascii=False)
+        raw_entries = await self._run_script({"mode": "collect", **request.model_dump()})
+        records = [EntryRecord.model_validate(item) for item in raw_entries]
+        if request.corp_code:
+            # 상세검색 목록은 기업 필터를 지원하지 않아 수집 후 걸러낸다.
+            records = [record for record in records if record.corp_code == request.corp_code]
+        return records
+
+    async def list_disclosures(self, request: CollectRequest) -> DisclosureListResult:
+        """기간(보통 하루)의 공시 목록과 원천 총건수를 가져온다.
+
+        :raises SourceFetchError: 목록 수집 실패
+        """
+        payload = {"mode": "list", **request.model_dump()}
+        result = DisclosureListResult.model_validate(await self._run_script(payload))
+        if request.corp_code:
+            items = [item for item in result.items if item.corp_code == request.corp_code]
+            return DisclosureListResult(listed_count=len(items), items=items)
+        return result
+
+    async def extract_disclosure(
+        self,
+        disclosure: DisclosureListItem,
+        *,
+        include_attachments: bool = True,
+    ) -> list[EntryRecord]:
+        """공시 1건의 상세를 파싱해 leaf 엔트리를 만든다.
+
+        :raises SourceFetchError: 상세 파싱 실패
+        """
+        payload = {
+            "mode": "extract",
+            "disclosure": disclosure.to_node_payload(),
+            "include_attachments": include_attachments,
+        }
+        raw_entries = await self._run_script(payload)
+        return [EntryRecord.model_validate(item) for item in raw_entries]
+
+    async def _run_script(self, payload: dict[str, Any]) -> Any:
+        """CLI 브릿지를 실행하고 stdout JSON을 돌려준다.
+
+        :raises SourceFetchError: 프로세스 실패, 시간 초과, 출력 파싱 실패
+        """
+        encoded = json.dumps(payload, ensure_ascii=False)
 
         try:
             completed = await asyncio.to_thread(
                 subprocess.run,
                 [self._node_executable, str(self._script_path)],
-                input=payload.encode("utf-8"),
+                input=encoded.encode("utf-8"),
                 capture_output=True,
                 timeout=self._timeout_seconds,
             )
@@ -71,12 +118,6 @@ class NodeEntryCollector:
             )
 
         try:
-            raw_entries = json.loads(completed.stdout.decode("utf-8"))
+            return json.loads(completed.stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise SourceFetchError(f"수집 결과 JSON을 해석하지 못했습니다: {exc}") from exc
-
-        records = [EntryRecord.model_validate(item) for item in raw_entries]
-        if request.corp_code:
-            # 상세검색 목록은 기업 필터를 지원하지 않아 수집 후 걸러낸다.
-            records = [record for record in records if record.corp_code == request.corp_code]
-        return records
