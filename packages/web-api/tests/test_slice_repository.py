@@ -147,3 +147,24 @@ async def test_list_slices_filters_by_date_range(sessionmaker_fixture) -> None:
         )
 
     assert [row.slice_date for row in rows] == ["20260724", "20260723"]
+
+
+async def test_list_slices_between_returns_all_types_without_limit(
+    sessionmaker_fixture,
+) -> None:
+    async with sessionmaker_fixture() as session:
+        repository = SliceRepository(session)
+        for index in range(105):
+            day = f"2026{(index // 28) + 1:02d}{(index % 28) + 1:02d}"
+            await repository.get_or_create_slice(
+                "A001" if index % 2 == 0 else "F001",
+                day,
+            )
+        await repository.get_or_create_slice("X001", "20250101")
+        await session.commit()
+
+        rows = await repository.list_slices_between("20260101", "20261231")
+
+    assert len(rows) == 105
+    assert {row.report_type for row in rows} == {"A001", "F001"}
+    assert rows[0].slice_date <= rows[-1].slice_date

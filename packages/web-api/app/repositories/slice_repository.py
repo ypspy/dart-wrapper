@@ -198,6 +198,20 @@ class SliceRepository:
         statement = statement.order_by(SliceProgress.slice_date.desc()).limit(limit)
         return list((await self._session.execute(statement)).scalars().all())
 
+    async def list_slices_between(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> list[SliceProgress]:
+        """기간 내 모든 보고서 타입의 슬라이스를 날짜·유형 순으로 반환한다."""
+        statement = (
+            select(SliceProgress)
+            .where(SliceProgress.slice_date >= start_date)
+            .where(SliceProgress.slice_date <= end_date)
+            .order_by(SliceProgress.slice_date, SliceProgress.report_type)
+        )
+        return list((await self._session.execute(statement)).scalars().all())
+
     async def list_incomplete(
         self,
         *,
