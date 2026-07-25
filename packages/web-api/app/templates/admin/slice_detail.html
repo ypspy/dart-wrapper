@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ slice.slice_date }} 슬라이스{% endblock %}
+{% block content %}
+<h2>{{ slice.slice_date }} · {{ slice.report_type }}</h2>
+<p>
+  상태 <span class="status status-{{ slice.status }}">{{ slice.status }}</span> ·
+  목록 {{ slice.listed_count if slice.listed_count is not none else "-" }}건 ·
+  성공 {{ slice.succeeded }}건 · 실패 {{ slice.failed_count }}건 · 시도 {{ slice.attempt }}회
+</p>
+
+{% if slice.status != "complete" %}
+<form class="inline" method="post" action="/admin/slices/{{ slice.slice_id }}/retry">
+  <button type="submit">실패분 재시도</button>
+</form>
+{% endif %}
+
+<h2>공시별 처리 결과</h2>
+<table>
+  <thead>
+    <tr>
+      <th>접수번호</th>
+      <th>상태</th>
+      <th>엔트리</th>
+      <th>시도</th>
+      <th>마지막 오류</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in attempts %}
+    <tr>
+      <td>{{ item.rcept_no }}</td>
+      <td class="status status-{{ item.status }}">{{ item.status }}</td>
+      <td>{{ item.entry_count }}</td>
+      <td>{{ item.attempt }}</td>
+      <td class="muted">{{ item.last_error or "" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">아직 처리한 공시가 없습니다.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p><a href="/admin">← 대시보드</a></p>
+{% endblock %}

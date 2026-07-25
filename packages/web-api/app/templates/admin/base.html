@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}DART 수집 운영{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0 auto; padding: 24px; max-width: 1040px;
+      font-family: "Segoe UI", system-ui, sans-serif; line-height: 1.5;
+    }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.1rem; margin-top: 32px; }
+    form.inline { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+    label { display: flex; flex-direction: column; font-size: 0.85rem; gap: 4px; }
+    input, select { padding: 6px 8px; font: inherit; }
+    button { padding: 7px 14px; font: inherit; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
+    th, td { border-bottom: 1px solid #8884; padding: 8px 6px; text-align: left; }
+    .status { font-weight: 600; }
+    .status-complete { color: #157347; }
+    .status-blocked { color: #b5850b; }
+    .status-failed { color: #b02a37; }
+    .muted { color: #8a8a8a; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1><a href="/admin">DART 수집 운영</a></h1>
+  {% block content %}{% endblock %}
+</body>
+</html>

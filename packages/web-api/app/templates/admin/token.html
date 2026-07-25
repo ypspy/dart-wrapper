@@ -1,0 +1,16 @@
+{% extends "admin/base.html" %}
+{% block title %}Admin 토큰 입력{% endblock %}
+{% block content %}
+<h2>Admin 토큰</h2>
+<p class="muted">운영 화면은 공유 토큰으로 보호됩니다. 설정한 <code>ADMIN_TOKEN</code>을 입력해 주세요.</p>
+
+{% if error %}<p class="status status-failed">{{ error }}</p>{% endif %}
+
+<form class="inline" method="post" action="/admin/token">
+  <label>
+    토큰
+    <input type="password" name="token" required autofocus>
+  </label>
+  <button type="submit">확인</button>
+</form>
+{% endblock %}

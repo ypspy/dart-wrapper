@@ -1,0 +1,36 @@
+<table id="slices-table">
+  <thead>
+    <tr>
+      <th>날짜</th>
+      <th>유형</th>
+      <th>목록</th>
+      <th>성공</th>
+      <th>실패</th>
+      <th>상태</th>
+      <th>시도</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in slices %}
+    <tr>
+      <td><a href="/admin/slices/{{ row.slice_id }}">{{ row.slice_date }}</a></td>
+      <td>{{ row.report_type }}</td>
+      <td>{{ row.listed_count if row.listed_count is not none else "-" }}</td>
+      <td>{{ row.succeeded }}</td>
+      <td>{{ row.failed_count }}</td>
+      <td class="status status-{{ row.status }}">{{ row.status }}</td>
+      <td>{{ row.attempt }}</td>
+      <td>
+        {% if row.status != "complete" %}
+        <form method="post" action="/admin/slices/{{ row.slice_id }}/retry">
+          <button type="submit">재시도</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">아직 수집한 슬라이스가 없습니다.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

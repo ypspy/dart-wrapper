@@ -13,6 +13,8 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "httpx",
+    "jinja2",
+    "python-multipart",
     "beautifulsoup4",
     "lxml",
     "SQLAlchemy",
