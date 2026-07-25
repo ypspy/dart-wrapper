@@ -7,7 +7,15 @@
     <p class="muted">
       왼쪽에서 비어 있는 구간을 찾고, 오른쪽에서 작업을 실행·감시합니다.
       한국 시간 기준 당일은 미도래(투명)로 두고, 다음 날 0시 이후에 엽니다.
+      진행 중인 작업이 있으면 새 수집은 시작할 수 없습니다.
     </p>
+    {% if notice %}
+    <p class="banner-warn" role="status">{{ notice }}</p>
+    {% elif job_busy %}
+    <p class="banner-warn" role="status">
+      수집 작업이 진행 중입니다. 다른 작업을 시작하려면 현재 작업이 끝날 때까지 기다려 주세요.
+    </p>
+    {% endif %}
   </div>
   <nav class="report-type-toggle" aria-label="보고서 유형">
     {% for code in report_types %}
@@ -52,7 +60,11 @@
     </div>
 
     <h3>수집</h3>
-    {% include "admin/partials/collect_form.html" %}
+    <div hx-get="/admin/collect-form?report_type={{ report_type }}&amp;start_date={{ start_date }}&amp;end_date={{ end_date }}&amp;expand_form={{ 1 if expand_form else 0 }}"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/collect_form.html" %}
+    </div>
 
     <h3>로그</h3>
     <div hx-get="/admin/job-logs"

@@ -4,23 +4,26 @@
     기간은 하루 단위 슬라이스로 나눠 처리합니다. 이미 성공한 공시는 다시 파싱하지 않으므로
     같은 기간을 여러 번 돌려도 중복이 생기지 않습니다.
   </p>
+  {% if job_busy %}
+  <p class="banner-warn">다른 작업이 진행 중이라 새 수집을 시작할 수 없습니다.</p>
+  {% endif %}
   <form method="post" action="/admin/collect">
     <label>
       공시 유형
-      <input type="text" name="report_type" value="{{ report_type }}" required>
+      <input type="text" name="report_type" value="{{ report_type }}" required{% if job_busy %} disabled{% endif %}>
     </label>
     <label>
       시작일
-      <input type="text" name="start_date" value="{{ start_date }}" pattern="\d{8}" required>
+      <input type="text" name="start_date" value="{{ start_date }}" pattern="\d{8}" required{% if job_busy %} disabled{% endif %}>
     </label>
     <label>
       종료일
-      <input type="text" name="end_date" value="{{ end_date }}" pattern="\d{8}" required>
+      <input type="text" name="end_date" value="{{ end_date }}" pattern="\d{8}" required{% if job_busy %} disabled{% endif %}>
     </label>
     <label class="checkbox">
-      <input type="checkbox" name="include_attachments" value="true" checked>
+      <input type="checkbox" name="include_attachments" value="true" checked{% if job_busy %} disabled{% endif %}>
       첨부 포함
     </label>
-    <button type="submit" class="btn btn-primary">수집 시작</button>
+    <button type="submit" class="btn btn-primary"{% if job_busy %} disabled{% endif %}>수집 시작</button>
   </form>
 </details>

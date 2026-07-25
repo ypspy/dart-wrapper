@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.errors import CatalogNotFound, ParseError, SourceFetchError
+from app.errors import CatalogConflict, CatalogNotFound, ParseError, SourceFetchError
 from app.main import create_app
 
 
@@ -12,6 +12,11 @@ from app.main import create_app
     ("exception", "expected_status", "expected_detail"),
     [
         (CatalogNotFound("카탈로그에 없습니다."), 404, "카탈로그에 없습니다."),
+        (
+            CatalogConflict("다른 수집 작업이 이미 진행 중입니다."),
+            409,
+            "다른 수집 작업이 이미 진행 중입니다.",
+        ),
         (SourceFetchError("원문을 가져오지 못했습니다."), 502, "원문을 가져오지 못했습니다."),
         (ParseError("본문 파싱에 실패했습니다."), 502, "본문 파싱에 실패했습니다."),
     ],

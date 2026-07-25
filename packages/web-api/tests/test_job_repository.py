@@ -57,6 +57,21 @@ async def test_status_transitions_and_logs(sessionmaker_fixture) -> None:
     assert active is None
 
 
+async def test_find_any_active_ignores_params_key(sessionmaker_fixture) -> None:
+    async with sessionmaker_fixture() as session:
+        repository = JobRepository(session)
+        await repository.create("job-a", {"report_type": "F001"}, "key-a")
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        repository = JobRepository(session)
+        active = await repository.find_any_active()
+        other = await repository.find_active("key-b")
+
+    assert active is not None and active.job_id == "job-a"
+    assert other is None
+
+
 async def test_latest_returns_most_recent_job(sessionmaker_fixture) -> None:
     async with sessionmaker_fixture() as session:
         repository = JobRepository(session)

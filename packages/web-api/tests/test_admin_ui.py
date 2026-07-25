@@ -217,6 +217,22 @@ async def test_admin_index_renders_two_column_ops_console(client_factory) -> Non
     assert ">F001<" in body or 'is-selected">F001' in body
 
 
+async def test_admin_index_disables_start_when_job_busy(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "진행 중인 작업이 있으면 새 수집은 시작할 수 없습니다" in body
+    assert 'name="report_type" value="F001" required disabled' in body
+    assert "수집 시작</button>" in body
+    assert "disabled>수집 시작</button>" in body or 'disabled">수집 시작</button>' in body
+    assert (
+        "disabled>미완료 이어하기</button>" in body or 'disabled">미완료 이어하기</button>' in body
+    )
+
+
 async def test_admin_index_collect_form_is_collapsed_by_default(client_factory) -> None:
     async with client_factory(_app()) as client:
         client.cookies.set("admin_token", "dev-admin-token")

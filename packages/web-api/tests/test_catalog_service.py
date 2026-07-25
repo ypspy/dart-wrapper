@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.db.session import create_all, create_db_engine, create_sessionmaker
-from app.errors import CatalogNotFound, SourceFetchError
+from app.errors import CatalogConflict, CatalogNotFound, SourceFetchError
 from app.ports.entry_collector import CollectRequest, DisclosureListItem, DisclosureListResult
 from app.schemas.catalog import ExtractRequest
 from app.schemas.entry import EntryRecord
@@ -134,6 +134,16 @@ async def test_start_extract_reuses_active_job(sessionmaker_fixture) -> None:
     second = await service.start_extract(REQUEST)
 
     assert first.job_id == second.job_id
+
+
+async def test_start_extract_rejects_when_other_job_is_running(sessionmaker_fixture) -> None:
+    service = CatalogService(sessionmaker_fixture, FakeCollector())
+    await service.start_extract(REQUEST)
+
+    with pytest.raises(CatalogConflict, match="이미 진행 중"):
+        await service.start_extract(
+            ExtractRequest(report_type="A001", start_date="20260101", end_date="20260101")
+        )
 
 
 async def test_run_job_saves_entries_and_marks_success(sessionmaker_fixture) -> None:

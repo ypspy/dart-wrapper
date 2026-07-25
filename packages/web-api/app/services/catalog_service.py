@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.errors import CatalogNotFound
+from app.errors import CatalogConflict, CatalogNotFound
 from app.models.disclosure import Disclosure
 from app.ports.entry_collector import CollectRequest, DisclosureListItem, EntryCollector
 from app.repositories.disclosure_repository import DisclosureRepository
@@ -193,7 +193,11 @@ class CatalogService:
         return await self.get_status(job_id)
 
     async def _start_job(self, params: dict[str, object], *, mode: str) -> ExtractResponse:
-        """같은 파라미터의 진행 중 작업을 재사용하거나 새 작업을 만든다."""
+        """진행 중 작업이 없으면 새 작업을 만들고, 같은 범위면 기존 작업을 재사용한다.
+
+        다른 범위의 작업이 이미 pending/running이면 원천 과부하·차단을 막기 위해
+        새 작업을 거절한다.
+        """
         params_key = _params_key({"mode": mode, **params})
 
         async with self._sessionmaker() as session:
@@ -203,6 +207,13 @@ class CatalogService:
                 logger.info("이미 진행 중인 수집 작업을 재사용합니다: %s", existing.job_id)
                 return ExtractResponse(
                     job_id=existing.job_id, status=existing.status, mode=existing.mode
+                )
+
+            other = await jobs.find_any_active()
+            if other is not None:
+                raise CatalogConflict(
+                    "다른 수집 작업이 이미 진행 중입니다. "
+                    f"현재 작업({other.job_id[:8]} · {other.status})이 끝난 뒤에 다시 시작해 주세요."
                 )
 
             job_id = uuid.uuid4().hex

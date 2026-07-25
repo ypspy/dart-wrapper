@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -19,6 +20,7 @@ from app.api.deps import (
     get_slice_query_service,
 )
 from app.config import Settings
+from app.errors import CatalogConflict
 from app.schemas.catalog import (
     ExtractRequest,
     JobLogItem,
@@ -134,6 +136,7 @@ async def dashboard(
     start_date: str | None = None,
     end_date: str | None = None,
     expand_form: bool = False,
+    notice: str | None = None,
     settings: Settings = Depends(get_settings_dep),
     slices: SliceQueryService = Depends(get_slice_query_service),
     service: CatalogService = Depends(get_catalog_service),
@@ -148,6 +151,7 @@ async def dashboard(
     heatmap = await slices.heatmap(year=selected_year, report_type=report_type or None)
     listing = await _list_year_slices(slices, report_type, selected_year)
     job = await service.get_latest_status()
+    job_busy = job is not None and job.status in ACTIVE_JOB_STATUSES
     return templates.TemplateResponse(
         request,
         "admin/index.html",
@@ -164,6 +168,8 @@ async def dashboard(
             "job": job,
             "logs": _filter_logs(job, _log_levels_for(job)),
             "report_types": settings.heatmap_report_type_list,
+            "job_busy": job_busy,
+            "notice": notice,
         },
     )
 
@@ -260,6 +266,57 @@ async def slices_summary_partial(
             "report_type": report_type,
             "slices": listing.items,
             "problem_slices": [row for row in listing.items if row.status != "complete"],
+        },
+    )
+
+
+@router.get("/collect-form", response_class=HTMLResponse, summary="수집 폼 갱신")
+async def collect_form_partial(
+    request: Request,
+    report_type: str = "F001",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    expand_form: bool = False,
+    settings: Settings = Depends(get_settings_dep),
+    service: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """진행 중 여부에 따라 수집 폼 활성/비활성 상태를 갱신한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    default_start, default_end = _default_range()
+    job = await service.get_latest_status()
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/collect_form.html",
+        {
+            "report_type": report_type,
+            "start_date": start_date or default_start,
+            "end_date": end_date or default_end,
+            "expand_form": expand_form,
+            "job_busy": job is not None and job.status in ACTIVE_JOB_STATUSES,
+        },
+    )
+
+
+@router.get("/resume-controls", response_class=HTMLResponse, summary="이어하기 버튼 갱신")
+async def resume_controls_partial(
+    request: Request,
+    report_type: str = "F001",
+    settings: Settings = Depends(get_settings_dep),
+    service: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """진행 중 여부에 따라 이어하기 버튼 활성/비활성 상태를 갱신한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    job = await service.get_latest_status()
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/resume_controls.html",
+        {
+            "report_type": report_type,
+            "job_busy": job is not None and job.status in ACTIVE_JOB_STATUSES,
         },
     )
 
@@ -376,7 +433,13 @@ async def start_collect(
         end_date=end_date,
         include_attachments=include_attachments,
     )
-    response = await service.start_extract(payload)
+    try:
+        response = await service.start_extract(payload)
+    except CatalogConflict as exc:
+        return RedirectResponse(
+            f"/admin?report_type={report_type}&notice={quote(str(exc))}",
+            status_code=303,
+        )
     if response.status == "pending":
         background_tasks.add_task(service.run_job, response.job_id, payload)
     return RedirectResponse(f"/admin?report_type={report_type}", status_code=303)
@@ -395,7 +458,13 @@ async def resume_all(
         return _to_token_page()
 
     payload = ResumeRequest(report_type=report_type)
-    response = await service.start_resume(payload)
+    try:
+        response = await service.start_resume(payload)
+    except CatalogConflict as exc:
+        return RedirectResponse(
+            f"/admin?report_type={report_type}&notice={quote(str(exc))}",
+            status_code=303,
+        )
     if response.status == "pending":
         background_tasks.add_task(service.run_resume_job, response.job_id, payload)
     return RedirectResponse(f"/admin?report_type={report_type}", status_code=303)
@@ -414,7 +483,13 @@ async def retry_slice(
         return _to_token_page()
 
     payload = ResumeRequest(slice_id=slice_id)
-    response = await service.start_resume(payload)
+    try:
+        response = await service.start_resume(payload)
+    except CatalogConflict as exc:
+        return RedirectResponse(
+            f"/admin/slices/{slice_id}?notice={quote(str(exc))}",
+            status_code=303,
+        )
     if response.status == "pending":
         background_tasks.add_task(service.run_resume_job, response.job_id, payload)
     return RedirectResponse(f"/admin/slices/{slice_id}", status_code=303)

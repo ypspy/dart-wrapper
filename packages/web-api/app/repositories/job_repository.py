@@ -54,6 +54,17 @@ class JobRepository:
         result = await self._session.execute(statement)
         return result.scalars().first()
 
+    async def find_any_active(self) -> CatalogJob | None:
+        """파라미터와 무관하게 진행 중인 작업이 있으면 반환한다."""
+        statement = (
+            select(CatalogJob)
+            .where(CatalogJob.status.in_(ACTIVE_STATUSES))
+            .order_by(CatalogJob.created_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(statement)
+        return result.scalars().first()
+
     async def get(self, job_id: str) -> CatalogJob | None:
         """작업을 조회한다. 없으면 None."""
         return await self._session.get(CatalogJob, job_id)

@@ -159,8 +159,24 @@
       cursor: pointer;
       white-space: nowrap;
     }
-    button:hover,
-    .btn:hover { filter: brightness(0.97); }
+    button:hover:not(:disabled),
+    .btn:hover:not(:disabled) { filter: brightness(0.97); }
+    button:disabled,
+    .btn:disabled,
+    input:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      filter: none;
+    }
+    .banner-warn {
+      margin: var(--space-3) 0 0;
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-sm);
+      background: var(--warn-soft);
+      color: var(--warn);
+      font-size: var(--fs-sm);
+      font-weight: 600;
+    }
     .btn-primary,
     button[type="submit"]:not(.btn-danger):not(.btn-ghost) {
       background: var(--accent);

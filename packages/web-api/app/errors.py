@@ -14,6 +14,10 @@ class CatalogNotFound(DartWrapperError):
     """요청한 공시/섹션이 카탈로그에 없을 때 발생한다."""
 
 
+class CatalogConflict(DartWrapperError):
+    """이미 진행 중인 수집이 있어 새 작업을 시작할 수 없을 때 발생한다."""
+
+
 class BadRequest(DartWrapperError):
     """잘못된 요청 파라미터(예: 손상된 cursor)일 때 발생한다."""
 
@@ -32,6 +36,7 @@ class ParseError(DartWrapperError):
 
 _STATUS_BY_EXCEPTION: dict[type[DartWrapperError], int] = {
     CatalogNotFound: 404,
+    CatalogConflict: 409,
     BadRequest: 400,
     Unauthorized: 401,
     SourceFetchError: 502,
