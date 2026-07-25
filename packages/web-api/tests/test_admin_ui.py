@@ -212,6 +212,9 @@ async def test_admin_index_renders_two_column_ops_console(client_factory) -> Non
     assert "수집 시작" in body
     assert "재시도" in body
     assert "이어하기" in body
+    assert 'class="report-type-chip' in body
+    assert ">A001<" in body or ">A001</a>" in body
+    assert ">F001<" in body or 'is-selected">F001' in body
 
 
 async def test_admin_index_collect_form_is_collapsed_by_default(client_factory) -> None:
@@ -372,8 +375,22 @@ async def test_job_status_partial_renders_idle_without_job(client_factory) -> No
     assert "소프트 스톱" not in response.text
 
 
-async def test_job_logs_partial_defaults_to_warn_and_error(client_factory) -> None:
+async def test_job_logs_partial_includes_info_while_running(client_factory) -> None:
     async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/job-logs")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "재시도합니다." in body
+    assert "상세 파싱에 실패했습니다." in body
+    assert "수집을 시작합니다." in body
+    assert "실행 중" in body
+
+
+async def test_job_logs_partial_hides_info_when_idle(client_factory) -> None:
+    idle = JOB_STATUS.model_copy(update={"status": "succeeded"})
+    async with client_factory(_app(FakeCatalogService(job=idle))) as client:
         client.cookies.set("admin_token", "dev-admin-token")
         response = await client.get("/admin/job-logs")
 

@@ -48,6 +48,34 @@
     }
     .job-chip-running { background: #2ea04333; color: #157347; }
     .job-chip-failed { background: #d1242f33; color: #b02a37; }
+    .job-chip.is-pulsing { position: relative; padding-left: 18px; }
+    .job-pulse {
+      position: absolute; left: 7px; top: 50%; width: 7px; height: 7px;
+      margin-top: -3.5px; border-radius: 50%; background: #2ea043;
+      box-shadow: 0 0 0 0 #2ea043aa;
+      animation: job-pulse 1.4s ease-out infinite;
+    }
+    @keyframes job-pulse {
+      0% { transform: scale(1); box-shadow: 0 0 0 0 #2ea043aa; }
+      70% { transform: scale(1.15); box-shadow: 0 0 0 8px #2ea04300; }
+      100% { transform: scale(1); box-shadow: 0 0 0 0 #2ea04300; }
+    }
+    .job-card-active { border-color: #2ea04388; }
+    .job-live { margin: 6px 0 0; font-size: 0.78rem; }
+    .job-last-log {
+      margin: 0 0 10px; font-size: 0.78rem; line-height: 1.35;
+      max-height: 3.2em; overflow: hidden;
+    }
+    .job-logs-hint { margin: 0 0 6px; }
+    .report-type-toggle { display: flex; flex-wrap: wrap; gap: 6px; }
+    .report-type-chip {
+      display: inline-block; padding: 4px 10px; border-radius: 999px;
+      border: 1px solid #8885; text-decoration: none; color: inherit;
+      font-size: 0.8rem; font-weight: 600;
+    }
+    .report-type-chip.is-selected {
+      background: #0969da; color: #fff; border-color: #0969da;
+    }
     .job-progress {
       height: 6px; margin: 10px 0; border-radius: 999px;
       background: #8883; overflow: hidden;

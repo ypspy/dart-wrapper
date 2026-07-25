@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
@@ -28,15 +28,17 @@ from app.schemas.catalog import (
     YearSummaryResponse,
 )
 from app.services.catalog_service import CatalogService
-from app.services.slice_query_service import SliceQueryService
+from app.services.slice_query_service import SliceQueryService, kst_today, last_closed_date
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-# 지연 등록·정정 공시를 놓치지 않도록 기본 수집 범위는 최근 7일을 겹쳐 잡는다.
+# 지연 등록·정정 공시를 놓치지 않도록 기본 수집 범위는 최근 7일(마감일 기준)을 겹쳐 잡는다.
 DEFAULT_RESCAN_DAYS = 7
-# 로그 패널은 기본적으로 주의가 필요한 줄만 보여준다.
-DEFAULT_LOG_LEVELS = "warn,error"
+# 대기 중일 때는 경고·오류만, 실행 중에는 진행 로그(info)도 보여준다.
+IDLE_LOG_LEVELS = "warn,error"
+ACTIVE_LOG_LEVELS = "info,warn,error"
+ACTIVE_JOB_STATUSES = frozenset({"pending", "running"})
 # 한 해는 최대 366일이므로 연도 슬라이스 조회 상한을 넉넉히 잡는다.
 YEAR_SLICE_LIMIT = 400
 
@@ -80,11 +82,18 @@ def _filter_logs(job: JobStatusResponse | None, levels: str) -> list[JobLogItem]
     return [log for log in job.logs if log.level.lower() in allowed]
 
 
+def _log_levels_for(job: JobStatusResponse | None) -> str:
+    """실행 중이면 진행 로그를 포함하고, 아니면 경고·오류만 보여준다."""
+    if job is not None and job.status in ACTIVE_JOB_STATUSES:
+        return ACTIVE_LOG_LEVELS
+    return IDLE_LOG_LEVELS
+
+
 def _default_range() -> tuple[str, str]:
-    """기본 수집 기간(최근 7일)을 YYYYMMDD로 만든다."""
-    today = date.today()
-    start = today - timedelta(days=DEFAULT_RESCAN_DAYS - 1)
-    return start.strftime("%Y%m%d"), today.strftime("%Y%m%d")
+    """기본 수집 기간(마감일 기준 최근 7일)을 YYYYMMDD로 만든다."""
+    closed = last_closed_date(as_of=kst_today())
+    start = closed - timedelta(days=DEFAULT_RESCAN_DAYS - 1)
+    return start.strftime("%Y%m%d"), closed.strftime("%Y%m%d")
 
 
 def _to_token_page() -> RedirectResponse:
@@ -153,7 +162,8 @@ async def dashboard(
             "slices": listing.items,
             "problem_slices": [row for row in listing.items if row.status != "complete"],
             "job": job,
-            "logs": _filter_logs(job, DEFAULT_LOG_LEVELS),
+            "logs": _filter_logs(job, _log_levels_for(job)),
+            "report_types": settings.heatmap_report_type_list,
         },
     )
 
@@ -204,6 +214,30 @@ async def heatmap_partial(
     )
 
 
+@router.get("/slices-chips", response_class=HTMLResponse, summary="선택 연도 미완료 칩")
+async def slices_chips_partial(
+    request: Request,
+    report_type: str = "F001",
+    year: int | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    slices: SliceQueryService = Depends(get_slice_query_service),
+) -> HTMLResponse:
+    """미완료 슬라이스 칩만 갱신한다. 전체 보기·이어하기는 페이지에 고정한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    summary = await slices.year_summary(report_type=report_type or None)
+    selected_year = _resolve_year(year, summary)
+    listing = await _list_year_slices(slices, report_type, selected_year)
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/slices_chips.html",
+        {
+            "problem_slices": [row for row in listing.items if row.status != "complete"],
+        },
+    )
+
+
 @router.get("/slices-summary", response_class=HTMLResponse, summary="선택 연도 슬라이스 요약")
 async def slices_summary_partial(
     request: Request,
@@ -212,7 +246,7 @@ async def slices_summary_partial(
     settings: Settings = Depends(get_settings_dep),
     slices: SliceQueryService = Depends(get_slice_query_service),
 ) -> HTMLResponse:
-    """선택 연도의 미완료 슬라이스 요약과 전체 표를 반환한다."""
+    """호환용: 칩·이어하기·전체 보기를 함께 반환한다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
@@ -251,19 +285,20 @@ async def job_status_partial(
 @router.get("/job-logs", response_class=HTMLResponse, summary="최신 작업 로그")
 async def job_logs_partial(
     request: Request,
-    levels: str = DEFAULT_LOG_LEVELS,
+    levels: str | None = None,
     settings: Settings = Depends(get_settings_dep),
     service: CatalogService = Depends(get_catalog_service),
 ) -> HTMLResponse:
-    """가장 최근 작업의 로그를 지정한 레벨만 걸러 반환한다."""
+    """가장 최근 작업의 로그를 보여준다. 실행 중이면 info도 포함한다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
     job = await service.get_latest_status()
+    selected = levels or _log_levels_for(job)
     return templates.TemplateResponse(
         request,
         "admin/partials/job_logs.html",
-        {"logs": _filter_logs(job, levels)},
+        {"logs": _filter_logs(job, selected), "job": job},
     )
 
 

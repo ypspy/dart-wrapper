@@ -1,4 +1,9 @@
 <div class="job-logs">
+  {% if job and job.status in ("pending", "running") %}
+  <p class="muted job-logs-hint">실행 중 · info/warn/error 표시 · 5초마다 갱신</p>
+  {% else %}
+  <p class="muted job-logs-hint">대기 중 · warn/error만 표시</p>
+  {% endif %}
   {% if logs %}
   <ul class="job-log-list">
     {% for log in logs %}

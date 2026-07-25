@@ -6,13 +6,20 @@
     <h2>수집 · 완전성</h2>
     <p class="muted">
       왼쪽에서 비어 있는 구간을 찾고, 오른쪽에서 작업을 실행·감시합니다.
+      한국 시간 기준 당일은 미도래(투명)로 두고, 다음 날 0시 이후에 엽니다.
     </p>
   </div>
+  <nav class="report-type-toggle" aria-label="보고서 유형">
+    {% for code in report_types %}
+    <a class="report-type-chip{% if code == report_type %} is-selected{% endif %}"
+       href="/admin?report_type={{ code }}&amp;year={{ selected_year }}">{{ code }}</a>
+    {% endfor %}
+  </nav>
 </header>
 
 <div class="ops-grid">
   <section class="ops-left" aria-label="완전성 탐색">
-    <h3>연도 요약</h3>
+    <h3>연도 요약 · {{ report_type }}</h3>
     <p class="muted">막대를 선택하면 아래 히트맵이 그 해로 바뀝니다.</p>
     <div hx-get="/admin/year-bar?report_type={{ report_type }}&amp;year={{ selected_year }}"
          hx-trigger="every 60s"
@@ -33,11 +40,7 @@
     </div>
 
     <h3>선택 연도 슬라이스</h3>
-    <div hx-get="/admin/slices-summary?report_type={{ report_type }}&amp;year={{ selected_year }}"
-         hx-trigger="every 5s"
-         hx-swap="innerHTML">
-      {% include "admin/partials/slices_summary.html" %}
-    </div>
+    {% include "admin/partials/slices_summary.html" %}
   </section>
 
   <aside class="ops-right" aria-label="실행 컨트롤">

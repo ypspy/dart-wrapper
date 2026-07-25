@@ -1,0 +1,13 @@
+{% if problem_slices %}
+<ul class="slice-chips">
+  {% for row in problem_slices %}
+  <li class="slice-chip slice-chip-{{ row.status }}">
+    <a href="/admin/slices/{{ row.slice_id }}">
+      {{ row.slice_date[4:6] }}-{{ row.slice_date[6:8] }} · {{ row.status }}
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">선택한 연도에 미완료 슬라이스가 없습니다.</p>
+{% endif %}

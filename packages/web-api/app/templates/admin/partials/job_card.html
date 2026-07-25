@@ -2,11 +2,18 @@
 {% set total = job.total_entries or 0 %}
 {% set saved = job.saved_entries or 0 %}
 {% set percent = (saved * 100 // total) if total else 0 %}
-<section class="job-card" aria-label="최근 수집 작업 현황">
+{% set active = job.status in ("pending", "running") %}
+<section class="job-card{% if active %} job-card-active{% endif %}" aria-label="최근 수집 작업 현황">
   <div class="job-card-head">
     <strong>작업 {{ job.job_id[:8] }} · {{ job.mode }}</strong>
-    <span class="job-chip job-chip-{{ job.status }}">{{ job.status }}</span>
+    <span class="job-chip job-chip-{{ job.status }}{% if active %} is-pulsing{% endif %}">
+      {% if active %}<span class="job-pulse" aria-hidden="true"></span>{% endif %}
+      {{ job.status }}
+    </span>
   </div>
+  {% if active %}
+  <p class="job-live muted">수집이 진행 중입니다. 아래 로그가 갱신되면 살아 있는 상태입니다.</p>
+  {% endif %}
   <div class="job-progress" aria-hidden="true"><i style="width: {{ percent }}%"></i></div>
   <dl class="job-meta">
     <div>
@@ -16,7 +23,14 @@
     <div><dt>유형</dt><dd>{{ job.params.get("report_type", "—") }}</dd></div>
     <div><dt>저장</dt><dd>{{ saved }} / {{ total }}</dd></div>
   </dl>
-  {% if job.status in ("pending", "running") %}
+  {% if job.logs %}
+  <p class="job-last-log">
+    <span class="muted">최근</span>
+    <span class="job-log-level">{{ job.logs[-1].level|upper }}</span>
+    {{ job.logs[-1].message }}
+  </p>
+  {% endif %}
+  {% if active %}
   <form method="post" action="/admin/jobs/{{ job.job_id }}/soft-stop">
     <button type="submit">소프트 스톱</button>
   </form>
@@ -31,6 +45,6 @@
     <strong>대기 중</strong>
     <span class="job-chip">idle</span>
   </div>
-  <p class="muted">아직 수집 작업 이력이 없습니다.</p>
+  <p class="muted">아직 수집 작업 이력이 없습니다. 오른쪽 수집 폼으로 시작하면 여기에 상태가 나타납니다.</p>
 </section>
 {% endif %}

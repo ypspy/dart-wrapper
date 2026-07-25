@@ -1,25 +1,19 @@
 <div class="slices-summary">
-  {% if problem_slices %}
-  <ul class="slice-chips">
-    {% for row in problem_slices %}
-    <li class="slice-chip slice-chip-{{ row.status }}">
-      <a href="/admin/slices/{{ row.slice_id }}">
-        {{ row.slice_date[4:6] }}-{{ row.slice_date[6:8] }} · {{ row.status }}
-      </a>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="muted">선택한 연도에 미완료 슬라이스가 없습니다.</p>
-  {% endif %}
+  <div id="slices-chips"
+       hx-get="/admin/slices-chips?report_type={{ report_type }}&amp;year={{ selected_year }}"
+       hx-trigger="every 5s"
+       hx-swap="innerHTML">
+    {% include "admin/partials/slices_chips.html" %}
+  </div>
 
   <form class="inline" method="post" action="/admin/resume">
     <input type="hidden" name="report_type" value="{{ report_type }}">
     <button type="submit">미완료 이어하기</button>
   </form>
+  <p class="muted">선택한 유형({{ report_type }})의 미완료·차단 슬라이스를 이어서 처리합니다.</p>
 
   <details class="slices-full">
-    <summary>전체 보기</summary>
+    <summary>전체 보기 ({{ selected_year }}년 · {{ slices|length }}건)</summary>
     {% include "admin/partials/slices_table.html" %}
   </details>
 </div>

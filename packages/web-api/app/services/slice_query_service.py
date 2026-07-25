@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app.errors import CatalogNotFound
 from app.repositories.slice_repository import SliceRepository
@@ -26,6 +26,8 @@ WEEK_COUNT = 53
 DAY_COUNT = 7
 # 수집 이력이 없을 때 연도 요약 바가 보여줄 시작 연도
 FALLBACK_START_YEAR = 1999
+# DART 공시일은 한국 표준시(UTC+9, 서머타임 없음) 달력으로 마감한다.
+KST = timezone(timedelta(hours=9))
 MONTH_LABELS = (
     "Jan",
     "Feb",
@@ -40,6 +42,19 @@ MONTH_LABELS = (
     "Nov",
     "Dec",
 )
+
+
+def kst_today(*, now: datetime | None = None) -> date:
+    """한국 시간 기준 오늘 날짜를 반환한다."""
+    return (now or datetime.now(KST)).astimezone(KST).date()
+
+
+def last_closed_date(*, as_of: date | None = None) -> date:
+    """수집·표시가 열린 마지막 날(한국 시간으로 하루가 끝난 날)을 반환한다.
+
+    당일은 일중 공시가 계속 들어오므로, 다음 날 0시가 지나기 전에는 열지 않는다.
+    """
+    return (as_of or kst_today()) - timedelta(days=1)
 
 
 class SliceQueryService:
@@ -92,10 +107,11 @@ class SliceQueryService:
         today: date | None = None,
     ) -> YearSummaryResponse:
         """연도별 완전성 요약과 기본 선택 연도를 만든다."""
-        end = today or date.today()
+        as_of = today or kst_today()
+        closed = last_closed_date(as_of=as_of)
         rows = await self._slices.list_slices_between(
             f"{FALLBACK_START_YEAR}0101",
-            end.strftime("%Y%m%d"),
+            closed.strftime("%Y%m%d"),
         )
         if report_type:
             key = report_type.strip().upper()
@@ -108,10 +124,10 @@ class SliceQueryService:
         first_year = min(statuses_by_year) if statuses_by_year else FALLBACK_START_YEAR
         items = [
             YearSummaryItem(year=year, level=self._year_level(statuses_by_year.get(year, [])))
-            for year in range(first_year, end.year + 1)
+            for year in range(first_year, as_of.year + 1)
         ]
 
-        selected_year = end.year
+        selected_year = as_of.year
         for item in reversed(items):
             if item.level == "incomplete":
                 selected_year = item.year
@@ -135,9 +151,10 @@ class SliceQueryService:
         report_type: str | None = None,
     ) -> HeatmapResponse:
         """완전성 격자를 만든다. `year`가 없으면 최근 53주, 있으면 그 해 창이다."""
-        end_today = today or date.today()
+        as_of = today or kst_today()
+        closed = last_closed_date(as_of=as_of)
         if year is None:
-            end = end_today
+            end = closed
             anchor = end - timedelta(weeks=WEEK_COUNT - 1)
             days_since_sunday = (anchor.weekday() + 1) % DAY_COUNT
             start = anchor - timedelta(days=days_since_sunday)
@@ -147,7 +164,7 @@ class SliceQueryService:
             year_end = date(year, 12, 31)
             days_since_sunday = (year_start.weekday() + 1) % DAY_COUNT
             start = year_start - timedelta(days=days_since_sunday)
-            end = min(year_end, end_today)
+            end = min(year_end, closed)
             # 12/31이 속한 주까지 열을 확보한다(보통 53주, 경우에 따라 54주).
             week_count = ((year_end - start).days // DAY_COUNT) + 1
 
@@ -176,7 +193,7 @@ class SliceQueryService:
                         self._cell(
                             code,
                             start + timedelta(days=week * DAY_COUNT + weekday),
-                            end_today,
+                            closed,
                             by_key,
                         )
                         for weekday in range(DAY_COUNT)
@@ -197,13 +214,16 @@ class SliceQueryService:
     def _cell(
         report_type: str,
         cell_date: date,
-        today: date,
+        last_closed: date,
         by_key: dict[tuple[str, str], object],
     ) -> HeatmapCell:
-        """한 날짜의 표시 단계와 링크 데이터를 만든다."""
+        """한 날짜의 표시 단계와 링크 데이터를 만든다.
+
+        `last_closed`보다 늦은 날짜(당일·미래)는 미도래로 둔다.
+        """
         key = cell_date.strftime("%Y%m%d")
         row = by_key.get((report_type, key))
-        if cell_date > today:
+        if cell_date > last_closed:
             return HeatmapCell(slice_date=key, level="future")
         if row is None:
             return HeatmapCell(slice_date=key, level="missing")

@@ -50,7 +50,8 @@ async def test_heatmap_builds_53_weeks_and_orders_report_types() -> None:
 
     result = await service.heatmap(today=date(2026, 7, 22))
 
-    assert repository.range == ("20250720", "20260722")
+    # 한국 시간으로 당일은 미도래 → 마감일은 전날(2026-07-21)
+    assert repository.range == ("20250720", "20260721")
     assert [row.report_type for row in result.rows] == ["A001", "F001", "X001"]
     assert all(len(row.weeks) == 53 for row in result.rows)
     assert all(len(week) == 7 for row in result.rows for week in row.weeks)
@@ -64,7 +65,7 @@ async def test_heatmap_builds_53_weeks_and_orders_report_types() -> None:
     assert cells[("A001", "20260721")].level == "complete"
     assert cells[("X001", "20260720")].level == "incomplete"
     assert cells[("F001", "20260721")].level == "missing"
-    assert cells[("A001", "20260723")].level == "future"
+    assert cells[("A001", "20260722")].level == "future"
 
 
 async def test_heatmap_month_labels_use_first_week_of_month() -> None:
@@ -119,14 +120,16 @@ async def test_heatmap_year_window_starts_on_sunday_of_jan1_week() -> None:
     assert cells["20181231"].level == "missing"
 
 
-async def test_heatmap_current_year_marks_future_cells() -> None:
+async def test_heatmap_current_year_marks_today_as_future_until_kst_midnight() -> None:
     service = SliceQueryService(FakeSliceRepository([]), ("F001",))
 
+    # as_of=2026-07-26 → 마감일은 2026-07-25. 당일(26)은 아직 투명(미도래).
     result = await service.heatmap(year=2026, today=date(2026, 7, 26))
 
-    assert result.end_date == "20260726"
+    assert result.end_date == "20260725"
     cells = {cell.slice_date: cell for week in result.rows[0].weeks for cell in week}
-    assert cells["20260726"].level == "missing"
+    assert cells["20260725"].level == "missing"
+    assert cells["20260726"].level == "future"
     assert cells["20260727"].level == "future"
     assert cells["20261231"].level == "future"
 
@@ -137,7 +140,7 @@ async def test_heatmap_year_none_keeps_rolling_53_weeks() -> None:
     result = await service.heatmap(today=date(2026, 7, 22))
 
     assert len(result.rows[0].weeks) == 53
-    assert result.end_date == "20260722"
+    assert result.end_date == "20260721"
 
 
 async def test_heatmap_filters_by_report_type() -> None:

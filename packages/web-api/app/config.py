@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # blocked 상태에서 재개까지 기다리는 시간(초)
     block_wait_seconds: float = 60.0
     # 히트맵에 항상 표시할 보고서 유형(쉼표 구분)
-    heatmap_report_types: str = "A001,F001"
+    heatmap_report_types: str = "A001,F001,F002"
 
     @property
     def heatmap_report_type_list(self) -> tuple[str, ...]:
