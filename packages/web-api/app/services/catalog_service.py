@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -32,6 +33,15 @@ from app.schemas.catalog import (
 from app.schemas.entry import EntryRecord
 
 logger = logging.getLogger(__name__)
+
+# 원천이 우리를 막고 있다고 볼 수 있는 신호. 이 경우 재시도보다 쉬어가는 편이 낫다.
+BLOCKING_HINTS = ("403", "429", "503", "차단", "연결", "Connection", "Timeout", "시간 초과")
+
+
+def is_blocking_error(exc: Exception) -> bool:
+    """차단·과부하로 보이는 오류인지 메시지로 판별한다."""
+    message = str(exc)
+    return any(hint in message for hint in BLOCKING_HINTS)
 
 
 def _params_key(payload: dict[str, object]) -> str:
@@ -101,6 +111,17 @@ class CatalogService:
         self._retry_backoff_seconds = retry_backoff_seconds
         self._block_streak_threshold = block_streak_threshold
         self._block_wait_seconds = block_wait_seconds
+        # 중단 요청된 작업. 다음 공시 경계에서 멈춘다.
+        self._stop_requested: set[str] = set()
+
+    async def request_soft_stop(self, job_id: str) -> None:
+        """진행 중인 작업에 중단을 요청한다. 이미 저장된 공시는 유지된다."""
+        self._stop_requested.add(job_id)
+        async with self._sessionmaker() as session:
+            await JobRepository(session).add_log(
+                job_id, "warning", "중단 요청을 받았습니다. 진행 중인 공시까지만 처리합니다."
+            )
+            await session.commit()
 
     async def start_extract(self, request: ExtractRequest) -> ExtractResponse:
         """수집 작업을 등록한다. 같은 범위가 진행 중이면 기존 작업을 돌려준다."""
@@ -214,6 +235,9 @@ class CatalogService:
                 await session.commit()
             return
 
+        finally:
+            self._stop_requested.discard(job_id)
+
         status = "succeeded" if incomplete == 0 else "partial"
         message = None if incomplete == 0 else f"미완료 슬라이스가 {incomplete}개 남아 있습니다."
 
@@ -275,13 +299,41 @@ class CatalogService:
             await session.commit()
 
         saved_total = 0
+        blocked = False
+        block_streak = 0
+
         for item in listed.items:
-            saved_total += await self._process_disclosure(
+            if job_id in self._stop_requested:
+                await self._log(job_id, "warning", f"{slice_date} 처리를 중단했습니다.")
+                break
+
+            saved, outcome = await self._process_disclosure(
                 job_id, slice_id, item, include_attachments
             )
+            saved_total += saved
+
+            if outcome != "blocked":
+                block_streak = 0
+                continue
+
+            block_streak += 1
+            if block_streak >= self._block_streak_threshold:
+                blocked = True
+                await self._log(
+                    job_id,
+                    "error",
+                    f"{slice_date} 수집이 차단된 것으로 보여 중단합니다. 재개로 이어서 처리하세요.",
+                )
+                if self._block_wait_seconds > 0:
+                    await asyncio.sleep(self._block_wait_seconds)
+                break
 
         async with self._sessionmaker() as session:
-            updated = await SliceRepository(session).evaluate_complete(slice_id)
+            slices = SliceRepository(session)
+            updated = await slices.evaluate_complete(slice_id)
+            if blocked and updated.status != "complete":
+                await slices.mark_slice_status(slice_id, "blocked")
+                updated = await slices.get_slice(slice_id)
             is_complete = updated.status == "complete"
             await JobRepository(session).add_log(
                 job_id,
@@ -301,39 +353,41 @@ class CatalogService:
         slice_id: str,
         item: DisclosureListItem,
         include_attachments: bool,
-    ) -> int:
-        """공시 1건을 파싱해 저장한다. 이미 성공한 공시는 건너뛴다."""
+    ) -> tuple[int, str]:
+        """공시 1건을 파싱해 저장하고 (저장 수, 결과)를 반환한다.
+
+        결과는 `skipped`(이미 성공) / `succeeded` / `failed` / `blocked` 중 하나다.
+        """
         async with self._sessionmaker() as session:
             slices = SliceRepository(session)
             attempt = await slices.get_attempt(item.rcept_no)
             if attempt is not None and attempt.status == "succeeded":
                 await slices.reassign_attempt(item.rcept_no, slice_id)
                 await session.commit()
-                return 0
+                return 0, "skipped"
 
-        try:
-            records = await self._collector.extract_disclosure(
-                item, include_attachments=include_attachments
-            )
-        except Exception as exc:
-            logger.warning("공시 %s 상세 파싱 실패: %s", item.rcept_no, exc)
+        records, error = await self._extract_with_retries(item, include_attachments)
+
+        if error is not None:
+            outcome = "blocked" if is_blocking_error(error) else "failed"
+            logger.warning("공시 %s 상세 파싱 실패: %s", item.rcept_no, error)
             async with self._sessionmaker() as session:
                 await SliceRepository(session).upsert_attempt(
                     rcept_no=item.rcept_no,
                     slice_id=slice_id,
                     report_type=item.report_type,
-                    status="failed",
-                    last_error=str(exc),
+                    status=outcome,
+                    last_error=str(error),
                 )
                 await JobRepository(session).add_log(
-                    job_id, "warning", f"공시 {item.rcept_no} 처리에 실패했습니다: {exc}"
+                    job_id, "warning", f"공시 {item.rcept_no} 처리에 실패했습니다: {error}"
                 )
                 await session.commit()
-            return 0
+            return 0, outcome
 
         async with self._sessionmaker() as session:
-            saved = await EntryRepository(session).upsert_many(records)
-            await DisclosureRepository(session).upsert_many(disclosures_from_records(records))
+            saved = await EntryRepository(session).upsert_many(records or [])
+            await DisclosureRepository(session).upsert_many(disclosures_from_records(records or []))
             await SliceRepository(session).upsert_attempt(
                 rcept_no=item.rcept_no,
                 slice_id=slice_id,
@@ -343,4 +397,36 @@ class CatalogService:
             )
             await session.commit()
 
-        return saved
+        return saved, "succeeded"
+
+    async def _extract_with_retries(
+        self,
+        item: DisclosureListItem,
+        include_attachments: bool,
+    ) -> tuple[list[EntryRecord] | None, Exception | None]:
+        """공시 상세를 재시도하며 파싱한다. 마지막 오류를 함께 돌려준다.
+
+        차단으로 보이는 오류는 곧바로 포기한다. 계속 두드리면 차단이 길어질 뿐이다.
+        """
+        last_error: Exception | None = None
+
+        for attempt_no in range(1, self._max_retries + 1):
+            try:
+                records = await self._collector.extract_disclosure(
+                    item, include_attachments=include_attachments
+                )
+                return records, None
+            except Exception as exc:
+                last_error = exc
+                if is_blocking_error(exc) or attempt_no == self._max_retries:
+                    break
+                if self._retry_backoff_seconds > 0:
+                    await asyncio.sleep(self._retry_backoff_seconds * (2 ** (attempt_no - 1)))
+
+        return None, last_error
+
+    async def _log(self, job_id: str, level: str, message: str) -> None:
+        """작업 로그를 한 줄 남긴다."""
+        async with self._sessionmaker() as session:
+            await JobRepository(session).add_log(job_id, level, message)
+            await session.commit()

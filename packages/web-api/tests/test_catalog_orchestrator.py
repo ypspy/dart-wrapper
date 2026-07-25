@@ -39,10 +39,12 @@ class ScriptedCollector:
         rcept_nos: tuple[str, ...] = ("1", "2", "3"),
         failing: dict[str, int] | None = None,
         list_error: Exception | None = None,
+        error: Exception | None = None,
     ) -> None:
         self._rcept_nos = rcept_nos
         self._failing = dict(failing or {})
         self._list_error = list_error
+        self._error = error
         self.list_calls: list[CollectRequest] = []
         self.extract_calls: list[str] = []
 
@@ -66,7 +68,9 @@ class ScriptedCollector:
         remaining = self._failing.get(disclosure.rcept_no, 0)
         if remaining > 0:
             self._failing[disclosure.rcept_no] = remaining - 1
-            raise SourceFetchError(f"상세 파싱에 실패했습니다: {disclosure.rcept_no}")
+            raise self._error or SourceFetchError(
+                f"상세 파싱에 실패했습니다: {disclosure.rcept_no}"
+            )
         return [
             EntryRecord(
                 entry_id=f"{disclosure.rcept_no}_1_5",
@@ -198,6 +202,84 @@ async def test_list_failure_marks_slice_failed_but_job_finishes(sessionmaker_fix
     assert rows[0].status == "failed"
     assert rows[0].listed_count is None
     assert any(log.level == "error" for log in status.logs)
+
+
+async def test_transient_failure_retries_then_succeeds(sessionmaker_fixture) -> None:
+    collector = ScriptedCollector(rcept_nos=("1",), failing={"1": 1})
+    service = CatalogService(
+        sessionmaker_fixture,
+        collector,
+        max_retries=3,
+        retry_backoff_seconds=0.0,
+        block_streak_threshold=99,
+        block_wait_seconds=0.0,
+    )
+
+    response = await service.start_extract(REQUEST)
+    await service.run_job(response.job_id, REQUEST)
+
+    assert collector.extract_calls == ["1", "1"]
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status == "complete"
+
+
+async def test_block_streak_marks_slice_blocked(sessionmaker_fixture) -> None:
+    collector = ScriptedCollector(
+        rcept_nos=("1", "2", "3"),
+        failing={"1": 9, "2": 9, "3": 9},
+        error=SourceFetchError("요청이 차단되었습니다(HTTP 429)"),
+    )
+    service = CatalogService(
+        sessionmaker_fixture,
+        collector,
+        max_retries=1,
+        retry_backoff_seconds=0.0,
+        block_streak_threshold=2,
+        block_wait_seconds=0.0,
+    )
+
+    response = await service.start_extract(REQUEST)
+    await service.run_job(response.job_id, REQUEST)
+
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status == "blocked"
+    # 차단이 감지되면 남은 공시는 시도하지 않고 슬라이스를 접는다.
+    assert collector.extract_calls == ["1", "2"]
+
+    status = await service.get_status(response.job_id)
+    assert status.status == "partial"
+    assert any("차단" in log.message for log in status.logs)
+
+
+async def test_soft_stop_keeps_succeeded_and_allows_resume(sessionmaker_fixture) -> None:
+    collector = ScriptedCollector(rcept_nos=("1", "2", "3"))
+    service = _service(sessionmaker_fixture, collector)
+    response = await service.start_extract(REQUEST)
+
+    # 첫 공시를 처리한 직후 중단을 요청한다.
+    original = service._process_disclosure
+
+    async def stopping(job_id, slice_id, item, include_attachments):
+        saved = await original(job_id, slice_id, item, include_attachments)
+        await service.request_soft_stop(job_id)
+        return saved
+
+    service._process_disclosure = stopping
+    await service.run_job(response.job_id, REQUEST)
+    service._process_disclosure = original
+
+    assert collector.extract_calls == ["1"]
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status != "complete"
+    assert rows[0].succeeded == 1
+
+    collector.extract_calls.clear()
+    resume = await service.start_resume(ResumeRequest(report_type="F001"))
+    await service.run_resume_job(resume.job_id, ResumeRequest(report_type="F001"))
+
+    assert collector.extract_calls == ["2", "3"]
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status == "complete"
 
 
 async def test_job_records_saved_entry_counts(sessionmaker_fixture) -> None:
