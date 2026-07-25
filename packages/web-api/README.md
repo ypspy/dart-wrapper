@@ -33,10 +33,17 @@ PostgreSQL로 배포할 때는 `.venv\Scripts\python.exe -m pip install -e ".[po
 
 ## 엔드포인트
 
+Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키를 요구합니다.
+
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | POST | `/admin/catalog/extract` | 기간/기업별 수집 트리거 (202, `job_id` 반환) |
+| POST | `/admin/catalog/resume` | 미완료·실패 슬라이스만 재개 |
 | GET | `/admin/catalog/status?job_id=` | 수집 현황·로그 |
+| GET | `/admin/catalog/slices` | 날짜 슬라이스 완전성 목록 |
+| GET | `/admin/catalog/slices/{slice_id}` | 슬라이스 상세와 공시별 처리 결과 |
+| POST | `/admin/catalog/slices/{slice_id}/retry` | 해당 슬라이스 실패분 재시도 |
+| POST | `/admin/catalog/jobs/{job_id}/soft-stop` | 다음 공시 경계에서 중단 |
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}` | 공시 단건 요약 |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | leaf 목차 (`primary_entries` + `all_entries`) |
@@ -50,6 +57,25 @@ PostgreSQL로 배포할 때는 `.venv\Scripts\python.exe -m pip install -e ".[po
 기본 UI는 primary를, “전체 보기”는 `all_entries`를 쓰면 됩니다. `entry_id`로 Viewer 단건 조회에 바로 이어갈 수 있습니다.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
+
+## 불연속 수집과 완전성
+
+DART는 차단·점검·지연으로 수집이 자주 끊깁니다. 그래서 수집은 다음 규칙으로 동작합니다.
+
+- 요청 기간을 **하루 단위 슬라이스**로 나눕니다. 페이지 번호는 시간이 지나면 다른 공시를 담으므로 재개 기준으로 쓰지 않습니다.
+- 슬라이스 안에서는 공시(접수번호) 하나를 처리할 때마다 저장을 확정합니다. 중간에 끊겨도 성공분은 남습니다.
+- 이미 성공한 공시는 다시 파싱하지 않습니다. 같은 기간을 여러 번 돌려도 중복이 생기지 않습니다.
+- 일시 오류는 `DISCLOSURE_MAX_RETRIES`만큼 지수 백오프로 재시도하고, 차단으로 보이는 응답이 `BLOCK_STREAK_THRESHOLD`회 연속되면 슬라이스를 `blocked`로 두고 접습니다.
+- 목록 건수(`listed_count`)와 성공 건수가 같고 실패가 없을 때만 슬라이스가 `complete`입니다.
+
+작업 상태는 `succeeded`(모든 슬라이스 완료), `partial`(미완료 슬라이스 남음), `failed`(예기치 못한 중단)입니다.
+남은 슬라이스는 `POST /admin/catalog/resume`이나 화면의 "이어하기"로 채웁니다.
+
+## Admin 화면
+
+`http://127.0.0.1:8000/admin` 에서 수집 시작, 슬라이스 완전성 확인, 실패분 재시도를 할 수 있습니다.
+처음 열면 토큰 입력 화면으로 이동하며, 입력한 토큰은 HttpOnly 쿠키에 저장됩니다.
+기본 수집 기간은 지연 등록·정정 공시를 잡기 위해 최근 7일을 겹쳐 잡습니다.
 
 ## disclosures backfill
 
@@ -77,3 +103,5 @@ PostgreSQL로 배포할 때는 `.venv\Scripts\python.exe -m pip install -e ".[po
 ## 설정
 
 `.env.example`을 참고해 `.env`를 만듭니다. 개발은 SQLite, 배포는 Neon PostgreSQL을 쓰며 `DATABASE_URL`만 교체하면 됩니다.
+
+Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`입니다.
