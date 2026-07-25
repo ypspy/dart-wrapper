@@ -9,16 +9,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.dart_http import DartHttpClient
 from app.config import Settings, get_settings
+from app.errors import Unauthorized
 from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
+from app.repositories.slice_repository import SliceRepository
 from app.services.catalog_query_service import CatalogQueryService
 from app.services.catalog_service import CatalogService
+from app.services.slice_query_service import SliceQueryService
 from app.services.viewer_service import ViewerService
+
+ADMIN_TOKEN_HEADER = "X-Admin-Token"
+ADMIN_TOKEN_COOKIE = "admin_token"
 
 
 def get_settings_dep() -> Settings:
     """설정 객체를 반환한다."""
     return get_settings()
+
+
+def require_admin(request: Request, settings: Settings = Depends(get_settings_dep)) -> None:
+    """Admin 요청을 공유 토큰으로 확인한다.
+
+    JSON 호출은 헤더를, 브라우저 화면은 쿠키를 쓴다. 1인 운영을 전제로 계정 체계는 두지 않는다.
+
+    :raises Unauthorized: 토큰이 없거나 일치하지 않는 경우
+    """
+    provided = request.headers.get(ADMIN_TOKEN_HEADER) or request.cookies.get(ADMIN_TOKEN_COOKIE)
+    if not provided:
+        raise Unauthorized("Admin 토큰이 필요합니다. X-Admin-Token 헤더를 확인해 주세요.")
+    if provided != settings.admin_token:
+        raise Unauthorized("Admin 토큰이 올바르지 않습니다.")
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -47,15 +67,31 @@ def get_viewer_service(
     return ViewerService(entries, http, concurrency=settings.dart_fetch_concurrency)
 
 
-def get_catalog_service(request: Request) -> CatalogService:
+def get_catalog_service(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+) -> CatalogService:
     """Admin 카탈로그 서비스를 제공한다.
 
     백그라운드 작업이 요청 세션 수명에 묶이지 않도록 세션메이커를 직접 넘긴다.
+    중단 요청 상태를 공유해야 하므로 앱 상태에 인스턴스를 하나만 둔다.
     """
-    return CatalogService(
-        request.app.state.sessionmaker,
-        request.app.state.entry_collector,
-    )
+    service = getattr(request.app.state, "catalog_service", None)
+    if service is None:
+        service = CatalogService(
+            request.app.state.sessionmaker,
+            request.app.state.entry_collector,
+            max_retries=settings.disclosure_max_retries,
+            block_streak_threshold=settings.block_streak_threshold,
+            block_wait_seconds=settings.block_wait_seconds,
+        )
+        request.app.state.catalog_service = service
+    return service
+
+
+def get_slice_query_service(session: AsyncSession = Depends(get_session)) -> SliceQueryService:
+    """슬라이스 완전성 조회 서비스를 제공한다."""
+    return SliceQueryService(SliceRepository(session))
 
 
 def get_catalog_query_service(

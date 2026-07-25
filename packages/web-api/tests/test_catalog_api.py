@@ -8,6 +8,8 @@ from app.main import create_app
 from app.schemas.catalog import ExtractRequest, ExtractResponse, JobStatusResponse
 
 PAYLOAD = {"report_type": "F001", "start_date": "20260724", "end_date": "20260724"}
+# Admin 라우터는 공유 토큰을 요구한다. 테스트는 기본값을 그대로 쓴다.
+HEADERS = {"X-Admin-Token": "dev-admin-token"}
 
 
 class FakeCatalogService:
@@ -41,7 +43,7 @@ async def test_extract_accepts_request_and_schedules_job(client_factory) -> None
     service = FakeCatalogService()
 
     async with client_factory(_app_with(service)) as client:
-        response = await client.post("/admin/catalog/extract", json=PAYLOAD)
+        response = await client.post("/admin/catalog/extract", json=PAYLOAD, headers=HEADERS)
 
     assert response.status_code == 202
     assert response.json() == {"job_id": "job-1", "status": "pending", "mode": "collect"}
@@ -52,7 +54,7 @@ async def test_extract_does_not_reschedule_running_job(client_factory) -> None:
     service = FakeCatalogService(status="running")
 
     async with client_factory(_app_with(service)) as client:
-        response = await client.post("/admin/catalog/extract", json=PAYLOAD)
+        response = await client.post("/admin/catalog/extract", json=PAYLOAD, headers=HEADERS)
 
     assert response.status_code == 202
     assert response.json()["status"] == "running"
@@ -62,7 +64,9 @@ async def test_extract_does_not_reschedule_running_job(client_factory) -> None:
 async def test_extract_rejects_invalid_date(client_factory) -> None:
     async with client_factory(_app_with(FakeCatalogService())) as client:
         response = await client.post(
-            "/admin/catalog/extract", json={**PAYLOAD, "start_date": "2026-07-24"}
+            "/admin/catalog/extract",
+            json={**PAYLOAD, "start_date": "2026-07-24"},
+            headers=HEADERS,
         )
 
     assert response.status_code == 422
@@ -70,7 +74,9 @@ async def test_extract_rejects_invalid_date(client_factory) -> None:
 
 async def test_status_returns_job_progress(client_factory) -> None:
     async with client_factory(_app_with(FakeCatalogService())) as client:
-        response = await client.get("/admin/catalog/status", params={"job_id": "job-1"})
+        response = await client.get(
+            "/admin/catalog/status", params={"job_id": "job-1"}, headers=HEADERS
+        )
 
     assert response.status_code == 200
     assert response.json()["saved_entries"] == 3
@@ -78,6 +84,8 @@ async def test_status_returns_job_progress(client_factory) -> None:
 
 async def test_status_returns_404_for_unknown_job(client_factory) -> None:
     async with client_factory(_app_with(FakeCatalogService())) as client:
-        response = await client.get("/admin/catalog/status", params={"job_id": "job-9"})
+        response = await client.get(
+            "/admin/catalog/status", params={"job_id": "job-9"}, headers=HEADERS
+        )
 
     assert response.status_code == 404

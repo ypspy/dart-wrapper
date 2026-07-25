@@ -40,6 +40,55 @@ class JobLogItem(BaseModel):
     created_at: datetime
 
 
+class SliceSummary(BaseModel):
+    """날짜 슬라이스 하나의 진행·완전성 요약."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    slice_id: str
+    report_type: str
+    slice_date: str
+    status: str
+    listed_count: int | None = None
+    attempted: int = 0
+    succeeded: int = 0
+    failed_count: int = 0
+    attempt: int = 0
+    last_job_id: str | None = None
+    updated_at: datetime | None = None
+
+    @property
+    def is_complete(self) -> bool:
+        """완전성 조건을 만족한 슬라이스인지 여부."""
+        return self.status == "complete"
+
+
+class SliceListResponse(BaseModel):
+    """슬라이스 목록 응답."""
+
+    items: list[SliceSummary] = Field(default_factory=list)
+
+
+class DisclosureAttemptItem(BaseModel):
+    """공시 1건의 마지막 처리 결과."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    rcept_no: str
+    status: str
+    entry_count: int = 0
+    attempt: int = 0
+    last_error: str | None = None
+    updated_at: datetime | None = None
+
+
+class SliceDetailResponse(BaseModel):
+    """슬라이스 상세: 요약과 공시별 처리 결과."""
+
+    slice: SliceSummary
+    attempts: list[DisclosureAttemptItem] = Field(default_factory=list)
+
+
 class JobStatusResponse(BaseModel):
     """수집 작업 현황과 최근 로그."""
 
