@@ -8,6 +8,9 @@ output/
 # Worktrees
 .worktrees/
 
+# Brainstorm visual companion
+.superpowers/
+
 # Python (web-api)
 .venv/
 __pycache__/
