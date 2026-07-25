@@ -78,6 +78,8 @@ async def submit_token(
 async def dashboard(
     request: Request,
     report_type: str = "F001",
+    start_date: str | None = None,
+    end_date: str | None = None,
     settings: Settings = Depends(get_settings_dep),
     slices: SliceQueryService = Depends(get_slice_query_service),
 ) -> HTMLResponse:
@@ -85,17 +87,39 @@ async def dashboard(
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
-    start_date, end_date = _default_range()
+    default_start, default_end = _default_range()
+    form_start = start_date or default_start
+    form_end = end_date or default_end
     listing = await slices.list_slices(report_type=report_type or None)
+    heatmap = await slices.heatmap()
     return templates.TemplateResponse(
         request,
         "admin/index.html",
         {
             "report_type": report_type,
-            "start_date": start_date,
-            "end_date": end_date,
+            "start_date": form_start,
+            "end_date": form_end,
             "slices": listing.items,
+            "heatmap": heatmap,
         },
+    )
+
+
+@router.get("/heatmap", response_class=HTMLResponse, summary="연간 완전성 히트맵 갱신")
+async def heatmap_partial(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+    slices: SliceQueryService = Depends(get_slice_query_service),
+) -> HTMLResponse:
+    """HTMX 요청에 보고서 유형별 최근 53주 히트맵을 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    heatmap = await slices.heatmap()
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/heatmap.html",
+        {"heatmap": heatmap},
     )
 
 

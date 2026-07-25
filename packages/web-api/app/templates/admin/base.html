@@ -24,6 +24,67 @@
     .status-blocked { color: #b5850b; }
     .status-failed { color: #b02a37; }
     .muted { color: #8a8a8a; font-size: 0.85rem; }
+    .heatmap-scroll { overflow-x: auto; padding-bottom: 8px; }
+    .heatmap-months {
+      display: grid;
+      grid-template-columns: 44px repeat(53, 11px);
+      column-gap: 2px;
+      min-width: 760px;
+      height: 20px;
+      font-size: 0.72rem;
+      color: #656d76;
+    }
+    .heatmap-row {
+      display: grid;
+      grid-template-columns: 38px 18px auto;
+      align-items: start;
+      min-width: 760px;
+      margin-bottom: 14px;
+    }
+    .heatmap-type { font-size: 0.75rem; padding-top: 2px; }
+    .heatmap-days {
+      display: grid;
+      grid-template-rows: repeat(7, 11px);
+      row-gap: 2px;
+      font-size: 0.62rem;
+      color: #656d76;
+    }
+    .heatmap-days span:nth-child(1) { grid-row: 2; }
+    .heatmap-days span:nth-child(2) { grid-row: 4; }
+    .heatmap-days span:nth-child(3) { grid-row: 6; }
+    .heatmap-grid {
+      display: grid;
+      grid-template-rows: repeat(7, 11px);
+      grid-auto-flow: column;
+      grid-auto-columns: 11px;
+      gap: 2px;
+    }
+    .heatmap-cell {
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      border-radius: 2px;
+      box-sizing: border-box;
+    }
+    .heatmap-cell:hover { outline: 1px solid #1f2328; outline-offset: 1px; }
+    .heatmap-complete { background: #2ea043; }
+    .heatmap-incomplete { background: #d1242f; }
+    .heatmap-missing { background: #ebedf0; }
+    .heatmap-future { background: transparent; }
+    .heatmap-legend {
+      display: flex;
+      justify-content: flex-end;
+      gap: 14px;
+      min-width: 760px;
+      font-size: 0.75rem;
+      color: #656d76;
+    }
+    .heatmap-legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .heatmap-legend .heatmap-cell:hover { outline: none; }
+    @media (prefers-color-scheme: dark) {
+      .heatmap-missing { background: #30363d; }
+      .heatmap-cell:hover { outline-color: #f0f6fc; }
+    }
   </style>
 </head>
 <body>
