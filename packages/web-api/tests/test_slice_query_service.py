@@ -95,6 +95,68 @@ async def test_heatmap_normalizes_database_report_type_into_fixed_row() -> None:
     assert cell.slice_id == "f001-20260721"
 
 
+async def test_heatmap_year_window_starts_on_sunday_of_jan1_week() -> None:
+    # 2018-01-01은 월요일이므로 창은 2017-12-31(일)부터 시작한다.
+    repository = FakeSliceRepository(
+        [
+            _slice("F001", "20180102", "complete", succeeded=1, listed_count=1),
+            _slice("F001", "20180615", "blocked", succeeded=0, listed_count=1),
+        ]
+    )
+    service = SliceQueryService(repository, ("F001",))
+
+    result = await service.heatmap(year=2018, today=date(2026, 7, 26))
+
+    assert result.start_date == "20171231"
+    assert result.end_date == "20181231"
+    assert repository.range == ("20171231", "20181231")
+    assert [row.report_type for row in result.rows] == ["F001"]
+    assert 52 <= len(result.rows[0].weeks) <= 54
+
+    cells = {cell.slice_date: cell for week in result.rows[0].weeks for cell in week}
+    assert cells["20180102"].level == "complete"
+    assert cells["20180615"].level == "incomplete"
+    assert cells["20181231"].level == "missing"
+
+
+async def test_heatmap_current_year_marks_future_cells() -> None:
+    service = SliceQueryService(FakeSliceRepository([]), ("F001",))
+
+    result = await service.heatmap(year=2026, today=date(2026, 7, 26))
+
+    assert result.end_date == "20260726"
+    cells = {cell.slice_date: cell for week in result.rows[0].weeks for cell in week}
+    assert cells["20260726"].level == "missing"
+    assert cells["20260727"].level == "future"
+    assert cells["20261231"].level == "future"
+
+
+async def test_heatmap_year_none_keeps_rolling_53_weeks() -> None:
+    service = SliceQueryService(FakeSliceRepository([]), ("F001",))
+
+    result = await service.heatmap(today=date(2026, 7, 22))
+
+    assert len(result.rows[0].weeks) == 53
+    assert result.end_date == "20260722"
+
+
+async def test_heatmap_filters_by_report_type() -> None:
+    repository = FakeSliceRepository(
+        [
+            _slice("F001", "20260102", "complete", succeeded=1, listed_count=1),
+            _slice("A001", "20260103", "complete", succeeded=1, listed_count=1),
+        ]
+    )
+    service = SliceQueryService(repository, ("A001", "F001"))
+
+    result = await service.heatmap(year=2026, report_type="f001", today=date(2026, 7, 26))
+
+    assert [row.report_type for row in result.rows] == ["F001"]
+    cells = {cell.slice_date: cell for week in result.rows[0].weeks for cell in week}
+    assert cells["20260102"].level == "complete"
+    assert cells["20260103"].level == "missing"
+
+
 async def test_year_summary_marks_levels_and_selects_latest_incomplete() -> None:
     rows = [
         _slice("F001", "20240115", "complete", succeeded=1, listed_count=1),
