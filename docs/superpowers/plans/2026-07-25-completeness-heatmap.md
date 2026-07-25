@@ -194,15 +194,15 @@ def _slice(
 async def test_heatmap_builds_53_weeks_and_orders_report_types() -> None:
     repository = FakeSliceRepository(
         [
-            _slice("A001", "20260724", "complete", succeeded=3, listed_count=3),
-            _slice("X001", "20260723", "blocked", succeeded=1, listed_count=2),
+            _slice("A001", "20260721", "complete", succeeded=3, listed_count=3),
+            _slice("X001", "20260720", "blocked", succeeded=1, listed_count=2),
         ]
     )
     service = SliceQueryService(repository, ("A001", "F001"))
 
-    result = await service.heatmap(today=date(2026, 7, 25))
+    result = await service.heatmap(today=date(2026, 7, 22))
 
-    assert repository.range == ("20250720", "20260725")
+    assert repository.range == ("20250720", "20260722")
     assert [row.report_type for row in result.rows] == ["A001", "F001", "X001"]
     assert all(len(row.weeks) == 53 for row in result.rows)
     assert all(len(week) == 7 for row in result.rows for week in row.weeks)
@@ -213,10 +213,10 @@ async def test_heatmap_builds_53_weeks_and_orders_report_types() -> None:
         for week in row.weeks
         for cell in week
     }
-    assert cells[("A001", "20260724")].level == "complete"
-    assert cells[("X001", "20260723")].level == "incomplete"
-    assert cells[("F001", "20260724")].level == "missing"
-    assert cells[("A001", "20260726")].level == "future"
+    assert cells[("A001", "20260721")].level == "complete"
+    assert cells[("X001", "20260720")].level == "incomplete"
+    assert cells[("F001", "20260721")].level == "missing"
+    assert cells[("A001", "20260723")].level == "future"
 
 
 async def test_heatmap_month_labels_use_first_week_of_month() -> None:
