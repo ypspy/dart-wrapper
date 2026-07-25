@@ -23,6 +23,8 @@ class CatalogJob(Base):
 
     job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    # collect: 신규 수집, resume: 미완료·실패분 재개, rescan: 최근 기간 겹침 수집
+    mode: Mapped[str] = mapped_column(String(16), default="collect", nullable=False)
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     params_key: Mapped[str] = mapped_column(String(512), index=True, nullable=False)
     total_entries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
