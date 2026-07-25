@@ -17,6 +17,8 @@ from app.schemas.catalog import (
     SliceDetailResponse,
     SliceListResponse,
     SliceSummary,
+    YearSummaryItem,
+    YearSummaryResponse,
 )
 
 SUMMARY = SliceSummary(
@@ -72,8 +74,23 @@ HEATMAP = HeatmapResponse(
 )
 
 
+YEAR_SUMMARY = YearSummaryResponse(
+    items=[
+        YearSummaryItem(year=2024, level="complete"),
+        YearSummaryItem(year=2025, level="incomplete"),
+        YearSummaryItem(year=2026, level="missing"),
+    ],
+    selected_year=2025,
+)
+
+
 class FakeSliceQueryService:
+    def __init__(self) -> None:
+        self.heatmap_calls: list[tuple[int | None, str | None]] = []
+        self.list_calls: list[dict[str, object]] = []
+
     async def list_slices(self, **kwargs) -> SliceListResponse:
+        self.list_calls.append(kwargs)
         return SliceListResponse(items=[SUMMARY])
 
     async def get_slice(self, slice_id: str) -> SliceDetailResponse:
@@ -90,8 +107,18 @@ class FakeSliceQueryService:
             ],
         )
 
-    async def heatmap(self) -> HeatmapResponse:
+    async def heatmap(
+        self,
+        today=None,
+        *,
+        year: int | None = None,
+        report_type: str | None = None,
+    ) -> HeatmapResponse:
+        self.heatmap_calls.append((year, report_type))
         return HEATMAP
+
+    async def year_summary(self, **kwargs) -> YearSummaryResponse:
+        return YEAR_SUMMARY
 
 
 JOB_STATUS = JobStatusResponse(
@@ -135,9 +162,13 @@ class FakeCatalogService:
         self.stopped.append(job_id)
 
 
-def _app(catalog: FakeCatalogService | None = None):
+def _app(
+    catalog: FakeCatalogService | None = None,
+    slices: FakeSliceQueryService | None = None,
+):
     app = create_app()
-    app.dependency_overrides[get_slice_query_service] = lambda: FakeSliceQueryService()
+    query_service = slices or FakeSliceQueryService()
+    app.dependency_overrides[get_slice_query_service] = lambda: query_service
     app.dependency_overrides[get_catalog_service] = lambda: catalog or FakeCatalogService()
     return app
 
@@ -167,17 +198,28 @@ async def test_token_form_rejects_wrong_token(client_factory) -> None:
     assert "올바르지" in response.text
 
 
-async def test_admin_index_renders_collect_form_and_slices(client_factory) -> None:
+async def test_admin_index_renders_two_column_ops_console(client_factory) -> None:
     async with client_factory(_app()) as client:
         client.cookies.set("admin_token", "dev-admin-token")
         response = await client.get("/admin")
 
     assert response.status_code == 200
     body = response.text
+    assert 'class="ops-grid"' in body
+    assert "연도 요약" in body
+    assert "2025년 일별 완전성" in body
+    assert "작업 현황" in body
     assert "수집 시작" in body
-    assert "20260724" in body
     assert "재시도" in body
     assert "이어하기" in body
+
+
+async def test_admin_index_collect_form_is_collapsed_by_default(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin")
+
+    assert '<details class="collect-form">' in response.text
 
 
 async def test_admin_index_renders_heatmap_links_and_legend(client_factory) -> None:
@@ -186,12 +228,11 @@ async def test_admin_index_renders_heatmap_links_and_legend(client_factory) -> N
         response = await client.get("/admin")
 
     assert response.status_code == 200
-    assert "연간 수집 완전성" in response.text
     assert "F001" in response.text
     assert 'href="/admin/slices/s1"' in response.text
     assert (
-        'href="/admin?report_type=F001&amp;start_date=20260725'
-        '&amp;end_date=20260725"' in response.text
+        'href="/admin?report_type=F001&amp;year=2025&amp;start_date=20260725'
+        '&amp;end_date=20260725&amp;expand_form=1"' in response.text
     )
     assert "미입수" in response.text
     assert "미완성" in response.text
@@ -219,21 +260,85 @@ async def test_heatmap_partial_renders_for_authenticated_admin(client_factory) -
     assert 'href="/admin/slices/s1"' in response.text
 
 
-async def test_admin_query_prefills_collect_form(client_factory) -> None:
+async def test_admin_query_prefills_and_expands_collect_form(client_factory) -> None:
     async with client_factory(_app()) as client:
         client.cookies.set("admin_token", "dev-admin-token")
         response = await client.get(
             "/admin",
             params={
                 "report_type": "A001",
+                "year": 2024,
                 "start_date": "20260102",
                 "end_date": "20260102",
+                "expand_form": 1,
             },
         )
 
-    assert 'name="report_type" value="A001"' in response.text
-    assert 'name="start_date" value="20260102"' in response.text
-    assert 'name="end_date" value="20260102"' in response.text
+    body = response.text
+    assert '<details class="collect-form" open>' in body
+    assert 'name="report_type" value="A001"' in body
+    assert 'name="start_date" value="20260102"' in body
+    assert 'name="end_date" value="20260102"' in body
+    assert "2024년 일별 완전성" in body
+
+
+async def test_year_bar_partial_marks_selected_year(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/year-bar", params={"year": 2024})
+
+    assert response.status_code == 200
+    body = response.text
+    assert "year-bar-complete" in body
+    assert "year-bar-incomplete" in body
+    assert 'href="/admin?report_type=F001&amp;year=2024"' in body
+    assert body.count("is-selected") == 1
+
+
+async def test_year_bar_partial_falls_back_to_default_year(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/year-bar", params={"year": 1990})
+
+    assert response.status_code == 200
+    selected = response.text.split("is-selected")[0]
+    assert selected.rstrip().endswith("year-bar-incomplete")
+
+
+async def test_heatmap_partial_uses_requested_year(client_factory) -> None:
+    query_service = FakeSliceQueryService()
+    async with client_factory(_app(slices=query_service)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/heatmap", params={"year": 2024, "report_type": "A001"})
+
+    assert response.status_code == 200
+    assert query_service.heatmap_calls == [(2024, "A001")]
+
+
+async def test_heatmap_cells_link_to_collect_form_with_year(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/heatmap", params={"year": 2025})
+
+    assert 'href="/admin/slices/s1"' in response.text
+    assert (
+        'href="/admin?report_type=F001&amp;year=2025&amp;start_date=20260725'
+        '&amp;end_date=20260725&amp;expand_form=1"' in response.text
+    )
+
+
+async def test_slices_summary_partial_lists_problem_slices(client_factory) -> None:
+    query_service = FakeSliceQueryService()
+    async with client_factory(_app(slices=query_service)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/slices-summary", params={"year": 2024})
+
+    assert response.status_code == 200
+    body = response.text
+    assert "07-24 · blocked" in body
+    assert "전체 보기" in body
+    assert query_service.list_calls[-1]["start_date"] == "20240101"
+    assert query_service.list_calls[-1]["end_date"] == "20241231"
 
 
 async def test_job_status_partial_requires_cookie_token(client_factory) -> None:

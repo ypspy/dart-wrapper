@@ -15,14 +15,14 @@
       {% for cell in week %}
         {% if cell.level == "future" %}
         <span class="heatmap-cell heatmap-future"></span>
-        {% elif cell.slice_id %}
-        <a class="heatmap-cell heatmap-{{ cell.level }}"
+        {% elif cell.level == "complete" and cell.slice_id %}
+        <a class="heatmap-cell heatmap-complete"
            href="/admin/slices/{{ cell.slice_id }}"
-           title="{{ cell.slice_date }} · {% if cell.level == 'complete' %}완료{% else %}미완성{% endif %} · 성공 {{ cell.succeeded }}/{{ cell.listed_count if cell.listed_count is not none else '?' }}"></a>
+           title="{{ cell.slice_date }} · 완료 · 성공 {{ cell.succeeded }}/{{ cell.listed_count if cell.listed_count is not none else '?' }}"></a>
         {% else %}
-        <a class="heatmap-cell heatmap-missing"
-           href="/admin?report_type={{ row.report_type }}&amp;start_date={{ cell.slice_date }}&amp;end_date={{ cell.slice_date }}"
-           title="{{ cell.slice_date }} · 미입수"></a>
+        <a class="heatmap-cell heatmap-{{ cell.level }}"
+           href="/admin?report_type={{ row.report_type }}&amp;year={{ selected_year }}&amp;start_date={{ cell.slice_date }}&amp;end_date={{ cell.slice_date }}&amp;expand_form=1"
+           title="{{ cell.slice_date }} · {% if cell.level == 'incomplete' %}미완성 · 성공 {{ cell.succeeded }}/{{ cell.listed_count if cell.listed_count is not none else '?' }}{% else %}미입수{% endif %}"></a>
         {% endif %}
       {% endfor %}
     {% endfor %}

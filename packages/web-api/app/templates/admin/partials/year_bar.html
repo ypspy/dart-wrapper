@@ -1,0 +1,14 @@
+<div class="year-bar" role="list" aria-label="연도별 수집 완전성">
+  {% for item in year_summary.items %}
+  <a role="listitem"
+     class="year-bar-item year-bar-{{ item.level }}{% if item.year == selected_year %} is-selected{% endif %}"
+     href="/admin?report_type={{ report_type }}&amp;year={{ item.year }}"
+     title="{{ item.year }} · {% if item.level == 'complete' %}완료{% elif item.level == 'incomplete' %}미완성{% else %}미입수{% endif %}">
+    <span class="year-bar-fill"></span>
+    <span class="year-bar-label">{{ item.year % 100 }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% if not year_summary.items %}
+<p class="muted">아직 수집 이력이 없습니다.</p>
+{% endif %}

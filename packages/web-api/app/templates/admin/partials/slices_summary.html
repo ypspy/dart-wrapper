@@ -1,0 +1,25 @@
+<div class="slices-summary">
+  {% if problem_slices %}
+  <ul class="slice-chips">
+    {% for row in problem_slices %}
+    <li class="slice-chip slice-chip-{{ row.status }}">
+      <a href="/admin/slices/{{ row.slice_id }}">
+        {{ row.slice_date[4:6] }}-{{ row.slice_date[6:8] }} · {{ row.status }}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">선택한 연도에 미완료 슬라이스가 없습니다.</p>
+  {% endif %}
+
+  <form class="inline" method="post" action="/admin/resume">
+    <input type="hidden" name="report_type" value="{{ report_type }}">
+    <button type="submit">미완료 이어하기</button>
+  </form>
+
+  <details class="slices-full">
+    <summary>전체 보기</summary>
+    {% include "admin/partials/slices_table.html" %}
+  </details>
+</div>

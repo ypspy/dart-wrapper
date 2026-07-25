@@ -1,58 +1,62 @@
 {% extends "admin/base.html" %}
 {% block title %}수집 대시보드{% endblock %}
 {% block content %}
-<h2>수집 시작</h2>
-<p class="muted">
-  기간은 하루 단위 슬라이스로 나눠 처리합니다. 이미 성공한 공시는 다시 파싱하지 않으므로
-  같은 기간을 여러 번 돌려도 중복이 생기지 않습니다. 기본값은 최근 7일 겹침 수집입니다.
-</p>
+<header class="ops-topbar">
+  <div>
+    <h2>수집 · 완전성</h2>
+    <p class="muted">
+      왼쪽에서 비어 있는 구간을 찾고, 오른쪽에서 작업을 실행·감시합니다.
+    </p>
+  </div>
+</header>
 
-<form class="inline" method="post" action="/admin/collect">
-  <label>
-    공시 유형
-    <input type="text" name="report_type" value="{{ report_type }}" required>
-  </label>
-  <label>
-    시작일
-    <input type="text" name="start_date" value="{{ start_date }}" pattern="\d{8}" required>
-  </label>
-  <label>
-    종료일
-    <input type="text" name="end_date" value="{{ end_date }}" pattern="\d{8}" required>
-  </label>
-  <label>
-    첨부 포함
-    <input type="checkbox" name="include_attachments" value="true" checked>
-  </label>
-  <button type="submit">수집 시작</button>
-</form>
+<div class="ops-grid">
+  <section class="ops-left" aria-label="완전성 탐색">
+    <h3>연도 요약</h3>
+    <p class="muted">막대를 선택하면 아래 히트맵이 그 해로 바뀝니다.</p>
+    <div hx-get="/admin/year-bar?report_type={{ report_type }}&amp;year={{ selected_year }}"
+         hx-trigger="every 60s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/year_bar.html" %}
+    </div>
 
-<h2>연간 수집 완전성</h2>
-<p class="muted">
-  보고서 유형별 최근 53주 상태입니다. 회색 칸은 미입수, 빨간 칸은 미완성,
-  초록 칸은 완료 수집입니다. 칸을 선택하면 상세 화면이나 해당 날짜 수집 폼으로 이동합니다.
-</p>
-<div class="heatmap-scroll"
-     hx-get="/admin/heatmap"
-     hx-trigger="every 30s"
-     hx-swap="innerHTML">
-  {% include "admin/partials/heatmap.html" %}
-</div>
+    <h3>{{ selected_year }}년 일별 완전성</h3>
+    <p class="muted">
+      회색은 미입수, 빨강은 미완성, 초록은 완료입니다. 완료 칸은 상세로,
+      나머지 칸은 그 날짜가 채워진 수집 폼으로 이동합니다.
+    </p>
+    <div class="heatmap-scroll"
+         hx-get="/admin/heatmap?report_type={{ report_type }}&amp;year={{ selected_year }}"
+         hx-trigger="every 30s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/heatmap.html" %}
+    </div>
 
-<h2>날짜 슬라이스 완전성</h2>
-<p class="muted">
-  목록 건수와 성공 건수가 같고 실패가 없을 때만 <code>complete</code>입니다.
-  차단·중단으로 남은 슬라이스는 이어하기로 채웁니다.
-</p>
+    <h3>선택 연도 슬라이스</h3>
+    <div hx-get="/admin/slices-summary?report_type={{ report_type }}&amp;year={{ selected_year }}"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/slices_summary.html" %}
+    </div>
+  </section>
 
-<form class="inline" method="post" action="/admin/resume">
-  <input type="hidden" name="report_type" value="{{ report_type }}">
-  <button type="submit">미완료 이어하기</button>
-</form>
+  <aside class="ops-right" aria-label="실행 컨트롤">
+    <h3>작업 현황</h3>
+    <div hx-get="/admin/job-status"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/job_card.html" %}
+    </div>
 
-<div hx-get="/admin/slices?report_type={{ report_type }}"
-     hx-trigger="every 5s"
-     hx-swap="innerHTML">
-  {% include "admin/partials/slices_table.html" %}
+    <h3>수집</h3>
+    {% include "admin/partials/collect_form.html" %}
+
+    <h3>로그</h3>
+    <div hx-get="/admin/job-logs"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/job_logs.html" %}
+    </div>
+  </aside>
 </div>
 {% endblock %}

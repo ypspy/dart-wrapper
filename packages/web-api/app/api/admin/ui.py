@@ -24,6 +24,8 @@ from app.schemas.catalog import (
     JobLogItem,
     JobStatusResponse,
     ResumeRequest,
+    SliceListResponse,
+    YearSummaryResponse,
 )
 from app.services.catalog_service import CatalogService
 from app.services.slice_query_service import SliceQueryService
@@ -35,6 +37,8 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 DEFAULT_RESCAN_DAYS = 7
 # 로그 패널은 기본적으로 주의가 필요한 줄만 보여준다.
 DEFAULT_LOG_LEVELS = "warn,error"
+# 한 해는 최대 366일이므로 연도 슬라이스 조회 상한을 넉넉히 잡는다.
+YEAR_SLICE_LIMIT = 400
 
 router = APIRouter(prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
@@ -42,6 +46,27 @@ router = APIRouter(prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 def _has_valid_token(request: Request, settings: Settings) -> bool:
     """쿠키에 담긴 Admin 토큰이 설정과 일치하는지 확인한다."""
     return request.cookies.get(ADMIN_TOKEN_COOKIE) == settings.admin_token
+
+
+def _resolve_year(year: int | None, summary: YearSummaryResponse) -> int:
+    """요청한 연도가 요약 범위 밖이면 기본 선택 연도로 되돌린다."""
+    if year is not None and any(item.year == year for item in summary.items):
+        return year
+    return summary.selected_year
+
+
+async def _list_year_slices(
+    slices: SliceQueryService,
+    report_type: str,
+    year: int,
+) -> SliceListResponse:
+    """선택 연도 한 해의 슬라이스를 모두 가져온다."""
+    return await slices.list_slices(
+        report_type=report_type or None,
+        start_date=f"{year}0101",
+        end_date=f"{year}1231",
+        limit=YEAR_SLICE_LIMIT,
+    )
 
 
 def _filter_logs(job: JobStatusResponse | None, levels: str) -> list[JobLogItem]:
@@ -96,29 +121,63 @@ async def submit_token(
 async def dashboard(
     request: Request,
     report_type: str = "F001",
+    year: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    expand_form: bool = False,
     settings: Settings = Depends(get_settings_dep),
     slices: SliceQueryService = Depends(get_slice_query_service),
+    service: CatalogService = Depends(get_catalog_service),
 ) -> HTMLResponse:
-    """수집 폼과 날짜 슬라이스 완전성 현황을 보여준다."""
+    """왼쪽 완전성 탐색과 오른쪽 실행 컨트롤을 함께 보여준다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
     default_start, default_end = _default_range()
-    form_start = start_date or default_start
-    form_end = end_date or default_end
-    listing = await slices.list_slices(report_type=report_type or None)
-    heatmap = await slices.heatmap()
+    summary = await slices.year_summary(report_type=report_type or None)
+    selected_year = _resolve_year(year, summary)
+    heatmap = await slices.heatmap(year=selected_year, report_type=report_type or None)
+    listing = await _list_year_slices(slices, report_type, selected_year)
+    job = await service.get_latest_status()
     return templates.TemplateResponse(
         request,
         "admin/index.html",
         {
             "report_type": report_type,
-            "start_date": form_start,
-            "end_date": form_end,
-            "slices": listing.items,
+            "start_date": start_date or default_start,
+            "end_date": end_date or default_end,
+            "expand_form": expand_form,
+            "year_summary": summary,
+            "selected_year": selected_year,
             "heatmap": heatmap,
+            "slices": listing.items,
+            "problem_slices": [row for row in listing.items if row.status != "complete"],
+            "job": job,
+            "logs": _filter_logs(job, DEFAULT_LOG_LEVELS),
+        },
+    )
+
+
+@router.get("/year-bar", response_class=HTMLResponse, summary="연도 요약 바 갱신")
+async def year_bar_partial(
+    request: Request,
+    report_type: str = "F001",
+    year: int | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    slices: SliceQueryService = Depends(get_slice_query_service),
+) -> HTMLResponse:
+    """연도별 완전성 요약 막대를 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    summary = await slices.year_summary(report_type=report_type or None)
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/year_bar.html",
+        {
+            "year_summary": summary,
+            "selected_year": _resolve_year(year, summary),
+            "report_type": report_type,
         },
     )
 
@@ -126,18 +185,48 @@ async def dashboard(
 @router.get("/heatmap", response_class=HTMLResponse, summary="연간 완전성 히트맵 갱신")
 async def heatmap_partial(
     request: Request,
+    report_type: str = "F001",
+    year: int | None = None,
     settings: Settings = Depends(get_settings_dep),
     slices: SliceQueryService = Depends(get_slice_query_service),
 ) -> HTMLResponse:
-    """HTMX 요청에 보고서 유형별 최근 53주 히트맵을 반환한다."""
+    """HTMX 요청에 선택 연도의 일별 완전성 히트맵을 반환한다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
-    heatmap = await slices.heatmap()
+    summary = await slices.year_summary(report_type=report_type or None)
+    selected_year = _resolve_year(year, summary)
+    heatmap = await slices.heatmap(year=selected_year, report_type=report_type or None)
     return templates.TemplateResponse(
         request,
         "admin/partials/heatmap.html",
-        {"heatmap": heatmap},
+        {"heatmap": heatmap, "selected_year": selected_year},
+    )
+
+
+@router.get("/slices-summary", response_class=HTMLResponse, summary="선택 연도 슬라이스 요약")
+async def slices_summary_partial(
+    request: Request,
+    report_type: str = "F001",
+    year: int | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    slices: SliceQueryService = Depends(get_slice_query_service),
+) -> HTMLResponse:
+    """선택 연도의 미완료 슬라이스 요약과 전체 표를 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    summary = await slices.year_summary(report_type=report_type or None)
+    selected_year = _resolve_year(year, summary)
+    listing = await _list_year_slices(slices, report_type, selected_year)
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/slices_summary.html",
+        {
+            "report_type": report_type,
+            "slices": listing.items,
+            "problem_slices": [row for row in listing.items if row.status != "complete"],
+        },
     )
 
 
