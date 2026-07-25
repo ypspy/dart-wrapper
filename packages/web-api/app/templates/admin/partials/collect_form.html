@@ -1,0 +1,26 @@
+<details class="collect-form"{% if expand_form %} open{% endif %}>
+  <summary>수집 시작</summary>
+  <p class="muted">
+    기간은 하루 단위 슬라이스로 나눠 처리합니다. 이미 성공한 공시는 다시 파싱하지 않으므로
+    같은 기간을 여러 번 돌려도 중복이 생기지 않습니다.
+  </p>
+  <form method="post" action="/admin/collect">
+    <label>
+      공시 유형
+      <input type="text" name="report_type" value="{{ report_type }}" required>
+    </label>
+    <label>
+      시작일
+      <input type="text" name="start_date" value="{{ start_date }}" pattern="\d{8}" required>
+    </label>
+    <label>
+      종료일
+      <input type="text" name="end_date" value="{{ end_date }}" pattern="\d{8}" required>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="include_attachments" value="true" checked>
+      첨부 포함
+    </label>
+    <button type="submit">수집 시작</button>
+  </form>
+</details>

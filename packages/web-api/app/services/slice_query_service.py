@@ -18,10 +18,14 @@ from app.schemas.catalog import (
     SliceDetailResponse,
     SliceListResponse,
     SliceSummary,
+    YearSummaryItem,
+    YearSummaryResponse,
 )
 
 WEEK_COUNT = 53
 DAY_COUNT = 7
+# 수집 이력이 없을 때 연도 요약 바가 보여줄 시작 연도
+FALLBACK_START_YEAR = 1999
 MONTH_LABELS = (
     "Jan",
     "Feb",
@@ -81,45 +85,111 @@ class SliceQueryService:
             attempts=[DisclosureAttemptItem.model_validate(item) for item in attempts],
         )
 
-    async def heatmap(self, today: date | None = None) -> HeatmapResponse:
-        """오늘 기준 최근 53주 완전성 격자를 만든다."""
+    async def year_summary(
+        self,
+        *,
+        report_type: str | None = None,
+        today: date | None = None,
+    ) -> YearSummaryResponse:
+        """연도별 완전성 요약과 기본 선택 연도를 만든다."""
         end = today or date.today()
-        anchor = end - timedelta(weeks=WEEK_COUNT - 1)
-        days_since_sunday = (anchor.weekday() + 1) % DAY_COUNT
-        start = anchor - timedelta(days=days_since_sunday)
+        rows = await self._slices.list_slices_between(
+            f"{FALLBACK_START_YEAR}0101",
+            end.strftime("%Y%m%d"),
+        )
+        if report_type:
+            key = report_type.strip().upper()
+            rows = [row for row in rows if row.report_type.strip().upper() == key]
+
+        statuses_by_year: dict[int, list[str]] = {}
+        for row in rows:
+            statuses_by_year.setdefault(int(row.slice_date[:4]), []).append(row.status)
+
+        first_year = min(statuses_by_year) if statuses_by_year else FALLBACK_START_YEAR
+        items = [
+            YearSummaryItem(year=year, level=self._year_level(statuses_by_year.get(year, [])))
+            for year in range(first_year, end.year + 1)
+        ]
+
+        selected_year = end.year
+        for item in reversed(items):
+            if item.level == "incomplete":
+                selected_year = item.year
+                break
+        return YearSummaryResponse(items=items, selected_year=selected_year)
+
+    @staticmethod
+    def _year_level(statuses: list[str]) -> str:
+        """한 해의 슬라이스 상태들을 연 단위 완전성으로 접는다."""
+        if not statuses:
+            return "missing"
+        if any(status != "complete" for status in statuses):
+            return "incomplete"
+        return "complete"
+
+    async def heatmap(
+        self,
+        today: date | None = None,
+        *,
+        year: int | None = None,
+        report_type: str | None = None,
+    ) -> HeatmapResponse:
+        """완전성 격자를 만든다. `year`가 없으면 최근 53주, 있으면 그 해 창이다."""
+        end_today = today or date.today()
+        if year is None:
+            end = end_today
+            anchor = end - timedelta(weeks=WEEK_COUNT - 1)
+            days_since_sunday = (anchor.weekday() + 1) % DAY_COUNT
+            start = anchor - timedelta(days=days_since_sunday)
+            week_count = WEEK_COUNT
+        else:
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+            days_since_sunday = (year_start.weekday() + 1) % DAY_COUNT
+            start = year_start - timedelta(days=days_since_sunday)
+            end = min(year_end, end_today)
+            # 12/31이 속한 주까지 열을 확보한다(보통 53주, 경우에 따라 54주).
+            week_count = ((year_end - start).days // DAY_COUNT) + 1
 
         rows = await self._slices.list_slices_between(
             start.strftime("%Y%m%d"),
             end.strftime("%Y%m%d"),
         )
+        if report_type:
+            key = report_type.strip().upper()
+            rows = [row for row in rows if row.report_type.strip().upper() == key]
+
         by_key = {(row.report_type.strip().upper(), row.slice_date): row for row in rows}
-        discovered = sorted(
-            {row.report_type.strip().upper() for row in rows} - set(self._report_types)
-        )
-        report_types = [*self._report_types, *discovered]
+        if report_type:
+            report_types = [report_type.strip().upper()]
+        else:
+            discovered = sorted(
+                {row.report_type.strip().upper() for row in rows} - set(self._report_types)
+            )
+            report_types = [*self._report_types, *discovered]
 
         heatmap_rows = [
             HeatmapRow(
-                report_type=report_type,
+                report_type=code,
                 weeks=[
                     [
                         self._cell(
-                            report_type,
+                            code,
                             start + timedelta(days=week * DAY_COUNT + weekday),
-                            end,
+                            end_today,
                             by_key,
                         )
                         for weekday in range(DAY_COUNT)
                     ]
-                    for week in range(WEEK_COUNT)
+                    for week in range(week_count)
                 ],
             )
-            for report_type in report_types
+            for code in report_types
         ]
         return HeatmapResponse(
             start_date=start.strftime("%Y%m%d"),
             end_date=end.strftime("%Y%m%d"),
-            month_labels=self._month_labels(start),
+            month_labels=self._month_labels(start, week_count),
             rows=heatmap_rows,
         )
 
@@ -147,11 +217,11 @@ class SliceQueryService:
         )
 
     @staticmethod
-    def _month_labels(start: date) -> list[HeatmapMonthLabel]:
+    def _month_labels(start: date, week_count: int = WEEK_COUNT) -> list[HeatmapMonthLabel]:
         """월이 처음 바뀌는 주에 영문 월 레이블을 둔다."""
         labels: list[HeatmapMonthLabel] = []
         previous_month: int | None = None
-        for week_index in range(WEEK_COUNT):
+        for week_index in range(week_count):
             week_start = start + timedelta(weeks=week_index)
             month = week_start.month
             if month != previous_month:

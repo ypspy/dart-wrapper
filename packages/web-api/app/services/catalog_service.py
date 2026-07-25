@@ -182,6 +182,16 @@ class CatalogService:
             logs=[JobLogItem.model_validate(log) for log in logs],
         )
 
+    async def get_latest_status(self) -> JobStatusResponse | None:
+        """가장 최근 작업의 현황을 반환한다. 작업 이력이 없으면 None."""
+        async with self._sessionmaker() as session:
+            job = await JobRepository(session).latest()
+            if job is None:
+                return None
+            job_id = job.job_id
+
+        return await self.get_status(job_id)
+
     async def _start_job(self, params: dict[str, object], *, mode: str) -> ExtractResponse:
         """같은 파라미터의 진행 중 작업을 재사용하거나 새 작업을 만든다."""
         params_key = _params_key({"mode": mode, **params})

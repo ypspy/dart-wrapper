@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from app.db.session import create_all, create_db_engine, create_sessionmaker
@@ -53,6 +55,30 @@ async def test_status_transitions_and_logs(sessionmaker_fixture) -> None:
     assert job.started_at is not None and job.finished_at is not None
     assert [log.message for log in logs] == ["수집을 시작합니다."]
     assert active is None
+
+
+async def test_latest_returns_most_recent_job(sessionmaker_fixture) -> None:
+    async with sessionmaker_fixture() as session:
+        repository = JobRepository(session)
+        # 생성 시각이 같은 밀리초에 찍히지 않도록 명시해 정렬만 검증한다.
+        old = await repository.create("job-old", {"report_type": "F001"}, "k-old")
+        old.created_at = datetime(2026, 7, 25, tzinfo=timezone.utc)
+        new = await repository.create("job-new", {"report_type": "A001"}, "k-new")
+        new.created_at = datetime(2026, 7, 26, tzinfo=timezone.utc)
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        latest = await JobRepository(session).latest()
+
+    assert latest is not None
+    assert latest.job_id == "job-new"
+
+
+async def test_latest_returns_none_when_no_job_exists(sessionmaker_fixture) -> None:
+    async with sessionmaker_fixture() as session:
+        latest = await JobRepository(session).latest()
+
+    assert latest is None
 
 
 async def test_mark_failed_records_message(sessionmaker_fixture) -> None:

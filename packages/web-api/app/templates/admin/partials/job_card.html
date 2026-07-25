@@ -1,0 +1,36 @@
+{% if job %}
+{% set total = job.total_entries or 0 %}
+{% set saved = job.saved_entries or 0 %}
+{% set percent = (saved * 100 // total) if total else 0 %}
+<section class="job-card" aria-label="최근 수집 작업 현황">
+  <div class="job-card-head">
+    <strong>작업 {{ job.job_id[:8] }} · {{ job.mode }}</strong>
+    <span class="job-chip job-chip-{{ job.status }}">{{ job.status }}</span>
+  </div>
+  <div class="job-progress" aria-hidden="true"><i style="width: {{ percent }}%"></i></div>
+  <dl class="job-meta">
+    <div>
+      <dt>기간</dt>
+      <dd>{{ job.params.get("start_date", "—") }} ~ {{ job.params.get("end_date", "—") }}</dd>
+    </div>
+    <div><dt>유형</dt><dd>{{ job.params.get("report_type", "—") }}</dd></div>
+    <div><dt>저장</dt><dd>{{ saved }} / {{ total }}</dd></div>
+  </dl>
+  {% if job.status in ("pending", "running") %}
+  <form method="post" action="/admin/jobs/{{ job.job_id }}/soft-stop">
+    <button type="submit">소프트 스톱</button>
+  </form>
+  {% endif %}
+  {% if job.error_message %}
+  <p class="job-error">{{ job.error_message }}</p>
+  {% endif %}
+</section>
+{% else %}
+<section class="job-card job-card-idle" aria-label="최근 수집 작업 현황">
+  <div class="job-card-head">
+    <strong>대기 중</strong>
+    <span class="job-chip">idle</span>
+  </div>
+  <p class="muted">아직 수집 작업 이력이 없습니다.</p>
+</section>
+{% endif %}
