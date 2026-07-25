@@ -92,8 +92,10 @@ class SliceQueryService:
             start.strftime("%Y%m%d"),
             end.strftime("%Y%m%d"),
         )
-        by_key = {(row.report_type, row.slice_date): row for row in rows}
-        discovered = sorted({row.report_type for row in rows} - set(self._report_types))
+        by_key = {(row.report_type.strip().upper(), row.slice_date): row for row in rows}
+        discovered = sorted(
+            {row.report_type.strip().upper() for row in rows} - set(self._report_types)
+        )
         report_types = [*self._report_types, *discovered]
 
         heatmap_rows = [

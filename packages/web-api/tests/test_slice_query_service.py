@@ -75,3 +75,19 @@ async def test_heatmap_month_labels_use_first_week_of_month() -> None:
     assert "Aug" in labels.values()
     assert "Jan" in labels.values()
     assert "Jul" in labels.values()
+
+
+async def test_heatmap_normalizes_database_report_type_into_fixed_row() -> None:
+    repository = FakeSliceRepository(
+        [_slice("f001", "20260721", "complete", succeeded=2, listed_count=2)]
+    )
+    service = SliceQueryService(repository, ("F001",))
+
+    result = await service.heatmap(today=date(2026, 7, 22))
+
+    assert [row.report_type for row in result.rows] == ["F001"]
+    cell = next(
+        cell for week in result.rows[0].weeks for cell in week if cell.slice_date == "20260721"
+    )
+    assert cell.level == "complete"
+    assert cell.slice_id == "f001-20260721"
