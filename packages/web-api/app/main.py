@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.adapters.node_entry_collector import NodeEntryCollector
 from app.api.admin import catalog
+from app.api.v1 import catalog as catalog_query
 from app.api.v1 import viewer
 from app.config import get_settings
 from app.db.session import create_all, create_db_engine, create_sessionmaker
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(catalog.router)
+    app.include_router(catalog_query.router)
     app.include_router(viewer.router)
 
     @app.get("/health", tags=["시스템"])

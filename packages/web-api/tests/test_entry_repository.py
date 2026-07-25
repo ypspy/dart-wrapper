@@ -67,3 +67,48 @@ async def test_list_by_rcept_no_and_get_by_entry_id(sessionmaker_fixture) -> Non
     assert [entry.entry_id for entry in entries] == ["a_1", "a_2"]
     assert found is not None and found.section_name == "주석"
     assert missing is None
+
+
+async def test_list_toc_orders_body_before_attachment(sessionmaker_fixture) -> None:
+    async with sessionmaker_fixture() as session:
+        repository = EntryRepository(session)
+        await repository.upsert_many(
+            [
+                EntryRecord(
+                    entry_id="att_1",
+                    rcept_no="20260724000650",
+                    source="attachment",
+                    dcm_no="999",
+                    ele_id="1",
+                    section_name="첨부",
+                    path=["첨부"],
+                    viewer_url="https://example.com/att",
+                ),
+                EntryRecord(
+                    entry_id="body_2",
+                    rcept_no="20260724000650",
+                    source="body",
+                    dcm_no="100",
+                    ele_id="2",
+                    section_name="주석",
+                    path=["감사보고서", "주석"],
+                    viewer_url="https://example.com/2",
+                ),
+                EntryRecord(
+                    entry_id="body_1",
+                    rcept_no="20260724000650",
+                    source="body",
+                    dcm_no="100",
+                    ele_id="1",
+                    section_name="재무상태표",
+                    path=["감사보고서", "재무상태표"],
+                    viewer_url="https://example.com/1",
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        toc = await EntryRepository(session).list_toc_by_rcept_no("20260724000650")
+
+    assert [entry.entry_id for entry in toc] == ["body_1", "body_2", "att_1"]

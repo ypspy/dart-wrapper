@@ -30,3 +30,22 @@ async def test_domain_exception_maps_to_http_response(
 
     assert response.status_code == expected_status
     assert response.json() == {"detail": expected_detail}
+
+
+async def test_bad_request_returns_400(client_factory) -> None:
+    from fastapi import FastAPI
+
+    from app.errors import BadRequest, register_exception_handlers
+
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.get("/boom")
+    async def boom() -> None:
+        raise BadRequest("커서 값이 올바르지 않습니다.")
+
+    async with client_factory(app) as client:
+        response = await client.get("/boom")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "커서 값이 올바르지 않습니다."

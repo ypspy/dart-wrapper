@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.dart_http import DartHttpClient
 from app.config import Settings, get_settings
+from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
+from app.services.catalog_query_service import CatalogQueryService
 from app.services.catalog_service import CatalogService
 from app.services.viewer_service import ViewerService
 
@@ -53,4 +55,14 @@ def get_catalog_service(request: Request) -> CatalogService:
     return CatalogService(
         request.app.state.sessionmaker,
         request.app.state.entry_collector,
+    )
+
+
+def get_catalog_query_service(
+    session: AsyncSession = Depends(get_session),
+) -> CatalogQueryService:
+    """Public 카탈로그 조회 서비스를 제공한다."""
+    return CatalogQueryService(
+        DisclosureRepository(session),
+        EntryRepository(session),
     )
