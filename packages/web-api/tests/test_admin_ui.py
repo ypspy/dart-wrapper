@@ -34,7 +34,7 @@ SUMMARY = SliceSummary(
 HEATMAP = HeatmapResponse(
     start_date="20250720",
     end_date="20260725",
-    month_labels=[HeatmapMonthLabel(week_index=0, label="7월")],
+    month_labels=[HeatmapMonthLabel(week_index=0, label="Jul")],
     rows=[
         HeatmapRow(
             report_type="F001",

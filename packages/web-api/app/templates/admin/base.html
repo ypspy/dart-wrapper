@@ -27,7 +27,7 @@
     .heatmap-scroll { overflow-x: auto; padding-bottom: 8px; }
     .heatmap-months {
       display: grid;
-      grid-template-columns: 44px repeat(53, 11px);
+      grid-template-columns: 54px repeat(53, 11px);
       column-gap: 2px;
       min-width: 760px;
       height: 20px;
@@ -81,6 +81,7 @@
     }
     .heatmap-legend span { display: inline-flex; align-items: center; gap: 5px; }
     .heatmap-legend .heatmap-cell:hover { outline: none; }
+    .heatmap-future:hover { outline: none; }
     @media (prefers-color-scheme: dark) {
       .heatmap-missing { background: #30363d; }
       .heatmap-cell:hover { outline-color: #f0f6fc; }

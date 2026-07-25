@@ -72,6 +72,7 @@ async def test_heatmap_month_labels_use_first_week_of_month() -> None:
     result = await service.heatmap(today=date(2026, 7, 25))
 
     labels = {item.week_index: item.label for item in result.month_labels}
+    assert labels[2] == "Aug"
     assert "Aug" in labels.values()
     assert "Jan" in labels.values()
     assert "Jul" in labels.values()

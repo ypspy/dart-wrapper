@@ -15,4 +15,4 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 *.egg-info/
-packages/web-api/dart_catalog.db
+packages/web-api/*.db
