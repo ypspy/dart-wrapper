@@ -10,7 +10,7 @@
 
 {% if slice.status != "complete" %}
 <form class="inline" method="post" action="/admin/slices/{{ slice.slice_id }}/retry">
-  <button type="submit">실패분 재시도</button>
+  <button type="submit" class="btn btn-primary">실패분 재시도</button>
 </form>
 {% endif %}
 

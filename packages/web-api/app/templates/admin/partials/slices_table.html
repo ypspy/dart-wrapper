@@ -24,7 +24,7 @@
       <td>
         {% if row.status != "complete" %}
         <form method="post" action="/admin/slices/{{ row.slice_id }}/retry">
-          <button type="submit">재시도</button>
+          <button type="submit" class="btn btn-sm">재시도</button>
         </form>
         {% endif %}
       </td>

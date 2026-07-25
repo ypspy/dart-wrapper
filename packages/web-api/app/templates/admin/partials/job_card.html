@@ -32,7 +32,7 @@
   {% endif %}
   {% if active %}
   <form method="post" action="/admin/jobs/{{ job.job_id }}/soft-stop">
-    <button type="submit">소프트 스톱</button>
+    <button type="submit" class="btn btn-danger">소프트 스톱</button>
   </form>
   {% endif %}
   {% if job.error_message %}
