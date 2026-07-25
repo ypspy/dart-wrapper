@@ -374,8 +374,7 @@ if (mode === 'list') {
   return;
 }
 if (mode === 'extract') {
-  const { parseDetail } = require('../src/documents'); // 실제 export 경로에 맞춤
-  const { buildEntries } = require('../src');
+  const { parseDetail, buildEntries } = require('../src');
   const detail = await parseDetail(params.disclosure.url, { disclosure: params.disclosure });
   const entries = buildEntries(params.disclosure, detail, {
     includeAttachments: params.include_attachments ?? true,
@@ -583,7 +582,7 @@ git commit -m "feat(web-api): protect admin catalog API and add resume/slices en
 - Create: `packages/web-api/app/templates/admin/slice_detail.html`
 - Create: `packages/web-api/app/templates/admin/partials/slices_table.html`
 - Modify: `packages/web-api/app/main.py` — `Jinja2Templates`, `StaticFiles`(선택), UI 라우터
-- Add dependency: `jinja2` in `pyproject.toml` if missing
+- Modify: `packages/web-api/pyproject.toml` — `jinja2`를 런타임 dependencies에 추가
 - Test: `packages/web-api/tests/test_admin_ui.py`
 
 **Interfaces:**
