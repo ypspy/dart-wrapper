@@ -2,6 +2,7 @@
 
 from app.models.base import Base
 from app.models.catalog_job import CatalogJob, CatalogJobLog
+from app.models.disclosure import Disclosure
 from app.models.entry import Entry
 
-__all__ = ["Base", "CatalogJob", "CatalogJobLog", "Entry"]
+__all__ = ["Base", "CatalogJob", "CatalogJobLog", "Disclosure", "Entry"]
