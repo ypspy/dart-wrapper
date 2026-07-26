@@ -12,17 +12,29 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.api.deps import get_catalog_query_service, get_settings_dep
+from app.api.deps import (
+    get_catalog_query_service,
+    get_entry_repository,
+    get_settings_dep,
+    get_viewer_service,
+)
 from app.config import Settings
-from app.errors import BadRequest, CatalogNotFound
+from app.errors import BadRequest, CatalogNotFound, ParseError, SourceFetchError
 from app.report_types import report_type_label, report_type_options
+from app.repositories.entry_repository import EntryRepository
 from app.services.catalog_query_service import CatalogQueryService
+from app.services.viewer_service import ViewerService
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["report_type_label"] = report_type_label
 
 router = APIRouter(prefix="/browse", tags=["Browse UI"], include_in_schema=False)
+
+
+def _is_htmx(request: Request) -> bool:
+    """HTMX가 보낸 부분 갱신 요청인지 확인한다."""
+    return request.headers.get("HX-Request", "").lower() == "true"
 
 
 @router.get("", response_class=HTMLResponse)
@@ -115,3 +127,53 @@ async def browse_disclosure(
             "first_entry_id": first_entry_id,
         },
     )
+
+
+@router.get("/{rcp_no}/sections/{entry_id}", response_class=HTMLResponse)
+async def browse_section(
+    request: Request,
+    rcp_no: str,
+    entry_id: str,
+    viewer: ViewerService = Depends(get_viewer_service),
+    entries: EntryRepository = Depends(get_entry_repository),
+) -> HTMLResponse:
+    """섹션 본문을 정제해 반환한다.
+
+    HTMX 요청이면 패널 partial만, 직접 접근이면 전체 페이지로 감싼다. 원문 수집·정제
+    실패는 페이지 오류가 아니라 패널 안 오류 카드로 처리한다.
+    """
+    entry = await entries.get_by_entry_id(entry_id)
+    viewer_url = entry.viewer_url if entry is not None and entry.rcept_no == rcp_no else None
+    htmx = _is_htmx(request)
+
+    try:
+        section = await viewer.get_section(rcp_no, entry_id)
+    except CatalogNotFound as exc:
+        return templates.TemplateResponse(
+            request,
+            "browse/404.html",
+            {"message": str(exc)},
+            status_code=404,
+        )
+    except (SourceFetchError, ParseError) as exc:
+        context = {
+            "rcp_no": rcp_no,
+            "entry_id": entry_id,
+            "error": str(exc),
+            "viewer_url": viewer_url,
+            "panel_template": "browse/partials/section_error.html",
+        }
+        if htmx:
+            return templates.TemplateResponse(request, context["panel_template"], context)
+        return templates.TemplateResponse(request, "browse/section_page.html", context)
+
+    context = {
+        "rcp_no": rcp_no,
+        "entry_id": entry_id,
+        "section": section,
+        "viewer_url": viewer_url,
+        "panel_template": "browse/partials/section.html",
+    }
+    if htmx:
+        return templates.TemplateResponse(request, context["panel_template"], context)
+    return templates.TemplateResponse(request, "browse/section_page.html", context)

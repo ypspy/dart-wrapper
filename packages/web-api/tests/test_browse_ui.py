@@ -212,3 +212,37 @@ async def test_browse_disclosure_not_found(client_factory) -> None:
         response = await client.get("/browse/99999999999999")
     assert response.status_code == 404
     assert "없" in response.text
+
+
+async def test_browse_section_partial_renders_blocks(client_factory) -> None:
+    async with client_factory(_app(viewer=FakeViewerService())) as client:
+        response = await client.get(
+            "/browse/20260724000650/sections/e_1",
+            headers={"HX-Request": "true"},
+        )
+    assert response.status_code == 200
+    assert "재무상태표" in response.text
+    assert "자산총계는 다음과 같다." in response.text
+    assert "block-table" in response.text
+    # partial이므로 전체 문서 뼈대는 포함하지 않는다.
+    assert "<html" not in response.text.lower()
+
+
+async def test_browse_section_error_panel(client_factory) -> None:
+    viewer = RaisingViewerService(SourceFetchError("원문을 가져오지 못했습니다."))
+    async with client_factory(_app(viewer=viewer)) as client:
+        response = await client.get(
+            "/browse/20260724000650/sections/e_1",
+            headers={"HX-Request": "true"},
+        )
+    assert response.status_code == 200
+    assert "section-error" in response.text
+    assert "다시" in response.text
+
+
+async def test_browse_section_not_found(client_factory) -> None:
+    viewer = RaisingViewerService(CatalogNotFound("섹션을 찾을 수 없습니다."))
+    async with client_factory(_app(viewer=viewer)) as client:
+        response = await client.get("/browse/20260724000650/sections/missing")
+    assert response.status_code == 404
+    assert "없" in response.text

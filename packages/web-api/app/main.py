@@ -16,11 +16,11 @@ from app.api.admin import ui as admin_ui
 from app.api.browse import ui as browse_ui
 from app.api.v1 import catalog as catalog_query
 from app.api.v1 import viewer
-
-STATIC_DIR = Path(__file__).resolve().parent / "static"
 from app.config import get_settings
 from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
 from app.errors import register_exception_handlers
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # DART는 일반 브라우저 요청과 유사한 헤더를 기대한다.
 _DEFAULT_HEADERS = {

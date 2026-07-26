@@ -1,0 +1,14 @@
+<div class="section-error">
+  <p><strong>원문을 불러오지 못했습니다.</strong></p>
+  <p>{{ error }}</p>
+  <p>
+    <a hx-get="/browse/{{ rcp_no }}/sections/{{ entry_id }}"
+       hx-target="#section-panel"
+       hx-swap="innerHTML"
+       hx-indicator="#section-loading"
+       href="/browse/{{ rcp_no }}/sections/{{ entry_id }}">다시 시도</a>
+    {% if viewer_url %}
+    · <a href="{{ viewer_url }}" target="_blank" rel="noopener">DART 원문 열기</a>
+    {% endif %}
+  </p>
+</div>

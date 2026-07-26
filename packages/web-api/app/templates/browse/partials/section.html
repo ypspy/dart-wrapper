@@ -1,0 +1,36 @@
+<article class="section-panel">
+  {% if section.path %}
+  <p class="section-breadcrumb">{{ section.path | join(" › ") }}</p>
+  {% endif %}
+  <div class="section-title-row">
+    <strong>{{ section.section_name or section.document_name or section.entry_id }}</strong>
+    {% if viewer_url %}
+    <a href="{{ viewer_url }}" target="_blank" rel="noopener">DART 원문</a>
+    {% endif %}
+  </div>
+
+  {% for block in section.blocks %}
+    {% if block.type == "heading" %}
+      {% if block.level == 1 %}<h2>{{ block.text }}</h2>
+      {% elif block.level == 2 %}<h2>{{ block.text }}</h2>
+      {% else %}<h3>{{ block.text }}</h3>{% endif %}
+    {% elif block.type == "paragraph" %}
+      <p>{{ block.text }}</p>
+    {% elif block.type == "table" %}
+      <table class="block-table">
+        {% if block.headers %}
+        <thead>
+          <tr>{% for cell in block.headers %}<th>{{ cell }}</th>{% endfor %}</tr>
+        </thead>
+        {% endif %}
+        <tbody>
+          {% for row in block.rows %}
+          <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% else %}
+    <p class="skeleton">표시할 본문이 없습니다.</p>
+  {% endfor %}
+</article>
