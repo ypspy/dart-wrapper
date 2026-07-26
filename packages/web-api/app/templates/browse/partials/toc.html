@@ -22,16 +22,24 @@
   </section>
   {% endif %}
 
-  {% if toc_items %}
-  <ul class="toc-tree">
-    {% for item in toc_items %}
-      {% if item.kind == "header" %}
-      <li class="toc-header" style="--toc-indent: {{ item.indent }}">{{ item.label }}</li>
-      {% else %}
-      <li class="toc-link" style="--toc-indent: {{ item.indent }}">{{ toc_link(item.entry) }}</li>
-      {% endif %}
+  {% if toc_sections %}
+    {% for section in toc_sections %}
+    <section class="toc-section">
+      <h3 class="toc-section-title">{{ section.title }}</h3>
+      <ul class="toc-tree">
+        {% for row in section.rows %}
+          {% for _ in range(row.close_levels) %}</ul>{% endfor %}
+          {% for _ in range(row.open_levels) %}<ul class="toc-branch">{% endfor %}
+          {% if row.item.kind == "header" %}
+          <li class="toc-header">{{ row.item.label }}</li>
+          {% else %}
+          <li class="toc-link">{{ toc_link(row.item.entry) }}</li>
+          {% endif %}
+        {% endfor %}
+        {% for _ in range(section.trailing_close) %}</ul>{% endfor %}
+      </ul>
+    </section>
     {% endfor %}
-  </ul>
   {% elif not toc.primary_entries %}
   <p>표시할 목차가 없습니다.</p>
   {% endif %}

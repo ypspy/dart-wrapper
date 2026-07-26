@@ -7,6 +7,7 @@
   --surface: #ffffff;
   --surface-soft: #f6f8fa;
   --accent: #0969da;
+  --link: #1d4ed8;
   --warn: #9a6700;
   --warn-soft: #fff8c5;
   --danger: #cf222e;
@@ -123,22 +124,51 @@ body {
   font-size: 0.88rem;
 }
 .toc a:hover { background: var(--surface-soft); }
-.toc-shortcut h3,
-.toc-tree .toc-header {
+.toc-shortcut h3 {
   font-size: 0.82rem;
   color: var(--text-muted);
-  font-weight: 600;
+  font-weight: 400;
   margin: 10px 0 4px;
 }
-.toc-tree { list-style: none; margin: 0; padding: 0; }
-.toc-tree .toc-header,
-.toc-tree .toc-link {
-  padding-left: calc(var(--toc-indent, 0) * 12px);
+
+.toc-section { margin-top: 12px; }
+.toc-section:first-of-type { margin-top: 0; }
+.toc-section-title {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
 }
+
+.toc-tree,
+.toc-branch { list-style: none; margin: 0; padding: 0; }
+
+.toc-branch {
+  margin-left: 7px;
+  padding-left: 9px;
+  border-left: 1px solid var(--border);
+}
+
 .toc-tree .toc-header {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 400;
   pointer-events: none;
   margin: 6px 0 2px;
+  padding: 2px 4px;
 }
+
+.toc-tree .toc-link > a {
+  color: var(--link);
+  font-size: 0.86rem;
+  font-weight: 400;
+  padding: 4px 6px;
+  border-radius: 5px;
+}
+.toc-tree .toc-link > a:hover { background: var(--surface-soft); }
 
 .section-panel {
   border: 1px solid var(--border);

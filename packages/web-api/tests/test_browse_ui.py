@@ -200,6 +200,7 @@ async def test_browse_disclosure_shows_primary_toc(client_factory) -> None:
     assert "toc-header" in response.text
     assert "감사보고서" in response.text
     assert "전체 보기" not in response.text
+    assert "--toc-indent" not in response.text
     # 첫 primary 섹션을 자동 로드하도록 패널이 hx-trigger="load"를 건다.
     assert 'hx-trigger="load"' in response.text
     assert "/browse/20260724000650/sections/e_1" in response.text
@@ -211,7 +212,8 @@ async def test_browse_disclosure_empty_primary_opens_all(client_factory) -> None
     assert response.status_code == 200
     assert "첨부문서" in response.text
     assert "바로가기" not in response.text
-    assert "toc-tree" in response.text
+    assert "첨부" in response.text
+    assert "본문" not in response.text  # EmptyPrimary는 attachment만
     assert "전체 보기" not in response.text
 
 
@@ -221,6 +223,10 @@ async def test_browse_disclosure_shows_shortcut_and_tree(client_factory) -> None
     assert response.status_code == 200
     assert "바로가기" in response.text
     assert "toc-tree" in response.text
+    assert "toc-branch" in response.text or "toc-section" in response.text
+    assert "본문" in response.text
+    assert "첨부" in response.text
+    assert "--toc-indent" not in response.text
     assert "전체 보기" not in response.text
 
 
