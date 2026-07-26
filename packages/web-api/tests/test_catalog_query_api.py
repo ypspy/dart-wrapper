@@ -46,14 +46,24 @@ class FakeCatalogQueryService:
             raise CatalogNotFound(f"공시를 찾을 수 없습니다: {rcp_no}")
         entry = EntrySummary(
             entry_id="e1",
+            rcept_no=rcp_no,
             source="body",
             section_name="재무상태표",
             path=["감사보고서", "재무상태표"],
+            viewer_url="https://example.com/viewer",
+            ordinal=0,
         )
         return DisclosureEntriesResponse(
-            rcp_no=rcp_no,
-            report_type="F001",
-            primary_entries=[entry],
+            disclosure=DisclosureSummary(
+                rcp_no=rcp_no,
+                corp_name="테스트",
+                report_type="F001",
+                correction_type="최초공시",
+                submitter="테스트제출",
+                rcept_dt="20260724",
+                year_end="(2025.12)",
+                entry_count=1,
+            ),
             all_entries=[entry],
         )
 
@@ -100,11 +110,16 @@ async def test_get_disclosure_not_found(client_factory) -> None:
     assert response.status_code == 404
 
 
-async def test_list_entries_includes_primary_and_entry_id(client_factory) -> None:
+async def test_list_entries_includes_entry_id(client_factory) -> None:
     async with client_factory(_app_with(FakeCatalogQueryService())) as client:
         response = await client.get("/api/v1/catalog/disclosures/20260724000650/entries")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["primary_entries"][0]["entry_id"] == "e1"
+    assert "primary_entries" not in body
+    assert body["disclosure"]["rcp_no"] == "20260724000650"
+    assert body["disclosure"]["correction_type"] == "최초공시"
+    assert body["disclosure"]["year_end"] == "(2025.12)"
     assert body["all_entries"][0]["entry_id"] == "e1"
+    assert body["all_entries"][0]["viewer_url"] == "https://example.com/viewer"
+    assert body["all_entries"][0]["rcept_no"] == "20260724000650"

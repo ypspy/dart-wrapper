@@ -41,7 +41,7 @@ const entries = await collectEntries({
 // entries[0].viewer_url → 실제 내용 접근 URL
 ```
 
-기본값: `leafOnly: true`, `includeAttachments: true`
+기본값: `leafOnly: false`, `includeAttachments: true`
 
 ## 엔트리 스키마
 
@@ -67,7 +67,7 @@ const entries = await collectEntries({
   section_original_name: '재 무 상 태 표',
   depth: 2,
   ordinal: 0,                  // 공시 내 등장 순번 (0부터)
-  is_leaf: true,
+  is_leaf: true,               // 중간 노드면 false (기본 수집에 포함)
   parent_ele_id: '4',
   ele_id: '5',
   offset: '29168',
@@ -79,7 +79,8 @@ const entries = await collectEntries({
 ```
 
 `entry_id`는 저장·조회·중복 제거용 키입니다. 저장 대상은 entry(메타·주소)이며, 공시 원문 본문은 이 모듈의 범위가 아닙니다.
-각 leaf에는 공시 내 등장 순번 `ordinal`(0부터)이 붙습니다. Browse/카탈로그 목차 정렬에 사용합니다.
+각 노드에는 공시 내 등장 순번 `ordinal`(0부터)이 붙습니다. Browse/카탈로그 목차 정렬에 사용합니다.
+기본 수집은 중간 TOC 노드(`is_leaf: false`)도 포함합니다. leaf만 원하면 `leafOnly: true`를 넘기세요.
 
 ## 단계별 API
 
@@ -117,17 +118,17 @@ DART HTML의 `node1['children'].push(node2)` 관계를 그대로 반영합니다
 
 | source | 설명 | 출처 |
 |--------|------|------|
-| `body` | 공시 본문 | `treeData` 목차 |
-| `attachment` | 첨부/관련 문서 | `#att` / `#doc` |
+| `body` | 공시 본문 | `treeData` 목차. `document_name`은 TOC의 `report_nm` 일치 노드 → 없으면 `report_nm` → (정정신고·대표이사확인 제외) 첫 노드 |
+| `attachment` | 첨부/관련 문서 | `#att` / `#doc` 옵션명 |
 
-### 3단계 — leaf 엔트리 생성
+### 3단계 — flat 엔트리 생성
 
 ```js
 const { buildEntries, collectEntries } = require('./src');
 
 // 이미 파싱한 결과로
 const entries = buildEntries(disclosure, detail, {
-  leafOnly: true,           // 최하단만 (기본)
+  leafOnly: false,          // 중간 노드 포함 (기본)
   includeAttachments: true, // 첨부 포함 (기본)
 });
 
@@ -135,18 +136,18 @@ const entries = buildEntries(disclosure, detail, {
 const all = await collectEntries({ reportType: 'F001', startDate, endDate });
 ```
 
-중간 노드(`(첨부)재무제표` 등)까지 필요하면 `leafOnly: false`.
+기본은 중간 노드(`(첨부)재무제표` 등, `is_leaf: false`)까지 저장합니다. leaf만 원하면 `leafOnly: true`.
 
 ## 첨부문서 leaf
 
 `includeAttachments: true`(기본)이면 `#att`/`#doc`의 첨부 `dcmNo` 중 **본문 treeData에 없는 것**만
-추가로 `main.do?rcpNo&dcmNo`를 열어 목차를 leaf까지 펼칩니다.
+추가로 `main.do?rcpNo&dcmNo`를 열어 목차를 펼칩니다(기본은 중간 노드 포함).
 
 | 경우 | 결과 |
 |------|------|
-| 첨부 목차 있음 | `source: 'attachment'` leaf (`entry_id=rcept_no_dcmNo_eleId`) |
+| 첨부 목차 있음 | `source: 'attachment'` entry (`entry_id=rcept_no_dcmNo_eleId`) |
 | 목차 없음·fetch 실패 | 문서 단위 1건 (`..._att`) |
-| 본문 트리에 이미 있는 dcmNo | 재요청·첨부 entry 없음 (body leaf만) |
+| 본문 트리에 이미 있는 dcmNo | 재요청·첨부 entry 없음 (body entry만) |
 
 `buildEntries`에 `attachmentTrees`를 직접 넘기면 HTTP 없이 테스트·재가공할 수 있습니다.
 통합 경로는 `buildEntriesFromDisclosure` / `collectEntries`를 사용하세요.

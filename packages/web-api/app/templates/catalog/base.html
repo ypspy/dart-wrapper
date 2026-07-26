@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Catalog{% endblock %}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+      color: #111;
+      background: #fff;
+    }
+    .page-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      gap: 12px;
+      align-items: baseline;
+      padding: 10px 12px;
+      border-bottom: 1px solid #ccc;
+      background: #fff;
+    }
+    .page-header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .page-header a { color: #06c; }
+    .page-body { padding: 12px; }
+    .meta { margin: 0 0 12px; font-size: 13px; }
+    .meta dt {
+      float: left;
+      clear: left;
+      width: 140px;
+      color: #555;
+    }
+    .meta dd { margin: 0 0 4px 150px; word-break: break-all; }
+    .meta a { color: #06c; }
+    .error { color: #a00; margin: 0 0 8px; }
+    .pager { margin-top: 12px; }
+    .table-scroll {
+      overflow: auto;
+      max-height: calc(100vh - 72px);
+      border: 1px solid #ccc;
+    }
+    table {
+      border-collapse: collapse;
+      width: max-content;
+      min-width: 100%;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 4px 8px;
+      text-align: left;
+      white-space: nowrap;
+      vertical-align: top;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #f3f3f3;
+      font-weight: 600;
+    }
+    td a { color: #06c; }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    {% block header %}{% endblock %}
+  </header>
+  <main class="page-body">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,51 @@
+{% extends "catalog/base.html" %}
+{% block title %}Catalog · {{ disclosure.rcp_no }}{% endblock %}
+{% block header %}
+  <h1>Catalog · {{ disclosure.rcp_no }}</h1>
+  <a href="/catalog">목록으로</a>
+{% endblock %}
+{% block content %}
+  <dl class="meta">
+    {% for col in disclosure_columns %}
+    <dt>{{ col }}</dt>
+    <dd>
+      {% if col == "disclosure_url" and disclosure.disclosure_url %}
+      <a href="{{ disclosure.disclosure_url }}" target="_blank" rel="noopener">{{ disclosure.disclosure_url }}</a>
+      {% else %}
+      {{ catalog_cell(attr(disclosure, col)) }}
+      {% endif %}
+    </dd>
+    {% endfor %}
+  </dl>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          {% for col in entry_columns %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+        <tr>
+          {% for col in entry_columns %}
+          <td>
+            {% if col == "viewer_url" and entry.viewer_url %}
+            <a href="{{ entry.viewer_url }}" target="_blank" rel="noopener">{{ entry.viewer_url }}</a>
+            {% elif col == "disclosure_url" and entry.disclosure_url %}
+            <a href="{{ entry.disclosure_url }}" target="_blank" rel="noopener">{{ entry.disclosure_url }}</a>
+            {% else %}
+            {{ catalog_cell(attr(entry, col)) }}
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ entry_columns|length }}">leaf가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

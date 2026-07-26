@@ -62,5 +62,5 @@ async def list_disclosure_entries(
     rcp_no: str,
     service: CatalogQueryService = Depends(get_catalog_query_service),
 ) -> DisclosureEntriesResponse:
-    """primary/전체 leaf 목차를 반환한다. 본문 파싱은 하지 않는다."""
+    """공시 메타와 leaf 목록을 반환한다. 본문 파싱은 하지 않는다."""
     return await service.list_entries(rcp_no)

@@ -54,7 +54,7 @@ function collectBodyDcmNos(tree) {
  * @param {object} disclosure 1단계에서 수집한 공시 메타데이터
  * @param {object} detail parseDetail 결과 { tree, documents }
  * @param {object} [options]
- * @param {boolean} [options.leafOnly=true] leaf(자식 없는 노드)만 엔트리로
+ * @param {boolean} [options.leafOnly=false] true면 leaf만, false면 중간 노드 포함
  * @param {boolean} [options.includeAttachments=true] 첨부문서도 엔트리에 포함
  * @param {Record<string, object[]>} [options.attachmentTrees] 첨부 dcmNo → 목차 트리 (HTTP 없음)
  * @returns {object[]} 엔트리 배열
@@ -62,7 +62,7 @@ function collectBodyDcmNos(tree) {
 function buildEntries(
   disclosure,
   detail,
-  { leafOnly = true, includeAttachments = true, attachmentTrees = {} } = {}
+  { leafOnly = false, includeAttachments = true, attachmentTrees = {} } = {}
 ) {
   const { tree = [], documents = [] } = detail || {};
   const features = pickFeatures(disclosure);
@@ -244,14 +244,14 @@ async function collectAttachmentTrees(
  *
  * @param {object} disclosure
  * @param {object} [options]
- * @param {boolean} [options.leafOnly=true]
+ * @param {boolean} [options.leafOnly=false]
  * @param {boolean} [options.includeAttachments=true]
  * @param {(url: string) => Promise<string>} [options.fetcher] 테스트용 HTML 공급
  * @returns {Promise<object[]>}
  */
 async function buildEntriesFromDisclosure(
   disclosure,
-  { leafOnly = true, includeAttachments = true, fetcher = null, log = undefined } = {}
+  { leafOnly = false, includeAttachments = true, fetcher = null, log = undefined } = {}
 ) {
   const detail = await parseDetail(disclosure.url, { disclosure, fetcher });
   let attachmentTrees = {};
@@ -274,7 +274,7 @@ async function buildEntriesFromDisclosure(
  * 각 공시마다 상세페이지를 요청한다(첨부 전용 dcmNo는 추가 요청).
  *
  * @param {object} params fetchDisclosureList 파라미터 + 아래 옵션
- * @param {boolean} [params.leafOnly=true]
+ * @param {boolean} [params.leafOnly=false]
  * @param {boolean} [params.includeAttachments=true]
  * @param {(url: string) => Promise<string>} [params.fetcher]
  * @param {(info: object) => void} [params.onEntry] 공시 단위 진행 콜백
@@ -282,7 +282,7 @@ async function buildEntriesFromDisclosure(
  */
 async function collectEntries(params = {}) {
   const {
-    leafOnly = true,
+    leafOnly = false,
     includeAttachments = true,
     onEntry = null,
     fetcher = null,

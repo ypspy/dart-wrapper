@@ -67,7 +67,7 @@ async def test_list_disclosures_paging(sessionmaker_fixture) -> None:
         assert page2.next_cursor is None
 
 
-async def test_list_entries_splits_primary(sessionmaker_fixture) -> None:
+async def test_list_entries_returns_all_ordinal_order(sessionmaker_fixture) -> None:
     async with sessionmaker_fixture() as session:
         await DisclosureRepository(session).upsert_many(
             [
@@ -75,6 +75,9 @@ async def test_list_entries_splits_primary(sessionmaker_fixture) -> None:
                     rcept_no="rcp1",
                     rcept_dt="20260724",
                     report_type="F001",
+                    correction_type="기재정정",
+                    submitter="제출자",
+                    year_end="(2025.12)",
                     entry_count=2,
                 )
             ]
@@ -109,11 +112,13 @@ async def test_list_entries_splits_primary(sessionmaker_fixture) -> None:
         service = CatalogQueryService(DisclosureRepository(session), EntryRepository(session))
         result = await service.list_entries("rcp1")
 
-    assert [item.entry_id for item in result.primary_entries] == ["e1"]
     assert [item.entry_id for item in result.all_entries] == ["e1", "e2"]
-    primary_ids = {item.entry_id for item in result.primary_entries}
-    all_ids = {item.entry_id for item in result.all_entries}
-    assert primary_ids <= all_ids
+    assert result.all_entries[0].viewer_url == "https://example.com/1"
+    assert result.all_entries[0].rcept_no == "rcp1"
+    assert result.disclosure.rcp_no == "rcp1"
+    assert result.disclosure.correction_type == "기재정정"
+    assert result.disclosure.year_end == "(2025.12)"
+    assert result.disclosure.submitter == "제출자"
 
 
 async def test_get_disclosure_missing(sessionmaker_fixture) -> None:

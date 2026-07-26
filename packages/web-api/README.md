@@ -46,19 +46,18 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | POST | `/admin/catalog/jobs/{job_id}/soft-stop` | 다음 공시 경계에서 중단 |
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}` | 공시 단건 요약 |
-| GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | leaf 목차 (`primary_entries` + `all_entries`) |
+| GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | leaf 목록 (전 feature, `all_entries`) |
 | GET | `/api/v1/viewer/{rcp_no}` | 접수번호의 모든 leaf 섹션 원문 (종합 분석용) |
 | GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 특정 leaf 섹션 원문 (단건 조회) |
-| GET | `/browse` | Public 공시 탐색 화면 (목록·필터·cursor) |
-| GET | `/browse/{rcp_no}` | 공시 상세 (왼쪽 목차 \| 오른쪽 본문 2열) |
-| GET | `/browse/{rcp_no}/sections/{entry_id}` | 섹션 본문 (HTMX partial / 직접 접근 시 전체 페이지) |
+| GET | `/catalog` | 공시 목록 표 (DisclosureSummary 전 컬럼) |
+| GET | `/catalog/{rcp_no}` | 공시 메타 + leaf 표 (EntrySummary 전 컬럼) |
 
 목록 쿼리: `corp_code`, `corp_name`, `report_nm`, `report_type`, `start_date`, `end_date`, `limit`(1–100), `cursor`.
 총건수는 반환하지 않으며, 다음 페이지는 `next_cursor`로 이어갑니다.
 
-목차의 `primary_entries`는 `report_type`별 섹션명 allowlist(현재 `F001`)로 선별합니다.
-Browse 목차는 `ordinal` 순의 본문/첨부 구역과 가이드라인 트리(path 기반 그룹 헤더)를
-기본으로 보여 주고, `primary_entries`는 상단 “바로가기”로 분리합니다.
+`all_entries`는 `ordinal` 순 leaf이며, entry-extractor 스키마와 같은 feature
+(`viewer_url`, `path`, 공시 features 등)를 담습니다. 응답의 `disclosure`에는
+공시 메타(`correction_type`, `submitter`, `year_end`, `bsns_year` 포함)가 들어 있습니다.
 `entry_id`로 Viewer 단건 조회에 바로 이어갈 수 있습니다.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
@@ -68,17 +67,7 @@ Browse 목차는 `ordinal` 순의 본문/첨부 구역과 가이드라인 트리
 Viewer 응답의 각 섹션은 문서 순서의 `blocks[]`를 담습니다. 블록 종류는 `heading`
 (`level` 1–3), `paragraph`, `table`(`headers`/`rows`) 세 가지입니다. 원문을 한 번만
 파싱해 `blocks`·`text`·`tables`를 함께 만들며, 하위호환 필드인 `text`에는 **표 내용을 넣지
-않습니다**(표는 `tables` 또는 `table` 블록으로만 제공). `/browse` 화면과 Viewer JSON은
-같은 정제 결과를 공유합니다.
-
-## Browse 화면
-
-`http://127.0.0.1:8000/browse` 는 인증 없는 Public 탐색 화면입니다.
-공시 목록에서 접수 단위를 고르면 상세에서 왼쪽 목차(상단 바로가기 + 본문/첨부 구역
-가이드라인 트리)와 오른쪽 본문이 2열로 열립니다. 섹션을 누르면 HTMX가 오른쪽 패널만
-교체하고,
-원문 수집이 실패하면 페이지 오류 대신 패널 안 오류 카드(다시 시도·DART 원문 링크)를 보여줍니다.
-Admin 화면과 템플릿·CSS(`static/browse.css`)는 분리되어 있습니다.
+않습니다**(표는 `tables` 또는 `table` 블록으로만 제공).
 
 ## 불연속 수집과 완전성
 

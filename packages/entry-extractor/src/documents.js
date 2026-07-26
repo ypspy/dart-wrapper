@@ -52,6 +52,70 @@ function isCorrectionNotice(name) {
   return /정정신고/.test(compact) || /^기재정정/.test(compact);
 }
 
+/** 대표이사 확인서 등 본문 문서 대표명으로 쓰기 부적합한 노드인지 판별 */
+function isRepresentativeConfirm(name) {
+  const compact = (name || '').replace(/\s+/g, '');
+  return /대표이사.*확인/.test(compact);
+}
+
+/**
+ * 동일 dcmNo 섹션들에서 본문 문서의 대표명을 고른다.
+ *
+ * 우선순위:
+ * 1) TOC에 report_nm과 일치하는 노드
+ * 2) disclosure.report_nm (있으면)
+ * 3) 정정신고·대표이사확인이 아닌 가장 얕은 노드
+ * 4) 첫 섹션
+ */
+function resolveBodyName(sectionsForDcm, disclosure = null) {
+  const sorted = [...sectionsForDcm].sort((a, b) => a.depth - b.depth);
+  const reportNm = disclosure?.report_nm
+    ? normalizeDartTitle(normalizeText(disclosure.report_nm))
+    : '';
+
+  if (reportNm) {
+    for (const section of sorted) {
+      const name = section.name || '';
+      const compactName = name.replace(/\s+/g, '');
+      const compactReport = reportNm.replace(/\s+/g, '');
+      if (name === reportNm || compactName === compactReport) {
+        return {
+          name,
+          originalName: section.originalName,
+          corrected: false,
+          normalized: !!section.normalized,
+        };
+      }
+    }
+    return {
+      name: reportNm,
+      originalName: sorted[0]?.originalName || '',
+      corrected: true,
+      normalized: !!sorted[0]?.normalized,
+    };
+  }
+
+  for (const section of sorted) {
+    const label = section.originalName || section.name;
+    if (isCorrectionNotice(label) || isRepresentativeConfirm(label)) continue;
+    if (isRepresentativeConfirm(section.name)) continue;
+    return {
+      name: section.name,
+      originalName: section.originalName,
+      corrected: false,
+      normalized: !!section.normalized,
+    };
+  }
+
+  const first = sorted[0];
+  return {
+    name: first?.name || '',
+    originalName: first?.originalName || '',
+    corrected: false,
+    normalized: !!first?.normalized,
+  };
+}
+
 /**
  * 문서/섹션명을 보정한다.
  * - 기본: DART 글자사이 공백 정규화
@@ -208,42 +272,6 @@ function flattenTree(tree) {
 /** @deprecated extractTree + flattenTree 조합. 하위 호환용 */
 function extractSections(html, disclosure = null) {
   return flattenTree(extractTree(html, disclosure));
-}
-
-/**
- * 동일 dcmNo 섹션들에서 본문 문서의 대표명을 고른다.
- * 정정신고 안내보다 실제 보고서 제목(또는 report_nm)을 우선한다.
- */
-function resolveBodyName(sectionsForDcm, disclosure = null) {
-  const sorted = [...sectionsForDcm].sort((a, b) => a.depth - b.depth);
-
-  for (const section of sorted) {
-    if (!isCorrectionNotice(section.originalName || section.name)) {
-      return {
-        name: section.name,
-        originalName: section.originalName,
-        corrected: false,
-        normalized: !!section.normalized,
-      };
-    }
-  }
-
-  if (disclosure?.report_nm) {
-    return {
-      name: disclosure.report_nm,
-      originalName: sorted[0]?.originalName || '',
-      corrected: true,
-      normalized: !!sorted[0]?.normalized,
-    };
-  }
-
-  const first = sorted[0];
-  return {
-    name: first?.name || '',
-    originalName: first?.originalName || '',
-    corrected: false,
-    normalized: !!first?.normalized,
-  };
 }
 
 /** 특정 dcmNo에 해당하는 서브트리만 남긴다. */
@@ -450,5 +478,7 @@ module.exports = {
   correctName,
   normalizeDartTitle,
   isCorrectionNotice,
+  isRepresentativeConfirm,
+  resolveBodyName,
   viewerUrl,
 };

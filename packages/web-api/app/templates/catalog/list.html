@@ -1,0 +1,43 @@
+{% extends "catalog/base.html" %}
+{% block title %}Catalog · 공시 목록{% endblock %}
+{% block header %}
+  <h1>Catalog · 공시 목록</h1>
+{% endblock %}
+{% block content %}
+  {% if cursor_error %}
+  <p class="error">{{ cursor_error }}</p>
+  {% endif %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          {% for col in columns %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          {% for col in columns %}
+          <td>
+            {% if col == "rcp_no" %}
+            <a href="/catalog/{{ item.rcp_no }}">{{ item.rcp_no }}</a>
+            {% elif col == "disclosure_url" and item.disclosure_url %}
+            <a href="{{ item.disclosure_url }}" target="_blank" rel="noopener">{{ item.disclosure_url }}</a>
+            {% else %}
+            {{ catalog_cell(attr(item, col)) }}
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ columns|length }}">표시할 공시가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if next_href %}
+  <p class="pager"><a href="{{ next_href }}">다음</a></p>
+  {% endif %}
+{% endblock %}

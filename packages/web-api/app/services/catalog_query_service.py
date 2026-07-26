@@ -1,11 +1,10 @@
-"""Public 카탈로그 조회 서비스. cursor와 primary 목차 분리를 담당한다."""
+"""Public 카탈로그 조회 서비스. cursor 목록과 leaf 목차를 담당한다."""
 
 from __future__ import annotations
 
 import base64
 import json
 
-from app.catalog.primary_sections import is_primary_section
 from app.errors import BadRequest, CatalogNotFound
 from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
@@ -104,7 +103,7 @@ class CatalogQueryService:
         return DisclosureSummary.from_model(row)
 
     async def list_entries(self, rcp_no: str) -> DisclosureEntriesResponse:
-        """공시의 primary/전체 leaf 목차를 반환한다.
+        """공시의 leaf 목차를 ordinal 순으로 반환한다.
 
         :raises CatalogNotFound: 공시가 없을 때
         """
@@ -114,14 +113,7 @@ class CatalogQueryService:
 
         entries = await self._entries.list_toc_by_rcept_no(rcp_no)
         all_entries = [EntrySummary.from_model(entry) for entry in entries]
-        primary_entries = [
-            item
-            for item in all_entries
-            if is_primary_section(disclosure.report_type, item.section_name, item.document_name)
-        ]
         return DisclosureEntriesResponse(
-            rcp_no=rcp_no,
-            report_type=disclosure.report_type,
-            primary_entries=primary_entries,
+            disclosure=DisclosureSummary.from_model(disclosure),
             all_entries=all_entries,
         )
