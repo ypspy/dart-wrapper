@@ -128,21 +128,23 @@ JOB_STATUS = JobStatusResponse(
     params={"report_type": "F001", "start_date": "20260701", "end_date": "20260726"},
     total_entries=10,
     saved_entries=4,
+    started_at=datetime(2026, 7, 26, 1, 0, tzinfo=timezone.utc),
+    stop_requested=False,
     logs=[
         JobLogItem(
-            level="info",
-            message="수집을 시작합니다.",
-            created_at=datetime(2026, 7, 26, tzinfo=timezone.utc),
+            level="error",
+            message="상세 파싱에 실패했습니다.",
+            created_at=datetime(2026, 7, 26, 1, 3, tzinfo=timezone.utc),
         ),
         JobLogItem(
             level="warn",
             message="재시도합니다.",
-            created_at=datetime(2026, 7, 26, tzinfo=timezone.utc),
+            created_at=datetime(2026, 7, 26, 1, 2, tzinfo=timezone.utc),
         ),
         JobLogItem(
-            level="error",
-            message="상세 파싱에 실패했습니다.",
-            created_at=datetime(2026, 7, 26, tzinfo=timezone.utc),
+            level="info",
+            message="수집을 시작합니다.",
+            created_at=datetime(2026, 7, 26, 1, 0, tzinfo=timezone.utc),
         ),
     ],
 )
@@ -154,12 +156,20 @@ class FakeCatalogService:
     def __init__(self, job: JobStatusResponse | None = JOB_STATUS) -> None:
         self.job = job
         self.stopped: list[str] = []
+        self.force_finished: list[str] = []
 
     async def get_latest_status(self) -> JobStatusResponse | None:
         return self.job
 
+    async def get_status(self, job_id: str) -> JobStatusResponse:
+        assert self.job is not None
+        return self.job
+
     async def request_soft_stop(self, job_id: str) -> None:
         self.stopped.append(job_id)
+
+    async def force_finish(self, job_id: str) -> None:
+        self.force_finished.append(job_id)
 
 
 def _app(
@@ -198,6 +208,27 @@ async def test_token_form_rejects_wrong_token(client_factory) -> None:
     assert "올바르지" in response.text
 
 
+async def test_admin_index_defaults_to_latest_job_report_type(client_factory) -> None:
+    job = JOB_STATUS.model_copy(
+        update={
+            "params": {
+                "report_type": "A001",
+                "start_date": "20260701",
+                "end_date": "20260701",
+            }
+        }
+    )
+    async with client_factory(_app(FakeCatalogService(job=job))) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin")
+
+    body = response.text
+    assert response.status_code == 200
+    assert 'href="/admin?report_type=A001"' in body
+    assert "연도 요약 · A001 사업보고서" in body
+    assert 'class="report-type-chip is-selected"' in body
+
+
 async def test_admin_index_renders_two_column_ops_console(client_factory) -> None:
     async with client_factory(_app()) as client:
         client.cookies.set("admin_token", "dev-admin-token")
@@ -213,8 +244,10 @@ async def test_admin_index_renders_two_column_ops_console(client_factory) -> Non
     assert "재시도" in body
     assert "이어하기" in body
     assert 'class="report-type-chip' in body
-    assert ">A001<" in body or ">A001</a>" in body
-    assert ">F001<" in body or 'is-selected">F001' in body
+    assert ">A001<" in body
+    assert "사업보고서" in body
+    assert "연결감사보고서" in body
+    assert 'href="/admin?report_type=A002' in body
 
 
 async def test_admin_index_disables_start_when_job_busy(client_factory) -> None:
@@ -225,12 +258,42 @@ async def test_admin_index_disables_start_when_job_busy(client_factory) -> None:
     assert response.status_code == 200
     body = response.text
     assert "진행 중인 작업이 있으면 새 수집은 시작할 수 없습니다" in body
-    assert 'name="report_type" value="F001" required disabled' in body
-    assert "수집 시작</button>" in body
+    assert "다른 작업이 진행 중이라 새 수집을 시작할 수 없습니다" in body
     assert "disabled>수집 시작</button>" in body or 'disabled">수집 시작</button>' in body
     assert (
         "disabled>미완료 이어하기</button>" in body or 'disabled">미완료 이어하기</button>' in body
     )
+
+
+async def test_collect_form_partial_keeps_submitted_end_date(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get(
+            "/admin/collect-form",
+            params={
+                "report_type": "A003",
+                "start_date": "20260101",
+                "end_date": "20260331",
+                "expand_form": 1,
+            },
+        )
+
+    body = response.text
+    assert response.status_code == 200
+    assert 'value="20260101"' in body
+    assert 'value="20260331"' in body
+    assert 'value="A003"' in body or "A003 · 분기보고서" in body
+    assert 'hx-include="find form"' not in body
+
+
+async def test_admin_index_collect_form_poll_includes_current_fields(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin")
+
+    assert 'hx-get="/admin/collect-form"' in response.text
+    assert 'hx-include="find form"' in response.text
+    assert "start_date={{ start_date }}" not in response.text
 
 
 async def test_admin_index_collect_form_is_collapsed_by_default(client_factory) -> None:
@@ -238,7 +301,9 @@ async def test_admin_index_collect_form_is_collapsed_by_default(client_factory) 
         client.cookies.set("admin_token", "dev-admin-token")
         response = await client.get("/admin")
 
-    assert '<details class="collect-form">' in response.text
+    assert 'class="collect-form' in response.text
+    assert "<details class=\"collect-form\" open>" not in response.text
+    assert ' open' not in response.text.split("collect-form", 1)[1].split(">", 1)[0]
 
 
 async def test_admin_index_renders_heatmap_links_and_legend(client_factory) -> None:
@@ -294,8 +359,9 @@ async def test_admin_query_prefills_and_expands_collect_form(client_factory) -> 
         )
 
     body = response.text
-    assert '<details class="collect-form" open>' in body
-    assert 'name="report_type" value="A001"' in body
+    assert "<details" in body and "collect-form" in body and " open" in body
+    assert 'value="20260102"' in body
+    assert '<option value="A001" selected>' in body
     assert 'name="start_date" value="20260102"' in body
     assert 'name="end_date" value="20260102"' in body
     assert "2024년 일별 완전성" in body
@@ -376,9 +442,12 @@ async def test_job_status_partial_renders_running_job(client_factory) -> None:
     assert response.status_code == 200
     body = response.text
     assert "job-1234" in body
-    assert "running" in body
+    assert "실행 중" in body
+    assert "4 / 10" in body
     assert "20260701 ~ 20260726" in body
     assert "소프트 스톱" in body
+    assert "강제 종료" in body
+    assert "상세 파싱에 실패했습니다." in body
 
 
 async def test_job_status_partial_renders_idle_without_job(client_factory) -> None:
@@ -433,8 +502,19 @@ async def test_soft_stop_form_requests_stop_and_redirects(client_factory) -> Non
         response = await client.post("/admin/jobs/job-1234abcd/soft-stop")
 
     assert response.status_code == 303
-    assert response.headers["location"].endswith("/admin")
+    assert response.headers["location"].endswith("/admin?report_type=F001")
     assert catalog.stopped == ["job-1234abcd"]
+
+
+async def test_force_finish_form_finishes_and_redirects(client_factory) -> None:
+    catalog = FakeCatalogService()
+    async with client_factory(_app(catalog)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post("/admin/jobs/job-1234abcd/force-finish")
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/admin?report_type=F001")
+    assert catalog.force_finished == ["job-1234abcd"]
 
 
 async def test_slice_detail_page_lists_failed_disclosure(client_factory) -> None:
@@ -445,3 +525,4 @@ async def test_slice_detail_page_lists_failed_disclosure(client_factory) -> None
     assert response.status_code == 200
     assert "20260724000651" in response.text
     assert "상세 파싱에 실패했습니다." in response.text
+    assert 'href="/admin?report_type=F001"' in response.text

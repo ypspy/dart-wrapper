@@ -123,6 +123,34 @@ class CatalogService:
             )
             await session.commit()
 
+    async def force_finish(self, job_id: str) -> None:
+        """멈춘 것으로 보이는 작업을 즉시 마감한다.
+
+        백그라운드 워커가 살아 있으면 soft-stop도 함께 걸어 추가 진행을 막고,
+        DB 상태는 바로 partial로 바꿔 새 수집을 시작할 수 있게 한다.
+        """
+        self._stop_requested.add(job_id)
+        async with self._sessionmaker() as session:
+            jobs = JobRepository(session)
+            job = await jobs.get(job_id)
+            if job is None:
+                raise CatalogNotFound(f"수집 작업을 찾을 수 없습니다: {job_id}")
+            if job.status not in {"pending", "running"}:
+                return
+            await jobs.mark_finished(
+                job_id,
+                "partial",
+                total_entries=max(job.total_entries, job.saved_entries),
+                saved_entries=job.saved_entries,
+                error_message="운영자가 작업을 강제 종료했습니다.",
+            )
+            await jobs.add_log(
+                job_id,
+                "warning",
+                "운영자가 작업을 강제 종료했습니다. 미완료분은 이어하기로 재개하세요.",
+            )
+            await session.commit()
+
     async def start_extract(self, request: ExtractRequest) -> ExtractResponse:
         """수집 작업을 등록한다. 같은 범위가 진행 중이면 기존 작업을 돌려준다."""
         return await self._start_job(request.model_dump(mode="json"), mode="collect")
@@ -179,6 +207,7 @@ class CatalogService:
             error_message=job.error_message,
             started_at=job.started_at,
             finished_at=job.finished_at,
+            stop_requested=job_id in self._stop_requested,
             logs=[JobLogItem.model_validate(log) for log in logs],
         )
 
@@ -237,16 +266,43 @@ class CatalogService:
             await session.commit()
 
         saved_total = 0
+        listed_total = 0
         incomplete = 0
+        stopped = False
 
         try:
             for report_type, slice_date in targets:
-                saved, is_complete = await self._process_slice(
-                    job_id, report_type, slice_date, include_attachments
+                if job_id in self._stop_requested:
+                    stopped = True
+                    await self._log(
+                        job_id,
+                        "warning",
+                        "중단 요청으로 남은 슬라이스 처리를 멈춥니다.",
+                    )
+                    # 아직 손대지 않은 슬라이스는 미완료로 집계한다.
+                    incomplete += 1
+                    break
+
+                saved, listed, is_complete = await self._process_slice(
+                    job_id,
+                    report_type,
+                    slice_date,
+                    include_attachments,
+                    progress_base=(saved_total, listed_total),
                 )
                 saved_total += saved
+                listed_total += listed
                 if not is_complete:
                     incomplete += 1
+
+                if job_id in self._stop_requested:
+                    stopped = True
+                    await self._log(
+                        job_id,
+                        "warning",
+                        "중단 요청으로 남은 슬라이스 처리를 멈춥니다.",
+                    )
+                    break
         except Exception as exc:  # 예기치 못한 오류만 작업 실패로 남긴다.
             logger.exception("수집 작업이 중단되었습니다: %s", job_id)
             async with self._sessionmaker() as session:
@@ -259,6 +315,8 @@ class CatalogService:
         finally:
             self._stop_requested.discard(job_id)
 
+        if stopped and incomplete == 0:
+            incomplete = 1
         status = "succeeded" if incomplete == 0 else "partial"
         message = None if incomplete == 0 else f"미완료 슬라이스가 {incomplete}개 남아 있습니다."
 
@@ -267,7 +325,7 @@ class CatalogService:
             await jobs.mark_finished(
                 job_id,
                 status,
-                total_entries=saved_total,
+                total_entries=max(listed_total, saved_total),
                 saved_entries=saved_total,
                 error_message=message,
             )
@@ -284,8 +342,11 @@ class CatalogService:
         report_type: str,
         slice_date: str,
         include_attachments: bool,
-    ) -> tuple[int, bool]:
-        """하루치 슬라이스를 처리하고 (저장 엔트리 수, 완료 여부)를 반환한다."""
+        *,
+        progress_base: tuple[int, int] = (0, 0),
+    ) -> tuple[int, int, bool]:
+        """하루치 슬라이스를 처리하고 (저장 수, 목록 수, 완료 여부)를 반환한다."""
+        base_saved, base_listed = progress_base
         async with self._sessionmaker() as session:
             slices = SliceRepository(session)
             slice_row = await slices.get_or_create_slice(report_type, slice_date)
@@ -310,16 +371,22 @@ class CatalogService:
                     job_id, "error", f"{slice_date} 목록 수집에 실패했습니다: {exc}"
                 )
                 await session.commit()
-            return 0, False
+            return 0, 0, False
 
         async with self._sessionmaker() as session:
             await SliceRepository(session).set_listed(slice_id, listed.listed_count, job_id)
             await JobRepository(session).add_log(
                 job_id, "info", f"{slice_date} 목록 {listed.listed_count}건을 확인했습니다."
             )
+            await JobRepository(session).update_progress(
+                job_id,
+                saved_entries=base_saved,
+                total_entries=max(base_listed + listed.listed_count, base_saved),
+            )
             await session.commit()
 
         saved_total = 0
+        processed = 0
         blocked = False
         block_streak = 0
 
@@ -332,6 +399,27 @@ class CatalogService:
                 job_id, slice_id, item, include_attachments
             )
             saved_total += saved
+            processed += 1
+
+            # 공시 단위로도 진행 수치를 밀어 폴링 화면에 숨이 보이게 한다.
+            async with self._sessionmaker() as session:
+                await JobRepository(session).update_progress(
+                    job_id,
+                    saved_entries=base_saved + saved_total,
+                    total_entries=max(
+                        base_listed + listed.listed_count,
+                        base_saved + saved_total,
+                    ),
+                )
+                # 긴 파싱 구간에서도 살아 있음을 보이도록 중간 로그를 남긴다.
+                if processed == 1 or processed % 5 == 0 or processed == listed.listed_count:
+                    await JobRepository(session).add_log(
+                        job_id,
+                        "info",
+                        f"{slice_date} 진행 {processed}/{listed.listed_count}건"
+                        f" (저장 {base_saved + saved_total}건)",
+                    )
+                await session.commit()
 
             if outcome != "blocked":
                 block_streak = 0
@@ -366,7 +454,7 @@ class CatalogService:
             )
             await session.commit()
 
-        return saved_total, is_complete
+        return saved_total, listed.listed_count, is_complete
 
     async def _process_disclosure(
         self,

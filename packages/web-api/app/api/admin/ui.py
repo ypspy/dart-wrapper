@@ -21,6 +21,7 @@ from app.api.deps import (
 )
 from app.config import Settings
 from app.errors import CatalogConflict
+from app.report_types import report_type_label, report_type_options
 from app.schemas.catalog import (
     ExtractRequest,
     JobLogItem,
@@ -57,6 +58,42 @@ def _resolve_year(year: int | None, summary: YearSummaryResponse) -> int:
     if year is not None and any(item.year == year for item in summary.items):
         return year
     return summary.selected_year
+
+
+def _resolve_report_type(
+    report_type: str | None,
+    job: JobStatusResponse | None,
+    settings: Settings,
+) -> str:
+    """화면 유형을 고른다. 명시값이 없으면 최근(진행 중) 작업 유형을 따른다."""
+    if report_type and report_type.strip():
+        return report_type.strip().upper()
+
+    if job is not None:
+        from_job = str(job.params.get("report_type") or "").strip().upper()
+        if from_job:
+            return from_job
+
+    configured = settings.heatmap_report_type_list
+    return configured[0] if configured else "F001"
+
+
+def _admin_dashboard_url(*, report_type: str | None = None, notice: str | None = None) -> str:
+    """대시보드로 돌아갈 때 유형·안내 문구를 유지한다."""
+    params: list[str] = []
+    if report_type:
+        params.append(f"report_type={quote(report_type)}")
+    if notice:
+        params.append(f"notice={quote(notice)}")
+    return "/admin?" + "&".join(params) if params else "/admin"
+
+
+def _report_type_from_job(job: JobStatusResponse | None) -> str | None:
+    """작업 파라미터에서 보고서 유형을 꺼낸다."""
+    if job is None:
+        return None
+    code = str(job.params.get("report_type") or "").strip().upper()
+    return code or None
 
 
 async def _list_year_slices(
@@ -131,7 +168,7 @@ async def submit_token(
 @router.get("", response_class=HTMLResponse, summary="Admin 대시보드")
 async def dashboard(
     request: Request,
-    report_type: str = "F001",
+    report_type: str | None = None,
     year: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
@@ -145,12 +182,13 @@ async def dashboard(
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
+    job = await service.get_latest_status()
+    report_type = _resolve_report_type(report_type, job, settings)
     default_start, default_end = _default_range()
     summary = await slices.year_summary(report_type=report_type or None)
     selected_year = _resolve_year(year, summary)
     heatmap = await slices.heatmap(year=selected_year, report_type=report_type or None)
     listing = await _list_year_slices(slices, report_type, selected_year)
-    job = await service.get_latest_status()
     job_busy = job is not None and job.status in ACTIVE_JOB_STATUSES
     return templates.TemplateResponse(
         request,
@@ -167,7 +205,9 @@ async def dashboard(
             "problem_slices": [row for row in listing.items if row.status != "complete"],
             "job": job,
             "logs": _filter_logs(job, _log_levels_for(job)),
-            "report_types": settings.heatmap_report_type_list,
+            "report_type_options": report_type_options(settings.heatmap_report_type_list),
+            "report_type_name": report_type_label(report_type),
+            "include_attachments": True,
             "job_busy": job_busy,
             "notice": notice,
         },
@@ -273,19 +313,25 @@ async def slices_summary_partial(
 @router.get("/collect-form", response_class=HTMLResponse, summary="수집 폼 갱신")
 async def collect_form_partial(
     request: Request,
-    report_type: str = "F001",
+    report_type: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     expand_form: bool = False,
+    include_attachments: bool | None = None,
     settings: Settings = Depends(get_settings_dep),
     service: CatalogService = Depends(get_catalog_service),
 ) -> HTMLResponse:
-    """진행 중 여부에 따라 수집 폼 활성/비활성 상태를 갱신한다."""
+    """진행 중 여부에 따라 수집 폼 활성/비활성 상태를 갱신한다.
+
+    폴링 시 현재 입력값(hx-include)을 그대로 받아 사용자가 고친 종료일이
+    5초마다 초기값으로 덮이지 않게 한다.
+    """
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
     default_start, default_end = _default_range()
     job = await service.get_latest_status()
+    report_type = _resolve_report_type(report_type, job, settings)
     return templates.TemplateResponse(
         request,
         "admin/partials/collect_form.html",
@@ -294,6 +340,10 @@ async def collect_form_partial(
             "start_date": start_date or default_start,
             "end_date": end_date or default_end,
             "expand_form": expand_form,
+            "include_attachments": (
+                True if include_attachments is None else bool(include_attachments)
+            ),
+            "report_type_options": report_type_options(settings.heatmap_report_type_list),
             "job_busy": job is not None and job.status in ACTIVE_JOB_STATUSES,
         },
     )
@@ -371,7 +421,30 @@ async def soft_stop_job(
         return _to_token_page()
 
     await service.request_soft_stop(job_id)
-    return RedirectResponse("/admin", status_code=303)
+    job = await service.get_status(job_id)
+    return RedirectResponse(
+        _admin_dashboard_url(report_type=_report_type_from_job(job)),
+        status_code=303,
+    )
+
+
+@router.post("/jobs/{job_id}/force-finish", summary="작업 강제 종료")
+async def force_finish_job(
+    request: Request,
+    job_id: str,
+    settings: Settings = Depends(get_settings_dep),
+    service: CatalogService = Depends(get_catalog_service),
+) -> RedirectResponse:
+    """멈춘 작업을 즉시 마감해 새 수집을 시작할 수 있게 한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    await service.force_finish(job_id)
+    job = await service.get_status(job_id)
+    return RedirectResponse(
+        _admin_dashboard_url(report_type=_report_type_from_job(job)),
+        status_code=303,
+    )
 
 
 @router.get("/slices", response_class=HTMLResponse, summary="슬라이스 표 부분 갱신")
@@ -408,7 +481,11 @@ async def slice_detail(
     return templates.TemplateResponse(
         request,
         "admin/slice_detail.html",
-        {"slice": detail.slice, "attempts": detail.attempts},
+        {
+            "slice": detail.slice,
+            "attempts": detail.attempts,
+            "report_type": detail.slice.report_type,
+        },
     )
 
 

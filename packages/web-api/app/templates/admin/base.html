@@ -246,10 +246,13 @@
       flex-wrap: wrap;
       gap: 6px;
       flex-shrink: 0;
+      max-width: 460px;
+      justify-content: flex-end;
     }
     .report-type-chip {
       display: inline-flex;
-      align-items: center;
+      align-items: baseline;
+      gap: 6px;
       height: 32px;
       padding: 0 12px;
       border: 1px solid var(--border);
@@ -257,10 +260,18 @@
       background: var(--surface-soft);
       color: var(--text);
       font-size: var(--fs-sm);
-      font-weight: 650;
-      letter-spacing: 0.02em;
       text-decoration: none;
     }
+    .report-type-code {
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .report-type-name {
+      font-size: var(--fs-xs);
+      color: var(--text-muted);
+    }
+    .report-type-chip.is-selected .report-type-name { color: inherit; opacity: 0.85; }
     .report-type-chip:hover { text-decoration: none; border-color: var(--accent); }
     .report-type-chip.is-selected {
       background: var(--accent);
@@ -348,7 +359,12 @@
       100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
     }
     .job-card-active { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
-    .job-live { margin: var(--space-2) 0 0; font-size: var(--fs-xs); }
+    .job-live {
+      margin: var(--space-2) 0 0;
+      font-size: var(--fs-sm);
+      font-weight: 650;
+      color: var(--ok);
+    }
     .job-progress {
       height: 6px;
       margin: var(--space-3) 0;
@@ -357,6 +373,27 @@
       overflow: hidden;
     }
     .job-progress i { display: block; height: 100%; background: var(--accent); }
+    .job-progress-live i {
+      background: var(--ok);
+      animation: job-progress-sheen 1.6s linear infinite;
+      background-image: linear-gradient(
+        90deg,
+        var(--ok) 0%,
+        color-mix(in srgb, var(--ok) 55%, white) 45%,
+        var(--ok) 90%
+      );
+      background-size: 200% 100%;
+    }
+    @keyframes job-progress-sheen {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+    .job-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: var(--space-2);
+    }
     .job-meta {
       display: grid;
       gap: 6px;
@@ -560,7 +597,7 @@
   </style>
 </head>
 <body>
-  <h1><a href="/admin">DART 수집 운영</a></h1>
+  <h1><a href="{% if report_type %}/admin?report_type={{ report_type }}{% else %}/admin{% endif %}">DART 수집 운영</a></h1>
   {% block content %}{% endblock %}
 </body>
 </html>

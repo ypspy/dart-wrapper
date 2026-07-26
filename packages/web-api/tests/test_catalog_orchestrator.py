@@ -282,6 +282,30 @@ async def test_soft_stop_keeps_succeeded_and_allows_resume(sessionmaker_fixture)
     assert rows[0].status == "complete"
 
 
+async def test_soft_stop_halts_remaining_slices(sessionmaker_fixture) -> None:
+    """소프트 스톱은 현재 날짜뿐 아니라 이후 날짜 슬라이스도 건너뛴다."""
+    collector = ScriptedCollector(rcept_nos=("1",))
+    service = _service(sessionmaker_fixture, collector)
+    request = ExtractRequest(report_type="F001", start_date="20260724", end_date="20260726")
+    response = await service.start_extract(request)
+
+    original = service._process_disclosure
+
+    async def stop_after_first(job_id, slice_id, item, include_attachments):
+        saved = await original(job_id, slice_id, item, include_attachments)
+        await service.request_soft_stop(job_id)
+        return saved
+
+    service._process_disclosure = stop_after_first
+    await service.run_job(response.job_id, request)
+    service._process_disclosure = original
+
+    status = await service.get_status(response.job_id)
+    assert status.status == "partial"
+    assert len(collector.list_calls) == 1
+    assert any("남은 슬라이스" in log.message for log in status.logs)
+
+
 async def test_job_records_saved_entry_counts(sessionmaker_fixture) -> None:
     collector = ScriptedCollector()
     service = _service(sessionmaker_fixture, collector)

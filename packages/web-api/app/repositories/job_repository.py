@@ -81,6 +81,18 @@ class JobRepository:
         job.status = "running"
         job.started_at = _now()
 
+    async def update_progress(
+        self,
+        job_id: str,
+        *,
+        saved_entries: int,
+        total_entries: int,
+    ) -> None:
+        """실행 중 진행 수치를 갱신한다. 화면 폴링이 바로 반영되도록 한다."""
+        job = await self._require(job_id)
+        job.saved_entries = max(0, saved_entries)
+        job.total_entries = max(job.saved_entries, total_entries)
+
     async def mark_succeeded(self, job_id: str, total_entries: int, saved_entries: int) -> None:
         """작업을 성공으로 마감하고 수집 수치를 기록한다."""
         job = await self._require(job_id)

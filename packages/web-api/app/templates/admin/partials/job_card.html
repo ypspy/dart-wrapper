@@ -3,37 +3,63 @@
 {% set saved = job.saved_entries or 0 %}
 {% set percent = (saved * 100 // total) if total else 0 %}
 {% set active = job.status in ("pending", "running") %}
-<section class="job-card{% if active %} job-card-active{% endif %}" aria-label="최근 수집 작업 현황">
+{% if job.status == "running" %}{% set status_label = "실행 중" %}
+{% elif job.status == "pending" %}{% set status_label = "대기" %}
+{% elif job.status == "succeeded" %}{% set status_label = "완료" %}
+{% elif job.status == "partial" %}{% set status_label = "부분 완료" %}
+{% elif job.status == "failed" %}{% set status_label = "실패" %}
+{% else %}{% set status_label = job.status %}{% endif %}
+<section class="job-card{% if active %} job-card-active{% endif %}" aria-label="최근 수집 작업 현황" aria-live="polite">
   <div class="job-card-head">
     <strong>작업 {{ job.job_id[:8] }} · {{ job.mode }}</strong>
     <span class="job-chip job-chip-{{ job.status }}{% if active %} is-pulsing{% endif %}">
       {% if active %}<span class="job-pulse" aria-hidden="true"></span>{% endif %}
-      {{ job.status }}
+      {{ status_label }}
     </span>
   </div>
   {% if active %}
-  <p class="job-live muted">수집이 진행 중입니다. 아래 로그가 갱신되면 살아 있는 상태입니다.</p>
+  <p class="job-live">
+    {% if job.stop_requested %}
+    중단 요청됨 — 현재 공시 처리가 끝나는 대로 멈춥니다.
+    {% else %}
+    수집이 진행 중입니다. 아래 저장 수치와 로그가 5초마다 갱신됩니다.
+    {% endif %}
+  </p>
   {% endif %}
-  <div class="job-progress" aria-hidden="true"><i style="width: {{ percent }}%"></i></div>
+  <div class="job-progress{% if active and total %} job-progress-live{% endif %}" aria-hidden="true"><i style="width: {{ percent }}%"></i></div>
   <dl class="job-meta">
     <div>
       <dt>기간</dt>
       <dd>{{ job.params.get("start_date", "—") }} ~ {{ job.params.get("end_date", "—") }}</dd>
     </div>
     <div><dt>유형</dt><dd>{{ job.params.get("report_type", "—") }}</dd></div>
-    <div><dt>저장</dt><dd>{{ saved }} / {{ total }}</dd></div>
+    <div><dt>저장</dt><dd>{{ saved }}{% if total %} / {{ total }}{% endif %}{% if active and total %} ({{ percent }}%){% endif %}</dd></div>
+    {% if job.started_at %}
+    <div><dt>시작</dt><dd>{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</dd></div>
+    {% endif %}
   </dl>
   {% if job.logs %}
   <p class="job-last-log">
     <span class="muted">최근</span>
-    <span class="job-log-level">{{ job.logs[-1].level|upper }}</span>
-    {{ job.logs[-1].message }}
+    <span class="job-log-level">{{ job.logs[0].level|upper }}</span>
+    {% if job.logs[0].created_at %}
+    <span class="muted">{{ job.logs[0].created_at.strftime("%H:%M:%S") }}</span>
+    {% endif %}
+    {{ job.logs[0].message }}
   </p>
   {% endif %}
   {% if active %}
-  <form method="post" action="/admin/jobs/{{ job.job_id }}/soft-stop">
-    <button type="submit" class="btn btn-danger">소프트 스톱</button>
-  </form>
+  <div class="job-actions">
+    <form method="post" action="/admin/jobs/{{ job.job_id }}/soft-stop">
+      <button type="submit" class="btn btn-danger"{% if job.stop_requested %} disabled{% endif %}>
+        {% if job.stop_requested %}중단 요청됨{% else %}소프트 스톱{% endif %}
+      </button>
+    </form>
+    <form method="post" action="/admin/jobs/{{ job.job_id }}/force-finish"
+          onsubmit="return confirm('지금 바로 작업을 마감할까요? 미완료분은 이어하기로 재개할 수 있습니다.');">
+      <button type="submit" class="btn">강제 종료</button>
+    </form>
+  </div>
   {% endif %}
   {% if job.error_message %}
   <p class="job-error">{{ job.error_message }}</p>

@@ -149,4 +149,5 @@ class JobStatusResponse(BaseModel):
     error_message: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    stop_requested: bool = False
     logs: list[JobLogItem] = Field(default_factory=list)

@@ -18,16 +18,20 @@
     {% endif %}
   </div>
   <nav class="report-type-toggle" aria-label="보고서 유형">
-    {% for code in report_types %}
-    <a class="report-type-chip{% if code == report_type %} is-selected{% endif %}"
-       href="/admin?report_type={{ code }}&amp;year={{ selected_year }}">{{ code }}</a>
+    {% for option in report_type_options %}
+    <a class="report-type-chip{% if option.code == report_type %} is-selected{% endif %}"
+       href="/admin?report_type={{ option.code }}&amp;year={{ selected_year }}"
+       title="{{ option.code }} · {{ option.label }}">
+      <span class="report-type-code">{{ option.code }}</span>
+      <span class="report-type-name">{{ option.label }}</span>
+    </a>
     {% endfor %}
   </nav>
 </header>
 
 <div class="ops-grid">
   <section class="ops-left" aria-label="완전성 탐색">
-    <h3>연도 요약 · {{ report_type }}</h3>
+    <h3>연도 요약 · {{ report_type }} {{ report_type_name }}</h3>
     <p class="muted">막대를 선택하면 아래 히트맵이 그 해로 바뀝니다.</p>
     <div hx-get="/admin/year-bar?report_type={{ report_type }}&amp;year={{ selected_year }}"
          hx-trigger="every 60s"
@@ -60,8 +64,9 @@
     </div>
 
     <h3>수집</h3>
-    <div hx-get="/admin/collect-form?report_type={{ report_type }}&amp;start_date={{ start_date }}&amp;end_date={{ end_date }}&amp;expand_form={{ 1 if expand_form else 0 }}"
+    <div hx-get="/admin/collect-form"
          hx-trigger="every 5s"
+         hx-include="find form"
          hx-swap="innerHTML">
       {% include "admin/partials/collect_form.html" %}
     </div>
