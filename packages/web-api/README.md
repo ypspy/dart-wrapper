@@ -49,6 +49,9 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | leaf 목차 (`primary_entries` + `all_entries`) |
 | GET | `/api/v1/viewer/{rcp_no}` | 접수번호의 모든 leaf 섹션 원문 (종합 분석용) |
 | GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 특정 leaf 섹션 원문 (단건 조회) |
+| GET | `/browse` | Public 공시 탐색 화면 (목록·필터·cursor) |
+| GET | `/browse/{rcp_no}` | 공시 상세 (왼쪽 목차 \| 오른쪽 본문 2열) |
+| GET | `/browse/{rcp_no}/sections/{entry_id}` | 섹션 본문 (HTMX partial / 직접 접근 시 전체 페이지) |
 
 목록 쿼리: `corp_code`, `corp_name`, `report_nm`, `report_type`, `start_date`, `end_date`, `limit`(1–100), `cursor`.
 총건수는 반환하지 않으며, 다음 페이지는 `next_cursor`로 이어갑니다.
@@ -57,6 +60,22 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 기본 UI는 primary를, “전체 보기”는 `all_entries`를 쓰면 됩니다. `entry_id`로 Viewer 단건 조회에 바로 이어갈 수 있습니다.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
+
+## 본문 정제 (blocks)
+
+Viewer 응답의 각 섹션은 문서 순서의 `blocks[]`를 담습니다. 블록 종류는 `heading`
+(`level` 1–3), `paragraph`, `table`(`headers`/`rows`) 세 가지입니다. 원문을 한 번만
+파싱해 `blocks`·`text`·`tables`를 함께 만들며, 하위호환 필드인 `text`에는 **표 내용을 넣지
+않습니다**(표는 `tables` 또는 `table` 블록으로만 제공). `/browse` 화면과 Viewer JSON은
+같은 정제 결과를 공유합니다.
+
+## Browse 화면
+
+`http://127.0.0.1:8000/browse` 는 인증 없는 Public 탐색 화면입니다.
+공시 목록에서 접수 단위를 고르면 상세에서 왼쪽 목차(기본 `primary`, “전체 보기” 토글)와
+오른쪽 본문이 2열로 열립니다. 섹션을 누르면 HTMX가 오른쪽 패널만 교체하고,
+원문 수집이 실패하면 페이지 오류 대신 패널 안 오류 카드(다시 시도·DART 원문 링크)를 보여줍니다.
+Admin 화면과 템플릿·CSS(`static/browse.css`)는 분리되어 있습니다.
 
 ## 불연속 수집과 완전성
 

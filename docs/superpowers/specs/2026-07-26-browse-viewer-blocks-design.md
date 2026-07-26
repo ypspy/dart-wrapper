@@ -1,7 +1,7 @@
 # Public 탐색·열람 UI와 Viewer 블록 정제 설계
 
 날짜: 2026-07-26  
-상태: 승인 대기 (브레인스토밍 반영, 사용자 스펙 리뷰)  
+상태: 승인 (구현 완료)  
 범위: `packages/web-api` — 본문 블록 파서, Viewer JSON 확장, Public Browse HTMX UI
 
 ## 1. 배경과 목표

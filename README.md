@@ -57,6 +57,8 @@ npm run example:entries
 - API 문서: http://127.0.0.1:8000/docs
 - Admin 운영 화면: http://127.0.0.1:8000/admin  
   (처음 열면 `ADMIN_TOKEN` 입력 → 수집 시작·이어하기·슬라이스 완전성 확인)
+- Public 탐색·열람 화면: http://127.0.0.1:8000/browse  
+  (공시 목록 → 목차 | 본문 2열, 인증 없음)
 
 주요 Public 경로:
 
