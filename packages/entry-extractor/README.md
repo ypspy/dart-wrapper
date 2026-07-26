@@ -66,6 +66,7 @@ const entries = await collectEntries({
   section_name: '재무상태표',
   section_original_name: '재 무 상 태 표',
   depth: 2,
+  ordinal: 0,                  // 공시 내 등장 순번 (0부터)
   is_leaf: true,
   parent_ele_id: '4',
   ele_id: '5',
@@ -78,6 +79,7 @@ const entries = await collectEntries({
 ```
 
 `entry_id`는 저장·조회·중복 제거용 키입니다. 저장 대상은 entry(메타·주소)이며, 공시 원문 본문은 이 모듈의 범위가 아닙니다.
+각 leaf에는 공시 내 등장 순번 `ordinal`(0부터)이 붙습니다. Browse/카탈로그 목차 정렬에 사용합니다.
 
 ## 단계별 API
 
