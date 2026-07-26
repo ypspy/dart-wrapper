@@ -135,6 +135,20 @@ const all = await collectEntries({ reportType: 'F001', startDate, endDate });
 
 중간 노드(`(첨부)재무제표` 등)까지 필요하면 `leafOnly: false`.
 
+## 첨부문서 leaf
+
+`includeAttachments: true`(기본)이면 `#att`/`#doc`의 첨부 `dcmNo` 중 **본문 treeData에 없는 것**만
+추가로 `main.do?rcpNo&dcmNo`를 열어 목차를 leaf까지 펼칩니다.
+
+| 경우 | 결과 |
+|------|------|
+| 첨부 목차 있음 | `source: 'attachment'` leaf (`entry_id=rcept_no_dcmNo_eleId`) |
+| 목차 없음·fetch 실패 | 문서 단위 1건 (`..._att`) |
+| 본문 트리에 이미 있는 dcmNo | 재요청·첨부 entry 없음 (body leaf만) |
+
+`buildEntries`에 `attachmentTrees`를 직접 넘기면 HTTP 없이 테스트·재가공할 수 있습니다.
+통합 경로는 `buildEntriesFromDisclosure` / `collectEntries`를 사용하세요.
+
 ## CLI 브릿지 (Python 연동)
 
 `bin/collect-entries.js`는 Python Admin 수집기가 호출하는 브릿지입니다.
@@ -154,6 +168,7 @@ echo {"report_type":"F001","start_date":"20260724","end_date":"20260724","max_to
 ## 예제 실행
 
 ```bash
+npm test                                 # 단위 테스트
 npm run example                          # 목록 + 목차 트리
 npm run example:entries                  # leaf 엔트리
 node examples/entries.js F001 20260724 20260724 2
@@ -163,8 +178,11 @@ node examples/entries.js F001 20260724 20260724 2
 
 | 함수 | 설명 |
 |------|------|
-| `collectEntries(params)` | 목록→상세→leaf 엔트리 통합 수집 (권장) |
-| `buildEntries(disclosure, detail, options)` | 파싱 결과로 엔트리 생성 |
+| `collectEntries(params)` | 목록→상세→첨부 leaf→엔트리 통합 수집 (권장) |
+| `buildEntriesFromDisclosure(disclosure, options)` | 공시 1건 상세+첨부 펼침→엔트리 |
+| `buildEntries(disclosure, detail, options)` | 파싱 결과(+`attachmentTrees`)로 엔트리 생성 |
+| `collectAttachmentTrees(documents, bodyTree, options)` | 첨부 전용 dcmNo 목차 수집 |
+| `parseAttachmentDetail(rcpNo, dcmNo, options)` | 첨부 dcmNo 상세 목차 파싱 |
 | `makeEntryId({ rcept_no, dcmNo, ele_id, source })` | 저장·중복 제거용 `entry_id` 생성 |
 | `fetchDisclosureList(params)` | 상세검색 목록 수집 |
 | `parseDetail(url, options)` | `tree` + `sections` + `documents` |
@@ -177,5 +195,6 @@ node examples/entries.js F001 20260724 20260724 2
 ## 주의
 
 - DART 서버 부하를 고려해 요청 간 기본 1초 지연 + 지수 백오프 재시도가 적용됩니다.
+- 첨부 전용 `dcmNo`마다 상세 요청이 추가되므로 공시당 소요 시간이 늘 수 있습니다.
 - HTML 구조 변경 시 셀렉터/`treeData` 파싱 정규식 조정이 필요할 수 있습니다.
 - 주말·공휴일에는 접수 건이 없어 결과가 0건입니다.
