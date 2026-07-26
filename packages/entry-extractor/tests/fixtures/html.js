@@ -31,17 +31,20 @@ function treeDataHtml({ rcpNo, dcmNo, nodes }) {
 
 function attachmentSelectHtml({ rcpNo, dcmNo, name }) {
   return [
-    '<html><body>',
-    '<select id="att">',
+    `<select id="att">`,
     `<option value="rcpNo=${rcpNo}&dcmNo=${dcmNo}">${name}</option>`,
     '</select>',
     '<select id="doc"></select>',
-    '</body></html>',
   ].join('\n');
 }
 
-function mergeHtml(...parts) {
-  return parts.join('\n');
+/** 본문 HTML(</body> 앞)에 추가 조각을 끼워 넣는다. */
+function mergeHtml(mainHtml, ...fragments) {
+  const injection = fragments.join('\n');
+  if (mainHtml.includes('</body>')) {
+    return mainHtml.replace('</body>', `${injection}\n</body>`);
+  }
+  return `<html><body>${mainHtml}\n${injection}</body></html>`;
 }
 
 const sampleDisclosure = {

@@ -15,6 +15,7 @@ const {
 } = require('./documents');
 const {
   buildEntries,
+  buildEntriesFromDisclosure,
   collectEntries,
   collectAttachmentTrees,
   pickFeatures,
@@ -38,6 +39,7 @@ module.exports = {
   viewerUrl,
   // 3단계
   buildEntries,
+  buildEntriesFromDisclosure,
   collectEntries,
   collectAttachmentTrees,
   pickFeatures,

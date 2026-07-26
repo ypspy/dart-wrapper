@@ -10,8 +10,7 @@
 const {
   collectEntries,
   fetchDisclosureListResult,
-  parseDetail,
-  buildEntries,
+  buildEntriesFromDisclosure,
 } = require('../src');
 
 function readStdin() {
@@ -60,8 +59,7 @@ async function runExtract(params) {
     throw new Error('disclosure.url은 필수입니다.');
   }
 
-  const detail = await parseDetail(disclosure.url, { disclosure });
-  const entries = buildEntries(disclosure, detail, {
+  const entries = await buildEntriesFromDisclosure(disclosure, {
     includeAttachments: params.include_attachments ?? true,
   });
 

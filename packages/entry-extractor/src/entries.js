@@ -235,12 +235,44 @@ async function collectAttachmentTrees(
 }
 
 /**
+ * 공시 1건: 상세 파싱 → 첨부 트리 수집 → leaf 엔트리.
+ * buildEntries는 HTTP를 하지 않으며, 이 함수가 오케스트레이션한다.
+ *
+ * @param {object} disclosure
+ * @param {object} [options]
+ * @param {boolean} [options.leafOnly=true]
+ * @param {boolean} [options.includeAttachments=true]
+ * @param {(url: string) => Promise<string>} [options.fetcher] 테스트용 HTML 공급
+ * @returns {Promise<object[]>}
+ */
+async function buildEntriesFromDisclosure(
+  disclosure,
+  { leafOnly = true, includeAttachments = true, fetcher = null, log = undefined } = {}
+) {
+  const detail = await parseDetail(disclosure.url, { disclosure, fetcher });
+  let attachmentTrees = {};
+  if (includeAttachments) {
+    attachmentTrees = await collectAttachmentTrees(detail.documents, detail.tree, {
+      fetcher,
+      rcpNo: disclosure.rcept_no,
+      ...(log !== undefined ? { log } : {}),
+    });
+  }
+  return buildEntries(disclosure, detail, {
+    leafOnly,
+    includeAttachments,
+    attachmentTrees,
+  });
+}
+
+/**
  * 1·2·3단계 통합: 목록 수집 → 상세 파싱 → leaf 엔트리 생성.
- * 각 공시마다 상세페이지를 1회 요청한다(요청 간 지연은 client에서 처리).
+ * 각 공시마다 상세페이지를 요청한다(첨부 전용 dcmNo는 추가 요청).
  *
  * @param {object} params fetchDisclosureList 파라미터 + 아래 옵션
  * @param {boolean} [params.leafOnly=true]
  * @param {boolean} [params.includeAttachments=true]
+ * @param {(url: string) => Promise<string>} [params.fetcher]
  * @param {(info: object) => void} [params.onEntry] 공시 단위 진행 콜백
  * @returns {Promise<object[]>} 모든 공시의 leaf 엔트리 flat 배열
  */
@@ -249,6 +281,7 @@ async function collectEntries(params = {}) {
     leafOnly = true,
     includeAttachments = true,
     onEntry = null,
+    fetcher = null,
     ...listParams
   } = params;
 
@@ -256,8 +289,11 @@ async function collectEntries(params = {}) {
   const allEntries = [];
 
   for (const disclosure of disclosures) {
-    const detail = await parseDetail(disclosure.url, { disclosure });
-    const entries = buildEntries(disclosure, detail, { leafOnly, includeAttachments });
+    const entries = await buildEntriesFromDisclosure(disclosure, {
+      leafOnly,
+      includeAttachments,
+      fetcher,
+    });
     allEntries.push(...entries);
 
     if (onEntry) {
@@ -274,6 +310,7 @@ async function collectEntries(params = {}) {
 
 module.exports = {
   buildEntries,
+  buildEntriesFromDisclosure,
   collectEntries,
   collectAttachmentTrees,
   collectBodyDcmNos,
