@@ -361,12 +361,17 @@ function dedupe(documents) {
  */
 async function parseDetail(
   disclosureUrl,
-  { disclosure = null, body = true, attachments = true } = {}
+  { disclosure = null, body = true, attachments = true, fetcher = null } = {}
 ) {
   if (!disclosureUrl) throw new Error('disclosureUrl은 필수입니다.');
 
-  const response = await safeGet(disclosureUrl);
-  const html = response.data;
+  const getHtml =
+    fetcher ||
+    (async (u) => {
+      const response = await safeGet(u);
+      return response.data;
+    });
+  const html = await getHtml(disclosureUrl);
   const $ = cheerio.load(html);
 
   const tree = extractTree(html, disclosure);
@@ -386,6 +391,27 @@ async function parseDetail(
     sections,
     documents: dedupe(documents),
   };
+}
+
+/**
+ * 첨부 dcmNo 전용 상세페이지에서 목차 트리를 파싱한다.
+ *
+ * @param {string} rcpNo
+ * @param {string} dcmNo
+ * @param {{ fetcher?: (url: string) => Promise<string> }} [options]
+ * @returns {Promise<object[]>}
+ */
+async function parseAttachmentDetail(rcpNo, dcmNo, { fetcher = null } = {}) {
+  if (!rcpNo || !dcmNo) throw new Error('rcpNo와 dcmNo는 필수입니다.');
+  const url = documentUrl(rcpNo, dcmNo);
+  const getHtml =
+    fetcher ||
+    (async (u) => {
+      const response = await safeGet(u);
+      return response.data;
+    });
+  const html = await getHtml(url);
+  return extractTree(html);
 }
 
 async function parseDocuments(disclosureUrl, options = {}) {
@@ -414,6 +440,7 @@ async function parseSections(disclosureUrl, { disclosure = null } = {}) {
 
 module.exports = {
   parseDetail,
+  parseAttachmentDetail,
   parseDocuments,
   parseTree,
   parseSections,

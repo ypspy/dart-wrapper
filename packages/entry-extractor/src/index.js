@@ -4,6 +4,7 @@ const { normalizeText, parseDisclosureRow } = require('./parse');
 const { fetchDisclosureList, fetchDisclosureListResult } = require('./list');
 const {
   parseDetail,
+  parseAttachmentDetail,
   parseDocuments,
   parseTree,
   parseSections,
@@ -15,6 +16,7 @@ const {
 const {
   buildEntries,
   collectEntries,
+  collectAttachmentTrees,
   pickFeatures,
   makeEntryId,
 } = require('./entries');
@@ -26,6 +28,7 @@ module.exports = {
   parseDisclosureRow,
   // 2단계
   parseDetail,
+  parseAttachmentDetail,
   parseDocuments,
   parseTree,
   parseSections,
@@ -36,6 +39,7 @@ module.exports = {
   // 3단계
   buildEntries,
   collectEntries,
+  collectAttachmentTrees,
   pickFeatures,
   makeEntryId,
   // 유틸

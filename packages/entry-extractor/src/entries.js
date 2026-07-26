@@ -1,6 +1,6 @@
 // 3단계: leaf 노드까지 펼쳐 공시 features와 합친 flat 엔트리 생성
 const { fetchDisclosureList } = require('./list');
-const { parseDetail } = require('./documents');
+const { parseDetail, parseAttachmentDetail } = require('./documents');
 
 // 공시 목록에서 얻는 features (엔트리에 반영할 필드)
 const DISCLOSURE_FEATURE_KEYS = [
@@ -187,6 +187,54 @@ function buildEntries(
 }
 
 /**
+ * 첨부 전용 dcmNo의 목차 트리를 수집한다.
+ * HTTP 실패는 해당 키 []로 흡수한다 (공시 전체 실패로 올리지 않음).
+ *
+ * @param {object[]} documents parseDetail.documents
+ * @param {object[]} bodyTree parseDetail.tree
+ * @param {object} [options]
+ * @param {(url: string) => Promise<string>} [options.fetcher]
+ * @param {string} [options.rcpNo] doc.rcpNo가 없을 때 사용
+ * @param {(msg: string) => void} [options.log]
+ * @returns {Promise<Record<string, object[]>>}
+ */
+async function collectAttachmentTrees(
+  documents,
+  bodyTree,
+  {
+    fetcher = null,
+    rcpNo = null,
+    log = (msg) => process.stderr.write(msg),
+  } = {}
+) {
+  const bodyDcmNos = collectBodyDcmNos(bodyTree);
+  const trees = Object.create(null);
+  const seen = new Set();
+
+  for (const doc of documents || []) {
+    if (doc.source !== 'attachment') continue;
+    const dcmNo = String(doc.dcmNo);
+    if (bodyDcmNos.has(dcmNo) || seen.has(dcmNo)) continue;
+    seen.add(dcmNo);
+
+    const docRcpNo = doc.rcpNo || rcpNo;
+    try {
+      const tree = await parseAttachmentDetail(docRcpNo, dcmNo, { fetcher });
+      trees[dcmNo] = tree || [];
+      if (!trees[dcmNo].length) {
+        log(`[첨부] dcmNo=${dcmNo} fallback (빈 목차)\n`);
+      } else {
+        log(`[첨부] dcmNo=${dcmNo} expanded\n`);
+      }
+    } catch (err) {
+      trees[dcmNo] = [];
+      log(`[첨부] dcmNo=${dcmNo} fetch_failed→fallback (${err.message})\n`);
+    }
+  }
+  return trees;
+}
+
+/**
  * 1·2·3단계 통합: 목록 수집 → 상세 파싱 → leaf 엔트리 생성.
  * 각 공시마다 상세페이지를 1회 요청한다(요청 간 지연은 client에서 처리).
  *
@@ -227,6 +275,7 @@ async function collectEntries(params = {}) {
 module.exports = {
   buildEntries,
   collectEntries,
+  collectAttachmentTrees,
   collectBodyDcmNos,
   pickFeatures,
   makeEntryId,
