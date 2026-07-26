@@ -7,7 +7,7 @@ DART 공시 소스를 **재가공해 제공**하기 위한 모노레포입니다
 ## 기본 흐름
 
 1. **수집** — Admin이 기간/유형으로 leaf entry를 카탈로그에 저장
-2. **탐색** — Public 카탈로그에서 공시 목록 → leaf 목차(`primary` / 전체) 선택
+2. **탐색** — Public 카탈로그에서 공시 목록 → leaf 목차(바로가기 + 계층 트리) 선택
 3. **열람** — Viewer가 `viewer_url`로 원문을 Lazy Retrieval·정제
 
 ## 구조
