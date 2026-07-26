@@ -33,14 +33,13 @@ class EntryRepository:
         return list(result.scalars().all())
 
     async def list_toc_by_rcept_no(self, rcept_no: str) -> list[Entry]:
-        """목차용 leaf 목록을 본문 우선·문서·섹션 순으로 반환한다."""
+        """목차용 leaf 목록을 ordinal 순으로 반환한다."""
         statement = (
             select(Entry)
             .where(Entry.rcept_no == rcept_no)
             .order_by(
-                case((Entry.source == "body", 0), else_=1),
-                Entry.dcm_no,
-                Entry.ele_id,
+                case((Entry.ordinal.is_(None), 1), else_=0),
+                Entry.ordinal,
                 Entry.entry_id,
             )
         )

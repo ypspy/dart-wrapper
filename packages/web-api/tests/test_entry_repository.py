@@ -69,7 +69,7 @@ async def test_list_by_rcept_no_and_get_by_entry_id(sessionmaker_fixture) -> Non
     assert missing is None
 
 
-async def test_list_toc_orders_body_before_attachment(sessionmaker_fixture) -> None:
+async def test_list_toc_orders_by_ordinal(sessionmaker_fixture) -> None:
     async with sessionmaker_fixture() as session:
         repository = EntryRepository(session)
         await repository.upsert_many(
@@ -82,6 +82,7 @@ async def test_list_toc_orders_body_before_attachment(sessionmaker_fixture) -> N
                     ele_id="1",
                     section_name="첨부",
                     path=["첨부"],
+                    ordinal=0,
                     viewer_url="https://example.com/att",
                 ),
                 EntryRecord(
@@ -92,6 +93,7 @@ async def test_list_toc_orders_body_before_attachment(sessionmaker_fixture) -> N
                     ele_id="2",
                     section_name="주석",
                     path=["감사보고서", "주석"],
+                    ordinal=2,
                     viewer_url="https://example.com/2",
                 ),
                 EntryRecord(
@@ -102,6 +104,7 @@ async def test_list_toc_orders_body_before_attachment(sessionmaker_fixture) -> N
                     ele_id="1",
                     section_name="재무상태표",
                     path=["감사보고서", "재무상태표"],
+                    ordinal=1,
                     viewer_url="https://example.com/1",
                 ),
             ]
@@ -111,4 +114,5 @@ async def test_list_toc_orders_body_before_attachment(sessionmaker_fixture) -> N
     async with sessionmaker_fixture() as session:
         toc = await EntryRepository(session).list_toc_by_rcept_no("20260724000650")
 
-    assert [entry.entry_id for entry in toc] == ["body_1", "body_2", "att_1"]
+    assert [entry.entry_id for entry in toc] == ["att_1", "body_1", "body_2"]
+    assert [entry.ordinal for entry in toc] == [0, 1, 2]
