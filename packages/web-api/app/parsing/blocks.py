@@ -77,7 +77,7 @@ def _walk(node: Tag, blocks: list[ContentBlock]) -> None:
         if isinstance(child, NavigableString):
             text = _norm(str(child))
             if text:
-                _append_paragraph(blocks, text)
+                blocks.append(ParagraphBlock(text=text))
             continue
         if not isinstance(child, Tag):
             continue
@@ -96,7 +96,7 @@ def _walk(node: Tag, blocks: list[ContentBlock]) -> None:
         if name == "p":
             text = _norm(child.get_text(" "))
             if text:
-                _append_paragraph(blocks, text)
+                blocks.append(ParagraphBlock(text=text))
             continue
 
         # 일반 컨테이너: 구조적 자손이 있으면 재귀, 없으면 한 문단으로 평탄화한다.
@@ -105,16 +105,7 @@ def _walk(node: Tag, blocks: list[ContentBlock]) -> None:
         else:
             text = _norm(child.get_text(" "))
             if text:
-                _append_paragraph(blocks, text)
-
-
-def _append_paragraph(blocks: list[ContentBlock], text: str) -> None:
-    """직전 블록도 문단이면 이어 붙여 잘게 쪼개지는 것을 막는다."""
-    if blocks and blocks[-1].type == "paragraph":
-        merged = f"{blocks[-1].text} {text}".strip()
-        blocks[-1] = ParagraphBlock(text=merged)
-    else:
-        blocks.append(ParagraphBlock(text=text))
+                blocks.append(ParagraphBlock(text=text))
 
 
 def _parse_table(table: Tag) -> TableBlock | None:

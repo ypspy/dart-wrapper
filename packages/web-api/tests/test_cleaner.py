@@ -39,3 +39,18 @@ def test_extract_text_removes_noise_and_blank_lines() -> None:
 
 def test_extract_text_returns_empty_string_for_blank_html() -> None:
     assert extract_text("<html><body>   </body></html>") == ""
+
+
+TABLE_HTML = """
+<html><body>
+  <p>서문</p>
+  <table><tr><th>A</th></tr><tr><td>1</td></tr></table>
+</body></html>
+"""
+
+
+def test_extract_text_excludes_table_contents() -> None:
+    text = extract_text(TABLE_HTML)
+    assert "서문" in text
+    assert "1" not in text
+    assert "A" not in text

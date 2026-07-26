@@ -17,7 +17,12 @@ SECTION = SectionContent(
     path=["감사보고서", "재무상태표"],
     document_name="감사보고서",
     section_name="재무상태표",
-    text="재무상태표\n자산총계 1,000",
+    blocks=[
+        {"type": "heading", "level": 2, "text": "재무상태표"},
+        {"type": "paragraph", "text": "자산총계는 다음과 같다."},
+        {"type": "table", "headers": ["과목", "당기"], "rows": [["자산총계", "1,000"]]},
+    ],
+    text="재무상태표\n자산총계는 다음과 같다.",
     tables=[TableData(headers=["과목", "당기"], rows=[["자산총계", "1,000"]])],
 )
 
@@ -71,7 +76,11 @@ async def test_get_section_returns_single_section(client_factory) -> None:
         response = await client.get("/api/v1/viewer/20260724000650/sections/e_1")
 
     assert response.status_code == 200
-    assert response.json()["entry_id"] == "e_1"
+    body = response.json()
+    assert body["entry_id"] == "e_1"
+    assert body["blocks"][0]["type"] == "heading"
+    assert body["blocks"][2]["type"] == "table"
+    assert "1,000" not in (body["text"] or "")
 
 
 @pytest.mark.parametrize(

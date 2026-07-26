@@ -8,10 +8,9 @@ import logging
 from app.adapters.dart_http import DartHttpClient
 from app.errors import CatalogNotFound, DartWrapperError, SourceFetchError
 from app.models.entry import Entry
-from app.parsing.cleaner import extract_text
-from app.parsing.tables import extract_tables
+from app.parsing.blocks import blocks_to_tables, blocks_to_text, extract_blocks
 from app.repositories.entry_repository import EntryRepository
-from app.schemas.viewer import DisclosureContent, DisclosureMeta, SectionContent, TableData
+from app.schemas.viewer import DisclosureContent, DisclosureMeta, SectionContent
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +106,13 @@ class ViewerService:
         html: str | None = None,
         error: str | None = None,
     ) -> SectionContent:
-        """엔트리 메타와 정제 결과를 합쳐 응답 모델을 만든다."""
-        text = extract_text(html) if html is not None else None
-        tables = [TableData(**table) for table in extract_tables(html)] if html is not None else []
+        """엔트리 메타와 정제 결과를 합쳐 응답 모델을 만든다.
+
+        블록을 한 번만 파싱해 blocks/text/tables를 함께 만든다. text에는 표 내용을 넣지 않는다.
+        """
+        blocks = extract_blocks(html) if html is not None else []
+        text = blocks_to_text(blocks) if html is not None else None
+        tables = blocks_to_tables(blocks)
         return SectionContent(
             entry_id=entry.entry_id,
             source=entry.source,
@@ -118,6 +121,7 @@ class ViewerService:
             path=list(entry.path or []),
             document_name=entry.document_name,
             section_name=entry.section_name,
+            blocks=list(blocks),
             text=text,
             tables=tables,
             error=error,
