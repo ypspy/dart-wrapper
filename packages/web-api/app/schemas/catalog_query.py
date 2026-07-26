@@ -53,6 +53,7 @@ class EntrySummary(BaseModel):
     section_name: str | None = None
     path: list[str] = Field(default_factory=list)
     depth: int | None = None
+    ordinal: int | None = None
 
     @classmethod
     def from_model(cls, row: Entry) -> EntrySummary:
@@ -66,6 +67,7 @@ class EntrySummary(BaseModel):
             section_name=row.section_name,
             path=list(row.path or []),
             depth=row.depth,
+            ordinal=row.ordinal,
         )
 
 

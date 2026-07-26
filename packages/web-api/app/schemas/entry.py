@@ -31,6 +31,7 @@ class EntryRecord(BaseModel):
     section_name: str | None = None
     section_original_name: str | None = None
     depth: int | None = None
+    ordinal: int | None = None
     is_leaf: bool = True
     parent_ele_id: str | None = None
     ele_id: str | None = None

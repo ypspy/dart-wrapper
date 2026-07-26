@@ -39,6 +39,7 @@ class Entry(Base):
     section_name: Mapped[str | None] = mapped_column(String(255))
     section_original_name: Mapped[str | None] = mapped_column(String(255))
     depth: Mapped[int | None] = mapped_column(Integer)
+    ordinal: Mapped[int | None] = mapped_column(Integer)
     is_leaf: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     parent_ele_id: Mapped[str | None] = mapped_column(String(32))
     ele_id: Mapped[str | None] = mapped_column(String(32))
