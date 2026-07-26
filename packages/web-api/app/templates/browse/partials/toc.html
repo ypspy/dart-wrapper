@@ -1,0 +1,28 @@
+<nav class="toc">
+  <h2>목차</h2>
+
+  {% macro toc_link(entry) %}
+  <li>
+    <a hx-get="/browse/{{ rcp_no }}/sections/{{ entry.entry_id }}"
+       hx-target="#section-panel"
+       hx-swap="innerHTML"
+       hx-indicator="#section-loading"
+       hx-push-url="true">
+      {{ entry.section_name or entry.document_name or entry.entry_id }}
+    </a>
+  </li>
+  {% endmacro %}
+
+  {% if toc.primary_entries %}
+  <ul class="toc-primary">
+    {% for entry in toc.primary_entries %}{{ toc_link(entry) }}{% endfor %}
+  </ul>
+  {% endif %}
+
+  <details class="toc-all" {% if show_all %}open{% endif %}>
+    <summary class="toc-toggle">전체 보기 ({{ toc.all_entries | length }})</summary>
+    <ul>
+      {% for entry in toc.all_entries %}{{ toc_link(entry) }}{% endfor %}
+    </ul>
+  </details>
+</nav>

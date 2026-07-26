@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.api.deps import get_catalog_query_service, get_settings_dep
 from app.config import Settings
-from app.errors import BadRequest
+from app.errors import BadRequest, CatalogNotFound
 from app.report_types import report_type_label, report_type_options
 from app.services.catalog_query_service import CatalogQueryService
 
@@ -77,5 +77,41 @@ async def browse_list(
             "cursor_error": cursor_error,
             "filters": filters,
             "report_type_options": report_type_options(settings.heatmap_report_type_list),
+        },
+    )
+
+
+@router.get("/{rcp_no}", response_class=HTMLResponse)
+async def browse_disclosure(
+    request: Request,
+    rcp_no: str,
+    catalog: CatalogQueryService = Depends(get_catalog_query_service),
+) -> HTMLResponse:
+    """공시 상세를 목차|본문 2열로 렌더링한다."""
+    try:
+        summary = await catalog.get_disclosure(rcp_no)
+        toc = await catalog.list_entries(rcp_no)
+    except CatalogNotFound as exc:
+        return templates.TemplateResponse(
+            request,
+            "browse/404.html",
+            {"message": str(exc)},
+            status_code=404,
+        )
+
+    # primary가 없으면 처음부터 전체 목차를 펼친다.
+    show_all = len(toc.primary_entries) == 0
+    entries = toc.all_entries if show_all else toc.primary_entries
+    first_entry_id = entries[0].entry_id if entries else None
+
+    return templates.TemplateResponse(
+        request,
+        "browse/disclosure.html",
+        {
+            "rcp_no": rcp_no,
+            "summary": summary,
+            "toc": toc,
+            "show_all": show_all,
+            "first_entry_id": first_entry_id,
         },
     )

@@ -187,3 +187,28 @@ async def test_browse_list_bad_cursor_shows_message(client_factory) -> None:
     assert response.status_code == 200
     assert "커서" in response.text
     assert "테스트회사" in response.text
+
+
+async def test_browse_disclosure_shows_primary_toc(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        response = await client.get("/browse/20260724000650")
+    assert response.status_code == 200
+    assert "browse-layout" in response.text
+    assert "재무상태표" in response.text
+    # 첫 primary 섹션을 자동 로드하도록 패널이 hx-trigger="load"를 건다.
+    assert 'hx-trigger="load"' in response.text
+    assert "/browse/20260724000650/sections/e_1" in response.text
+
+
+async def test_browse_disclosure_empty_primary_opens_all(client_factory) -> None:
+    async with client_factory(_app(catalog=EmptyPrimaryService())) as client:
+        response = await client.get("/browse/20260724000650")
+    assert response.status_code == 200
+    assert "첨부문서" in response.text
+
+
+async def test_browse_disclosure_not_found(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        response = await client.get("/browse/99999999999999")
+    assert response.status_code == 404
+    assert "없" in response.text
