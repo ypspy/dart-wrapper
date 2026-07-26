@@ -151,3 +151,39 @@ async def test_browse_css_is_served(client_factory) -> None:
         response = await client.get("/static/browse.css")
     assert response.status_code == 200
     assert "text/css" in response.headers["content-type"]
+
+
+async def test_browse_list_shows_disclosure_rows(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        response = await client.get("/browse")
+    assert "테스트회사" in response.text
+    assert "감사보고서" in response.text
+
+
+async def test_browse_list_has_next_cursor_link(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        response = await client.get("/browse")
+    assert "cursor=eyJuZXh0IjoxfQ" in response.text
+    assert "다음" in response.text
+
+
+class BadCursorCatalog(FakeCatalogQueryService):
+    def __init__(self) -> None:
+        self._raised = False
+
+    async def list_disclosures(self, **kwargs: object) -> DisclosureListResponse:
+        # 첫 호출(cursor 있음)만 실패시키고, 되돌린 첫 페이지 호출은 정상 응답한다.
+        from app.errors import BadRequest
+
+        if not self._raised and kwargs.get("cursor"):
+            self._raised = True
+            raise BadRequest("커서 값이 올바르지 않습니다.")
+        return await super().list_disclosures(**kwargs)
+
+
+async def test_browse_list_bad_cursor_shows_message(client_factory) -> None:
+    async with client_factory(_app(catalog=BadCursorCatalog())) as client:
+        response = await client.get("/browse", params={"cursor": "!!!"})
+    assert response.status_code == 200
+    assert "커서" in response.text
+    assert "테스트회사" in response.text
