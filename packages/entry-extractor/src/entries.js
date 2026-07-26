@@ -75,6 +75,7 @@ function buildEntries(
   }
 
   const entries = [];
+  let ordinal = 0;
 
   function walk(node, path) {
     const currentPath = [...path, node.name];
@@ -98,6 +99,7 @@ function buildEntries(
         dtd: node.dtd,
         path: currentPath,
         viewer_url: node.url,
+        ordinal: ordinal++,
       };
       entry.entry_id = makeEntryId(entry);
       entries.push(entry);
@@ -145,6 +147,7 @@ function buildEntries(
               dtd: node.dtd,
               path: currentPath,
               viewer_url: node.url,
+              ordinal: ordinal++,
             };
             entry.entry_id = makeEntryId(entry);
             entries.push(entry);
@@ -177,6 +180,7 @@ function buildEntries(
         dtd: null,
         path: [doc.name],
         viewer_url: doc.url,
+        ordinal: ordinal++,
       };
       entry.entry_id = makeEntryId(entry);
       entries.push(entry);
