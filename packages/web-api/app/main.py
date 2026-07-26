@@ -4,15 +4,20 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.adapters.node_entry_collector import NodeEntryCollector
 from app.api.admin import catalog
 from app.api.admin import ui as admin_ui
+from app.api.browse import ui as browse_ui
 from app.api.v1 import catalog as catalog_query
 from app.api.v1 import viewer
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 from app.config import get_settings
 from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
 from app.errors import register_exception_handlers
@@ -66,8 +71,11 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(catalog.router)
     app.include_router(admin_ui.router)
+    app.include_router(browse_ui.router)
     app.include_router(catalog_query.router)
     app.include_router(viewer.router)
+
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/health", tags=["시스템"])
     async def health() -> dict[str, str]:

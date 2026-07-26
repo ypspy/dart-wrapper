@@ -1,0 +1,64 @@
+{% extends "browse/base.html" %}
+{% block title %}공시 목록 · DART 공시 탐색{% endblock %}
+{% block content %}
+<section class="browse-list">
+  <h1 class="browse-title">공시 탐색</h1>
+
+  <form class="filter-form" method="get" action="/browse">
+    <input type="text" name="corp_name" value="{{ filters.corp_name }}" placeholder="회사명">
+    <input type="text" name="report_nm" value="{{ filters.report_nm }}" placeholder="보고서명">
+    <select name="report_type">
+      <option value="">전체 유형</option>
+      {% for opt in report_type_options %}
+      <option value="{{ opt.code }}" {% if filters.report_type == opt.code %}selected{% endif %}>
+        {{ opt.code }} {{ opt.label }}
+      </option>
+      {% endfor %}
+    </select>
+    <input type="text" name="start_date" value="{{ filters.start_date }}" placeholder="시작 YYYYMMDD">
+    <input type="text" name="end_date" value="{{ filters.end_date }}" placeholder="종료 YYYYMMDD">
+    <button type="submit">검색</button>
+  </form>
+
+  {% if cursor_error %}
+  <p class="notice">{{ cursor_error }} 첫 페이지를 보여드립니다.</p>
+  {% endif %}
+
+  <table class="disclosure-table">
+    <thead>
+      <tr>
+        <th>접수일</th>
+        <th>회사명</th>
+        <th>보고서명</th>
+        <th>유형</th>
+        <th>목차 수</th>
+        <th>원문</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.rcept_dt }}</td>
+        <td><a href="/browse/{{ item.rcp_no }}">{{ item.corp_name }}</a></td>
+        <td><a href="/browse/{{ item.rcp_no }}">{{ item.report_nm }}</a></td>
+        <td>{{ item.report_type }} {{ report_type_label(item.report_type) if item.report_type else "" }}</td>
+        <td>{{ item.entry_count }}</td>
+        <td>
+          {% if item.disclosure_url %}
+          <a href="{{ item.disclosure_url }}" target="_blank" rel="noopener">DART</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="empty">조건에 맞는 공시가 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if next_cursor %}
+  <div class="pager">
+    <a class="next" href="/browse?corp_code={{ filters.corp_code }}&corp_name={{ filters.corp_name }}&report_nm={{ filters.report_nm }}&report_type={{ filters.report_type }}&start_date={{ filters.start_date }}&end_date={{ filters.end_date }}&limit={{ filters.limit }}&cursor={{ next_cursor }}">다음 →</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
