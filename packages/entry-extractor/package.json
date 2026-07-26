@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "example": "node examples/run.js",
-    "example:entries": "node examples/entries.js"
+    "example:entries": "node examples/entries.js",
+    "test": "node --test tests/test_*.js"
   },
   "keywords": [
     "dart",
