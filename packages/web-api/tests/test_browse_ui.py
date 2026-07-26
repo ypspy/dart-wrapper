@@ -195,6 +195,11 @@ async def test_browse_disclosure_shows_primary_toc(client_factory) -> None:
     assert response.status_code == 200
     assert "browse-layout" in response.text
     assert "재무상태표" in response.text
+    assert "바로가기" in response.text
+    assert "toc-tree" in response.text
+    assert "toc-header" in response.text
+    assert "감사보고서" in response.text
+    assert "전체 보기" not in response.text
     # 첫 primary 섹션을 자동 로드하도록 패널이 hx-trigger="load"를 건다.
     assert 'hx-trigger="load"' in response.text
     assert "/browse/20260724000650/sections/e_1" in response.text
@@ -205,6 +210,18 @@ async def test_browse_disclosure_empty_primary_opens_all(client_factory) -> None
         response = await client.get("/browse/20260724000650")
     assert response.status_code == 200
     assert "첨부문서" in response.text
+    assert "바로가기" not in response.text
+    assert "toc-tree" in response.text
+    assert "전체 보기" not in response.text
+
+
+async def test_browse_disclosure_shows_shortcut_and_tree(client_factory) -> None:
+    async with client_factory(_app()) as client:
+        response = await client.get("/browse/20260724000650")
+    assert response.status_code == 200
+    assert "바로가기" in response.text
+    assert "toc-tree" in response.text
+    assert "전체 보기" not in response.text
 
 
 async def test_browse_disclosure_not_found(client_factory) -> None:

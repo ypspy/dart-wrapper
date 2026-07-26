@@ -23,6 +23,7 @@ from app.errors import BadRequest, CatalogNotFound, ParseError, SourceFetchError
 from app.report_types import report_type_label, report_type_options
 from app.repositories.entry_repository import EntryRepository
 from app.services.catalog_query_service import CatalogQueryService
+from app.services.toc_items import build_toc_items
 from app.services.viewer_service import ViewerService
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -111,10 +112,12 @@ async def browse_disclosure(
             status_code=404,
         )
 
-    # primary가 없으면 처음부터 전체 목차를 펼친다.
-    show_all = len(toc.primary_entries) == 0
-    entries = toc.all_entries if show_all else toc.primary_entries
-    first_entry_id = entries[0].entry_id if entries else None
+    # primary가 있으면 바로가기 첫 항목을, 없으면 전체 목차 첫 leaf를 자동 로드한다.
+    toc_items = build_toc_items(toc.all_entries)
+    if toc.primary_entries:
+        first_entry_id = toc.primary_entries[0].entry_id
+    else:
+        first_entry_id = toc.all_entries[0].entry_id if toc.all_entries else None
 
     return templates.TemplateResponse(
         request,
@@ -123,7 +126,7 @@ async def browse_disclosure(
             "rcp_no": rcp_no,
             "summary": summary,
             "toc": toc,
-            "show_all": show_all,
+            "toc_items": toc_items,
             "first_entry_id": first_entry_id,
         },
     )

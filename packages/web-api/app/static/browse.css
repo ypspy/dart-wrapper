@@ -123,7 +123,22 @@ body {
   font-size: 0.88rem;
 }
 .toc a:hover { background: var(--surface-soft); }
-.toc .toc-toggle { font-size: 0.82rem; color: var(--text-muted); }
+.toc-shortcut h3,
+.toc-tree .toc-header {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin: 10px 0 4px;
+}
+.toc-tree { list-style: none; margin: 0; padding: 0; }
+.toc-tree .toc-header,
+.toc-tree .toc-link {
+  padding-left: calc(var(--toc-indent, 0) * 12px);
+}
+.toc-tree .toc-header {
+  pointer-events: none;
+  margin: 6px 0 2px;
+}
 
 .section-panel {
   border: 1px solid var(--border);

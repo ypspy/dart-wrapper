@@ -2,27 +2,37 @@
   <h2>목차</h2>
 
   {% macro toc_link(entry) %}
-  <li>
-    <a hx-get="/browse/{{ rcp_no }}/sections/{{ entry.entry_id }}"
-       hx-target="#section-panel"
-       hx-swap="innerHTML"
-       hx-indicator="#section-loading"
-       hx-push-url="true">
-      {{ entry.section_name or entry.document_name or entry.entry_id }}
-    </a>
-  </li>
+  <a hx-get="/browse/{{ rcp_no }}/sections/{{ entry.entry_id }}"
+     hx-target="#section-panel"
+     hx-swap="innerHTML"
+     hx-indicator="#section-loading"
+     hx-push-url="true">
+    {{ entry.section_name or entry.document_name or entry.entry_id }}
+  </a>
   {% endmacro %}
 
   {% if toc.primary_entries %}
-  <ul class="toc-primary">
-    {% for entry in toc.primary_entries %}{{ toc_link(entry) }}{% endfor %}
-  </ul>
+  <section class="toc-shortcut">
+    <h3>바로가기</h3>
+    <ul>
+      {% for entry in toc.primary_entries %}
+      <li>{{ toc_link(entry) }}</li>
+      {% endfor %}
+    </ul>
+  </section>
   {% endif %}
 
-  <details class="toc-all" {% if show_all %}open{% endif %}>
-    <summary class="toc-toggle">전체 보기 ({{ toc.all_entries | length }})</summary>
-    <ul>
-      {% for entry in toc.all_entries %}{{ toc_link(entry) }}{% endfor %}
-    </ul>
-  </details>
+  {% if toc_items %}
+  <ul class="toc-tree">
+    {% for item in toc_items %}
+      {% if item.kind == "header" %}
+      <li class="toc-header" style="--toc-indent: {{ item.indent }}">{{ item.label }}</li>
+      {% else %}
+      <li class="toc-link" style="--toc-indent: {{ item.indent }}">{{ toc_link(item.entry) }}</li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+  {% elif not toc.primary_entries %}
+  <p>표시할 목차가 없습니다.</p>
+  {% endif %}
 </nav>
