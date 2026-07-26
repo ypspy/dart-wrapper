@@ -34,6 +34,19 @@ function makeEntryId({ rcept_no, dcmNo, ele_id, source }) {
   return [rcept_no || '', dcmNo || '', elePart].join('_');
 }
 
+/** 본문 목차 트리에 등장하는 dcmNo 집합 */
+function collectBodyDcmNos(tree) {
+  const set = new Set();
+  function walk(nodes) {
+    for (const node of nodes || []) {
+      if (node.dcmNo) set.add(String(node.dcmNo));
+      walk(node.children);
+    }
+  }
+  walk(tree);
+  return set;
+}
+
 /**
  * parseDetail 결과(tree/documents)와 공시 features를 합쳐
  * leaf 단위 flat 엔트리 배열을 만든다.
@@ -43,9 +56,14 @@ function makeEntryId({ rcept_no, dcmNo, ele_id, source }) {
  * @param {object} [options]
  * @param {boolean} [options.leafOnly=true] leaf(자식 없는 노드)만 엔트리로
  * @param {boolean} [options.includeAttachments=true] 첨부문서도 엔트리에 포함
+ * @param {Record<string, object[]>} [options.attachmentTrees] 첨부 dcmNo → 목차 트리 (HTTP 없음)
  * @returns {object[]} 엔트리 배열
  */
-function buildEntries(disclosure, detail, { leafOnly = true, includeAttachments = true } = {}) {
+function buildEntries(
+  disclosure,
+  detail,
+  { leafOnly = true, includeAttachments = true, attachmentTrees = {} } = {}
+) {
   const { tree = [], documents = [] } = detail || {};
   const features = pickFeatures(disclosure);
   const disclosureUrl = disclosure?.url || null;
@@ -95,8 +113,53 @@ function buildEntries(disclosure, detail, { leafOnly = true, includeAttachments 
   }
 
   if (includeAttachments) {
+    const bodyDcmNos = collectBodyDcmNos(tree);
+
     for (const doc of documents) {
       if (doc.source !== 'attachment') continue;
+      const dcmNo = String(doc.dcmNo);
+      if (bodyDcmNos.has(dcmNo)) continue;
+
+      const attTree = attachmentTrees[dcmNo];
+      const hasLeaves = Array.isArray(attTree) && attTree.length > 0;
+
+      if (hasLeaves) {
+        function walkAtt(node, path) {
+          const currentPath = [...path, node.name];
+          const isLeaf = !node.children || node.children.length === 0;
+          if (isLeaf || !leafOnly) {
+            const entry = {
+              ...features,
+              disclosure_url: disclosureUrl,
+              source: 'attachment',
+              dcmNo: node.dcmNo,
+              document_name: doc.name,
+              section_name: node.name,
+              section_original_name: node.originalName,
+              depth: node.depth,
+              is_leaf: isLeaf,
+              parent_ele_id: node.parentEleId,
+              ele_id: node.eleId,
+              offset: node.offset,
+              length: node.length,
+              dtd: node.dtd,
+              path: currentPath,
+              viewer_url: node.url,
+            };
+            entry.entry_id = makeEntryId(entry);
+            entries.push(entry);
+          }
+          for (const child of node.children || []) {
+            walkAtt(child, currentPath);
+          }
+        }
+        for (const root of attTree) {
+          walkAtt(root, []);
+        }
+        continue;
+      }
+
+      // 트리 없음·빈 배열·미제공 → 문서 단위 fallback
       const entry = {
         ...features,
         disclosure_url: disclosureUrl,
@@ -164,6 +227,7 @@ async function collectEntries(params = {}) {
 module.exports = {
   buildEntries,
   collectEntries,
+  collectBodyDcmNos,
   pickFeatures,
   makeEntryId,
   DISCLOSURE_FEATURE_KEYS,
