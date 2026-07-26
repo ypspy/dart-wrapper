@@ -12,6 +12,7 @@ class TocEntryLike(Protocol):
     section_name: str | None
     document_name: str | None
     depth: int | None
+    source: str
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,20 @@ class TocItem:
     label: str
     indent: int
     entry: TocEntryLike | None = None
+
+
+@dataclass(frozen=True)
+class TocRow:
+    item: TocItem
+    open_levels: int
+    close_levels: int
+
+
+@dataclass(frozen=True)
+class TocSection:
+    title: str
+    rows: list[TocRow]
+    trailing_close: int
 
 
 def _ancestors(path: list[str]) -> list[str]:
@@ -72,3 +87,40 @@ def build_toc_items(entries: Sequence[TocEntryLike]) -> list[TocItem]:
         prev_ancestors = ancestors
 
     return items
+
+
+def to_nested_rows(items: Sequence[TocItem]) -> tuple[list[TocRow], int]:
+    """indent 변화로 중첩 <ul> 개폐 수를 계산한다.
+
+    close_levels / open_levels는 해당 행을 출력하기 **전에** 적용한다.
+    trailing_close는 마지막에 열린 깊이를 모두 닫는 개수다.
+    """
+    rows: list[TocRow] = []
+    prev_indent = 0
+    for item in items:
+        indent = item.indent
+        close_levels = max(0, prev_indent - indent)
+        open_levels = max(0, indent - prev_indent)
+        rows.append(
+            TocRow(item=item, open_levels=open_levels, close_levels=close_levels)
+        )
+        prev_indent = indent
+    return rows, prev_indent
+
+
+def build_toc_sections(entries: Sequence[TocEntryLike]) -> list[TocSection]:
+    """source별로 본문/첨부 목차 구역을 만든다."""
+    groups: list[tuple[str, list[TocEntryLike]]] = [
+        ("본문", [e for e in entries if getattr(e, "source", None) == "body"]),
+        (
+            "첨부",
+            [e for e in entries if getattr(e, "source", None) == "attachment"],
+        ),
+    ]
+    sections: list[TocSection] = []
+    for title, group in groups:
+        if not group:
+            continue
+        rows, trailing = to_nested_rows(build_toc_items(group))
+        sections.append(TocSection(title=title, rows=rows, trailing_close=trailing))
+    return sections
