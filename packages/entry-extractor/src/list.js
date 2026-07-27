@@ -6,6 +6,9 @@ const { parseDisclosureRow } = require('./parse');
 /**
  * DART 상세검색(dsab007/detailSearch.ax)을 페이지네이션하며 공시 목록을 수집한다.
  *
+ * 기본은 최종보고서 체크 해제와 동일(finalReport 미전송)이라 이력 접수가 포함된다.
+ * 최종만 보려면 finalReport: 'recent'를 넘긴다.
+ *
  * @param {object} params
  * @param {string} params.reportType 공시 유형(publicType). 예: 'A001', 'F001'
  * @param {string} params.startDate 시작일 YYYYMMDD
@@ -14,6 +17,8 @@ const { parseDisclosureRow } = require('./parse');
  * @param {number} [params.maxTotal=null] 전체 최대 수집 건수(옵션)
  * @param {string|number} [params.year=null] 사업연도 태깅용(옵션)
  * @param {(info: object) => void} [params.onProgress] 진행 콜백(옵션)
+ * @param {'recent'|null} [params.finalReport=null] 'recent'면 최종보고서만
+ * @param {(url: string) => Promise<string>} [params.fetcher] 테스트용 HTML 공급
  * @returns {Promise<{listedCount: number, disclosures: object[], error: Error|null}>}
  *   원천이 알려준 총건수와 공시 메타데이터 배열(각 항목에 main.do url 포함).
  *   수집 도중 요청이 실패하면 error에 마지막 오류가 담긴다.
@@ -26,6 +31,8 @@ async function fetchDisclosureListResult({
   maxTotal = null,
   year = null,
   onProgress = null,
+  finalReport = null,
+  fetcher = null,
 } = {}) {
   if (!reportType) throw new Error('reportType은 필수입니다.');
   if (!startDate || !endDate) throw new Error('startDate/endDate는 필수입니다 (YYYYMMDD).');
@@ -44,21 +51,26 @@ async function fetchDisclosureListResult({
       maxLinks: '10',
       startDate,
       endDate,
-      finalReport: 'recent',
       publicType: reportType,
     });
+    if (finalReport === 'recent') params.set('finalReport', 'recent');
     const url = `${BASE_URL}/dsab007/detailSearch.ax?${params.toString()}`;
 
-    let response;
+    let html;
     try {
-      response = await safeGet(url);
+      if (fetcher) {
+        html = await fetcher(url);
+      } else {
+        const response = await safeGet(url);
+        html = response.data;
+      }
     } catch (err) {
       if (onProgress) onProgress({ type: 'error', reportType, currentPage, message: err.message });
       lastError = err;
       break;
     }
 
-    const $ = cheerio.load(response.data);
+    const $ = cheerio.load(html);
 
     if (currentPage === 1) {
       // 페이지 정보는 '[1/3] [총 42건]' 형태로 div.pageInfo에 들어있다.

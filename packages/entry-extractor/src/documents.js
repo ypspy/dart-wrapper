@@ -382,6 +382,54 @@ function dedupe(documents) {
   return unique;
 }
 
+/** YYYY.MM.DD → 비교용 숫자(없으면 -1) */
+function reportDateRank(reportDate) {
+  const m = String(reportDate || '').match(/(\d{4})\.(\d{2})\.(\d{2})/);
+  if (!m) return -1;
+  return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+}
+
+/**
+ * 첨부/관련 문서 중 동일 name은 최종본 1건만 남긴다.
+ * 우선순위: reportDate 최신 → correctionType 있음 → 기존 순서(안정).
+ *
+ * @param {object[]} documents
+ * @returns {object[]}
+ */
+function selectFinalAttachments(documents) {
+  const body = [];
+  const byName = new Map();
+  for (const doc of documents || []) {
+    if (doc.source !== 'attachment') {
+      body.push(doc);
+      continue;
+    }
+    const key = doc.name || '';
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(doc);
+  }
+  const attachments = [];
+  for (const group of byName.values()) {
+    let best = group[0];
+    for (let i = 1; i < group.length; i++) {
+      const cand = group[i];
+      const br = reportDateRank(best.reportDate);
+      const cr = reportDateRank(cand.reportDate);
+      if (cr > br) {
+        best = cand;
+        continue;
+      }
+      if (cr === br) {
+        const bHas = !!best.correctionType;
+        const cHas = !!cand.correctionType;
+        if (cHas && !bHas) best = cand;
+      }
+    }
+    attachments.push(best);
+  }
+  return [...body, ...attachments];
+}
+
 /**
  * 상세페이지를 한 번만 요청해 목차 트리 + flat 섹션 + 문서 목록을 반환한다.
  *
@@ -417,7 +465,7 @@ async function parseDetail(
   return {
     tree,
     sections,
-    documents: dedupe(documents),
+    documents: dedupe(selectFinalAttachments(documents)),
   };
 }
 
@@ -480,5 +528,6 @@ module.exports = {
   isCorrectionNotice,
   isRepresentativeConfirm,
   resolveBodyName,
+  selectFinalAttachments,
   viewerUrl,
 };

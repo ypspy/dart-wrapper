@@ -99,6 +99,13 @@ const disclosures = await fetchDisclosureList({
 });
 ```
 
+**최종보고서 체크:** 기본은 체크 해제와 동일(`finalReport` 미전송)이라
+최종·정정 전 접수가 모두 목록에 포함됩니다. 최종만 보려면
+`finalReport: 'recent'`를 넘기세요.
+
+**첨부 최종본:** `#att`/`#doc`에서 같은 문서명은 `reportDate`가 가장 늦은
+1건만 펼칩니다(동일 날짜면 `[정정]`/`[기재정정]` 우선).
+
 ### 2단계 — 목차 트리 + 문서 URL 파싱
 
 ```js
