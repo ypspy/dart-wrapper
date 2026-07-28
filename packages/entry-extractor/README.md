@@ -2,7 +2,7 @@
 
 `dart-wrapper` 모노레포의 **대상 문서 단위(entry) 추출** 패키지 (`@dart-wrapper/entry-extractor`)입니다.
 
-공시 문서 컨테이너(접수 단위)를 찾아, 그 안의 구성 문서·섹션을 leaf까지 펼친 뒤, 목록에서 얻은 features와 합쳐 **flat entry**로 만듭니다.
+공시 문서 컨테이너(접수 단위)를 찾아, 구성 문서·섹션을 TOC 노드까지 펼친 뒤, 목록 features와 합쳐 **flat entry**로 만듭니다.
 
 > OpenDART OpenAPI가 아니라, 상세검색/상세페이지 HTML을 스크래핑하는 방식입니다.
 
@@ -24,7 +24,7 @@ const { collectEntries } = require('@dart-wrapper/entry-extractor');
 
 ## 빠른 시작 (권장)
 
-최종 산출물은 **leaf 엔트리**입니다. 목록 features + 문서/섹션 정보가 한 객체로 합쳐집니다.
+최종 산출물은 **flat entry**입니다(기본: TOC 중간 노드 + leaf). 목록 features와 문서/섹션 정보가 한 객체로 합쳐집니다.
 
 ```js
 const { collectEntries } = require('./src');
@@ -41,7 +41,13 @@ const entries = await collectEntries({
 // entries[0].viewer_url → 실제 내용 접근 URL
 ```
 
-기본값: `leafOnly: false`, `includeAttachments: true`
+기본값:
+
+| 옵션 | 기본 | 의미 |
+|------|------|------|
+| `leafOnly` | `false` | 중간 TOC 노드(`is_leaf: false`)도 저장 |
+| `includeAttachments` | `true` | `#att`/`#doc` 첨부 펼침 |
+| `finalReport` | (미전송) | 목록에 최종·정정 전 접수 모두 포함. 최종만이면 `'recent'` |
 
 ## 엔트리 스키마
 
@@ -55,7 +61,7 @@ const entries = await collectEntries({
   report_nm: '감사보고서',
   year_end: '(2025.12)',
   corp_code: '00224628',
-  corp_name: '제이에스어소시에이츠',
+  corp_name: '제이에스어소시에이츠', // 기업개황 링크 텍스트만 (IR 배지 제외)
   submitter: '한울회계법인',
   rcept_dt: '2026.07.24',
   // —— 문서/섹션 ——
@@ -79,8 +85,7 @@ const entries = await collectEntries({
 ```
 
 `entry_id`는 저장·조회·중복 제거용 키입니다. 저장 대상은 entry(메타·주소)이며, 공시 원문 본문은 이 모듈의 범위가 아닙니다.
-각 노드에는 공시 내 등장 순번 `ordinal`(0부터)이 붙습니다. Browse/카탈로그 목차 정렬에 사용합니다.
-기본 수집은 중간 TOC 노드(`is_leaf: false`)도 포함합니다. leaf만 원하면 `leafOnly: true`를 넘기세요.
+`ordinal`은 공시 내 등장 순(0부터)이며 Catalog 정렬에 씁니다.
 
 ## 단계별 API
 
@@ -96,15 +101,16 @@ const disclosures = await fetchDisclosureList({
   year: 2024,
   maxTotal: 100,
   onProgress: (info) => console.log(info),
+  // finalReport: 'recent',  // 최종보고서만 (기본은 이력 포함)
 });
 ```
 
-**최종보고서 체크:** 기본은 체크 해제와 동일(`finalReport` 미전송)이라
-최종·정정 전 접수가 모두 목록에 포함됩니다. 최종만 보려면
-`finalReport: 'recent'`를 넘기세요.
-
-**첨부 최종본:** `#att`/`#doc`에서 같은 문서명은 `reportDate`가 가장 늦은
-1건만 펼칩니다(동일 날짜면 `[정정]`/`[기재정정]` 우선).
+**최종보고서 체크:** 기본은 DART UI 체크 해제와 동일합니다(`finalReport` 쿼리 미전송).
+최종·수정/정정 전 접수가 **각각** 목록에 나와 Catalog에서 이력을 볼 수 있습니다.
+(DART에서 체크하면 최종만, 해제하면 최종+정정 전이 같이 보입니다. 최종 상세 `#att`/`#doc`에도
+타 접수 첨부 링크가 실려 있지만, 아래 **첨부 접수 스코프**로 현재 `rcept_no`와 다른 option은
+펼치지 않습니다. 그 첨부는 **해당 접수가 목록에 있을 때** 그 건을 열어 입수합니다.)
+최종 접수만 목록에 두려면 `finalReport: 'recent'`를 넘기세요.
 
 ### 2단계 — 목차 트리 + 문서 URL 파싱
 
@@ -120,34 +126,42 @@ DART HTML의 `node1['children'].push(node2)` 관계를 그대로 반영합니다
 
 **이름 보정**
 - `감 사 보 고 서` → `감사보고서` (글자 사이 공백 정규화)
-- 본문 문서명: 목차에 정정신고만 있으면 목록의 `report_nm`으로 교체
 - 목차의 `정정신고(보고)` 노드는 구조 보존을 위해 유지
+
+**본문 `document_name` 우선순위**
+1. TOC에 목록 `report_nm`과 일치하는 노드
+2. 없으면 `report_nm` 자체 (예: 사업보고서)
+3. `report_nm`이 없을 때만 정정신고·대표이사확인을 건너뛴 첫 노드
 
 | source | 설명 | 출처 |
 |--------|------|------|
-| `body` | 공시 본문 | `treeData` 목차. `document_name`은 TOC의 `report_nm` 일치 노드 → 없으면 `report_nm` → (정정신고·대표이사확인 제외) 첫 노드 |
-| `attachment` | 첨부/관련 문서 | `#att` / `#doc` 옵션명 |
+| `body` | 공시 본문 | `treeData` 목차 + 위 `document_name` 규칙 |
+| `attachment` | 첨부/관련 문서 | `#att` / `#doc` 옵션명 (아래 접수 스코프 필터 적용) |
+
+**첨부 접수 스코프:** `#att`/`#doc`에서 option의 `rcpNo`가 현재 공시
+`rcept_no`와 **같은 것만** 남깁니다. 같은 날이라도 다른 접수(첨부정정·최초 등)의
+option은 제외되며, 그 내용은 목록의 해당 접수 행을 펼칠 때 입수합니다.
+본문(`treeData`)에는 이 필터를 적용하지 않습니다.
 
 ### 3단계 — flat 엔트리 생성
 
 ```js
 const { buildEntries, collectEntries } = require('./src');
 
-// 이미 파싱한 결과로
 const entries = buildEntries(disclosure, detail, {
   leafOnly: false,          // 중간 노드 포함 (기본)
   includeAttachments: true, // 첨부 포함 (기본)
 });
 
-// 또는 1·2·3단계 통합
 const all = await collectEntries({ reportType: 'F001', startDate, endDate });
 ```
 
-기본은 중간 노드(`(첨부)재무제표` 등, `is_leaf: false`)까지 저장합니다. leaf만 원하면 `leafOnly: true`.
+기본은 중간 노드(`(첨부)재무제표` 등, `is_leaf: false`)까지 저장합니다.
+leaf만 원하면 `leafOnly: true`.
 
-## 첨부문서 leaf
+## 첨부문서 펼침
 
-`includeAttachments: true`(기본)이면 `#att`/`#doc`의 첨부 `dcmNo` 중 **본문 treeData에 없는 것**만
+`includeAttachments: true`(기본)이면, 접수 스코프 필터 후의 첨부 `dcmNo` 중 **본문 treeData에 없는 것**만
 추가로 `main.do?rcpNo&dcmNo`를 열어 목차를 펼칩니다(기본은 중간 노드 포함).
 
 | 경우 | 결과 |
@@ -155,6 +169,7 @@ const all = await collectEntries({ reportType: 'F001', startDate, endDate });
 | 첨부 목차 있음 | `source: 'attachment'` entry (`entry_id=rcept_no_dcmNo_eleId`) |
 | 목차 없음·fetch 실패 | 문서 단위 1건 (`..._att`) |
 | 본문 트리에 이미 있는 dcmNo | 재요청·첨부 entry 없음 (body entry만) |
+| 타 접수·이후 정정 option | `selectReceptionAttachments`에서 제외 |
 
 `buildEntries`에 `attachmentTrees`를 직접 넘기면 HTTP 없이 테스트·재가공할 수 있습니다.
 통합 경로는 `buildEntriesFromDisclosure` / `collectEntries`를 사용하세요.
@@ -175,12 +190,14 @@ echo {"report_type":"F001","start_date":"20260724","end_date":"20260724","max_to
 | `max_total` | 최대 수집 건수 (옵션) |
 | `include_attachments` | 첨부 포함 여부 (기본 true) |
 
+목록의 `finalReport`·`leafOnly`는 CLI에 아직 노출하지 않으며, extractor 기본값(이력 포함·중간 노드 포함)을 따릅니다.
+
 ## 예제 실행
 
 ```bash
 npm test                                 # 단위 테스트
 npm run example                          # 목록 + 목차 트리
-npm run example:entries                  # leaf 엔트리
+npm run example:entries                  # flat 엔트리
 node examples/entries.js F001 20260724 20260724 2
 ```
 
@@ -188,23 +205,27 @@ node examples/entries.js F001 20260724 20260724 2
 
 | 함수 | 설명 |
 |------|------|
-| `collectEntries(params)` | 목록→상세→첨부 leaf→엔트리 통합 수집 (권장) |
+| `collectEntries(params)` | 목록→상세→첨부 펼침→엔트리 통합 수집 (권장) |
 | `buildEntriesFromDisclosure(disclosure, options)` | 공시 1건 상세+첨부 펼침→엔트리 |
 | `buildEntries(disclosure, detail, options)` | 파싱 결과(+`attachmentTrees`)로 엔트리 생성 |
 | `collectAttachmentTrees(documents, bodyTree, options)` | 첨부 전용 dcmNo 목차 수집 |
 | `parseAttachmentDetail(rcpNo, dcmNo, options)` | 첨부 dcmNo 상세 목차 파싱 |
+| `selectReceptionAttachments(documents, rceptNo)` | 현재 접수 rcpNo 첨부만 유지 |
 | `makeEntryId({ rcept_no, dcmNo, ele_id, source })` | 저장·중복 제거용 `entry_id` 생성 |
-| `fetchDisclosureList(params)` | 상세검색 목록 수집 |
-| `parseDetail(url, options)` | `tree` + `sections` + `documents` |
+| `fetchDisclosureList(params)` / `fetchDisclosureListResult(params)` | 상세검색 목록 (기본 이력 포함) |
+| `parseDetail(url, options)` | `tree` + `sections` + `documents` (첨부 접수 스코프 필터 포함) |
 | `parseTree(url, options)` | 목차 트리만 |
 | `parseSections(url, options)` | flat 섹션 (`parentEleId` 포함) |
 | `parseDocuments(url, options)` | dcmNo 단위 문서 |
 | `flattenTree(tree)` | 트리 → flat 배열 |
+| `resolveBodyName(sections, disclosure)` | 본문 `document_name` 선정 |
 | `correctName(name, disclosure)` | 제목 정규화·보정 |
 
 ## 주의
 
 - DART 서버 부하를 고려해 요청 간 기본 1초 지연 + 지수 백오프 재시도가 적용됩니다.
 - 첨부 전용 `dcmNo`마다 상세 요청이 추가되므로 공시당 소요 시간이 늘 수 있습니다.
+- 이력 모드에서는 정정 전·후 접수가 각각 목록·entry로 쌓입니다. 타 접수 첨부 option은 접수 스코프로 제외됩니다.
+- 일부 감사보고서 TOC는 `(첨부)재무제표` 아래 leaf가 `주석`뿐인 경우가 있습니다. 제표 본표는 부모 노드(`is_leaf: false`) viewer 구간에 있을 수 있습니다.
 - HTML 구조 변경 시 셀렉터/`treeData` 파싱 정규식 조정이 필요할 수 있습니다.
 - 주말·공휴일에는 접수 건이 없어 결과가 0건입니다.

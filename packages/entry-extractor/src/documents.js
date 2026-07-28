@@ -382,52 +382,39 @@ function dedupe(documents) {
   return unique;
 }
 
-/** YYYY.MM.DD → 비교용 숫자(없으면 -1) */
-function reportDateRank(reportDate) {
-  const m = String(reportDate || '').match(/(\d{4})\.(\d{2})\.(\d{2})/);
-  if (!m) return -1;
-  return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+/**
+ * 상세 URL·disclosure에서 현재 접수번호(rcpNo)를 구한다.
+ * disclosure.rcept_no 우선, 없으면 URL의 rcpNo.
+ * @param {object|null} disclosure
+ * @param {string} disclosureUrl
+ * @returns {string}
+ */
+function resolveReceptionRcpNo(disclosure, disclosureUrl) {
+  if (disclosure?.rcept_no) return String(disclosure.rcept_no);
+  const m = String(disclosureUrl || '').match(/[?&]rcpNo=(\d+)/i);
+  return m ? m[1] : '';
 }
 
 /**
- * 첨부/관련 문서 중 동일 name은 최종본 1건만 남긴다.
- * 우선순위: reportDate 최신 → correctionType 있음 → 기존 순서(안정).
+ * 첨부/관련 문서 중 현재 접수(rcpNo)에 속한 것만 남긴다.
+ * 본문(source !== 'attachment')은 그대로 둔다.
+ * rceptNo가 비면 첨부는 전부 제외한다(전량 오입수 방지).
  *
  * @param {object[]} documents
+ * @param {string} rceptNo
  * @returns {object[]}
  */
-function selectFinalAttachments(documents) {
-  const body = [];
-  const byName = new Map();
+function selectReceptionAttachments(documents, rceptNo) {
+  const want = String(rceptNo || '');
+  const out = [];
   for (const doc of documents || []) {
     if (doc.source !== 'attachment') {
-      body.push(doc);
+      out.push(doc);
       continue;
     }
-    const key = doc.name || '';
-    if (!byName.has(key)) byName.set(key, []);
-    byName.get(key).push(doc);
+    if (want && doc.rcpNo === want) out.push(doc);
   }
-  const attachments = [];
-  for (const group of byName.values()) {
-    let best = group[0];
-    for (let i = 1; i < group.length; i++) {
-      const cand = group[i];
-      const br = reportDateRank(best.reportDate);
-      const cr = reportDateRank(cand.reportDate);
-      if (cr > br) {
-        best = cand;
-        continue;
-      }
-      if (cr === br) {
-        const bHas = !!best.correctionType;
-        const cHas = !!cand.correctionType;
-        if (cHas && !bHas) best = cand;
-      }
-    }
-    attachments.push(best);
-  }
-  return [...body, ...attachments];
+  return out;
 }
 
 /**
@@ -462,10 +449,12 @@ async function parseDetail(
     );
   }
 
+  const rceptNo = resolveReceptionRcpNo(disclosure, disclosureUrl);
+
   return {
     tree,
     sections,
-    documents: dedupe(selectFinalAttachments(documents)),
+    documents: dedupe(selectReceptionAttachments(documents, rceptNo)),
   };
 }
 
@@ -528,6 +517,7 @@ module.exports = {
   isCorrectionNotice,
   isRepresentativeConfirm,
   resolveBodyName,
-  selectFinalAttachments,
+  resolveReceptionRcpNo,
+  selectReceptionAttachments,
   viewerUrl,
 };
