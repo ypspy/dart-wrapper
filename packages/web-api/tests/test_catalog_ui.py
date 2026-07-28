@@ -92,7 +92,8 @@ class FakeCatalogQueryService:
                 submitter="제출",
                 rcept_dt="20260724",
                 year_end="(2025.12)",
-                entry_count=1,
+                entry_count=2,
+                disclosure_url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000650",
             ),
             all_entries=[
                 EntrySummary(
@@ -101,10 +102,27 @@ class FakeCatalogQueryService:
                     source="body",
                     section_name="재무상태표",
                     path=["감사보고서", "재무상태표"],
+                    disclosure_url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000650",
                     viewer_url="https://example.com/viewer",
                     ordinal=0,
                     is_leaf=True,
-                )
+                ),
+                EntrySummary(
+                    entry_id="e2",
+                    rcept_no=rcp_no,
+                    source="attachment",
+                    dcm_no="999",
+                    document_name="감사보고서",
+                    section_name="주석",
+                    path=["(첨부)재무제표", "주석"],
+                    disclosure_url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000650",
+                    viewer_url=(
+                        "https://dart.fss.or.kr/report/viewer.do?"
+                        "rcpNo=20260325000008&dcmNo=999&eleId=5"
+                    ),
+                    ordinal=1,
+                    is_leaf=True,
+                ),
             ],
         )
 
@@ -126,6 +144,10 @@ async def test_catalog_list_shows_all_disclosure_columns(client_factory) -> None
     assert 'href="/catalog/20260724000650"' in response.text
     assert "다음" in response.text
     assert "cursor-token" in response.text
+    assert ">원문</a>" in response.text
+    assert 'href="https://example.com/d"' in response.text
+    # 앵커 텍스트로는 긴 URL을 쓰지 않는다
+    assert ">https://example.com/d</a>" not in response.text
 
 
 async def test_catalog_entries_shows_all_entry_columns(client_factory) -> None:
@@ -138,6 +160,16 @@ async def test_catalog_entries_shows_all_entry_columns(client_factory) -> None:
     assert "재무상태표" in response.text
     assert "감사보고서 › 재무상태표" in response.text
     assert "correction_type" in response.text
+    assert ">원문</a>" in response.text
+    assert ">viewer</a>" in response.text
+    assert "https://example.com/viewer" in response.text
+    assert response.text.count("https://example.com/viewer") == 1  # href만
+    assert (
+        'href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260325000008&amp;dcmNo=999"'
+        in response.text
+        or 'href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260325000008&dcmNo=999"'
+        in response.text
+    )
 
 
 async def test_catalog_entries_not_found(client_factory) -> None:

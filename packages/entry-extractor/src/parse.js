@@ -27,11 +27,16 @@ function parseDisclosureRow($, row, baseUrl, reportType) {
   const tds = $(row).find('td').toArray();
 
   const corpCell = tds[1] ? $(tds[1]) : null;
-  let corpName = corpCell ? normalizeText(corpCell.text()) : '';
-  // '코/유/기/넥 ' 시장구분 접두사 제거
-  corpName = corpName.replace(/^(코|유|기|넥)\s+/, '');
-
   const corpLink = corpCell ? corpCell.find('a[href^="javascript:openCorpInfoNew"]').first() : null;
+  // 회사명은 기업개황 링크 텍스트만 사용 (셀 전체 text의 IR 배지·시장구분 제외)
+  let corpName = corpLink && corpLink.length > 0
+    ? normalizeText(corpLink.text())
+    : corpCell
+      ? normalizeText(corpCell.text())
+      : '';
+  // fallback: 시장구분 접두사·끝의 IR 링크 문구 제거
+  corpName = corpName.replace(/^(코|유|기|넥)\s+/, '').replace(/\s*IR\s*$/i, '').trim();
+
   const corpLinkHref = corpLink && corpLink.length > 0 ? corpLink.attr('href') : '';
   const corpCodeMatch = corpLinkHref ? corpLinkHref.match(/openCorpInfoNew\('([\d]+)'/) : null;
   const corpCode = corpCodeMatch ? corpCodeMatch[1] : '';

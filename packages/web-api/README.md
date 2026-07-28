@@ -16,17 +16,20 @@ DB에는 entry 메타데이터만 저장하고, 본문·표는 조회 시점에 
 
 ## 설치
 
-```bash
+```powershell
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
 PostgreSQL로 배포할 때는 `.venv\Scripts\python.exe -m pip install -e ".[postgres]"`를 추가합니다.
 
 ## 실행
 
-```bash
-.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+`packages/web-api` 디렉터리에서 실행합니다. PowerShell은 `.\.venv\...`처럼 **`.\` 접두사**가 필요합니다.
+
+```powershell
+cd packages/web-api
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
 문서: http://127.0.0.1:8000/docs
@@ -46,19 +49,22 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | POST | `/admin/catalog/jobs/{job_id}/soft-stop` | 다음 공시 경계에서 중단 |
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}` | 공시 단건 요약 |
-| GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | leaf 목록 (전 feature, `all_entries`) |
-| GET | `/api/v1/viewer/{rcp_no}` | 접수번호의 모든 leaf 섹션 원문 (종합 분석용) |
-| GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 특정 leaf 섹션 원문 (단건 조회) |
-| GET | `/catalog` | 공시 목록 표 (DisclosureSummary 전 컬럼) |
-| GET | `/catalog/{rcp_no}` | 공시 메타 + leaf 표 (EntrySummary 전 컬럼) |
+| GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | entry 목록 (전 feature, `all_entries`) |
+| GET | `/api/v1/viewer/{rcp_no}` | 접수번호의 모든 entry 섹션 원문 (종합 분석용) |
+| GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 특정 entry 섹션 원문 (단건 조회) |
+| GET | `/catalog` | 공시 목록 표 (`DisclosureSummary` 전 컬럼). `disclosure_url`은 「원문」 링크(새 탭) |
+| GET | `/catalog/{rcp_no}` | 공시 메타 + entry 표. `disclosure_url`「원문」·`viewer_url`「viewer」 링크. attachment는 `rcpNo`+`dcm_no`로 해당 문서 main.do에 연결 |
 
 목록 쿼리: `corp_code`, `corp_name`, `report_nm`, `report_type`, `start_date`, `end_date`, `limit`(1–100), `cursor`.
 총건수는 반환하지 않으며, 다음 페이지는 `next_cursor`로 이어갑니다.
 
-`all_entries`는 `ordinal` 순 leaf이며, entry-extractor 스키마와 같은 feature
-(`viewer_url`, `path`, 공시 features 등)를 담습니다. 응답의 `disclosure`에는
+`all_entries`는 `ordinal` 순 entry이며, entry-extractor 스키마와 같은 feature
+(`viewer_url`, `path`, `is_leaf`, 공시 features 등)를 담습니다. 응답의 `disclosure`에는
 공시 메타(`correction_type`, `submitter`, `year_end`, `bsns_year` 포함)가 들어 있습니다.
 `entry_id`로 Viewer 단건 조회에 바로 이어갈 수 있습니다.
+
+수집기는 Node entry-extractor 기본값을 따릅니다(목록 이력 포함·첨부 접수 스코프·TOC 중간 노드 포함).
+상세는 [`../entry-extractor/README.md`](../entry-extractor/README.md)를 보세요.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
 

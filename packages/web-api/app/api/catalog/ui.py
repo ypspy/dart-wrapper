@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
@@ -21,6 +21,8 @@ TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 router = APIRouter(prefix="/catalog", tags=["Catalog UI"], include_in_schema=False)
+
+DART_MAIN_URL = "https://dart.fss.or.kr/dsaf001/main.do"
 
 DISCLOSURE_COLUMNS: tuple[str, ...] = (
     "rcp_no",
@@ -85,8 +87,35 @@ def _attr(obj: Any, name: str) -> Any:
     return getattr(obj, name, None)
 
 
+def _rcp_from_viewer_url(viewer_url: str | None) -> str | None:
+    """viewer_url 쿼리의 rcpNo를 읽는다(첨부 문서의 실제 접수번호)."""
+    if not viewer_url:
+        return None
+    values = parse_qs(urlparse(viewer_url).query).get("rcpNo")
+    return values[0] if values else None
+
+
+def entry_document_url(entry: Any) -> str | None:
+    """entry의 DART 문서(main.do) URL.
+
+    attachment는 부모 disclosure_url이 아니라 rcpNo+dcmNo 조합으로 해당 첨부에 연결한다.
+    rcpNo는 viewer_url에 있으면 그것을 쓰고, 없으면 rcept_no를 쓴다.
+    """
+    source = getattr(entry, "source", None)
+    dcm_no = getattr(entry, "dcm_no", None)
+    if source == "attachment" and dcm_no:
+        rcp_no = _rcp_from_viewer_url(getattr(entry, "viewer_url", None)) or getattr(
+            entry, "rcept_no", None
+        )
+        if rcp_no:
+            return f"{DART_MAIN_URL}?rcpNo={rcp_no}&dcmNo={dcm_no}"
+    url = getattr(entry, "disclosure_url", None)
+    return url if url else None
+
+
 templates.env.globals["catalog_cell"] = _cell
 templates.env.globals["attr"] = _attr
+templates.env.globals["entry_document_url"] = entry_document_url
 
 
 @router.get("", response_class=HTMLResponse)

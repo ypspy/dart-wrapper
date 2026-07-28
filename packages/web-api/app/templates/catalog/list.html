@@ -24,7 +24,7 @@
             {% if col == "rcp_no" %}
             <a href="/catalog/{{ item.rcp_no }}">{{ item.rcp_no }}</a>
             {% elif col == "disclosure_url" and item.disclosure_url %}
-            <a href="{{ item.disclosure_url }}" target="_blank" rel="noopener">{{ item.disclosure_url }}</a>
+            <a href="{{ item.disclosure_url }}" target="_blank" rel="noopener">원문</a>
             {% else %}
             {{ catalog_cell(attr(item, col)) }}
             {% endif %}

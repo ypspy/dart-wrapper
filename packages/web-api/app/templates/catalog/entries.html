@@ -10,7 +10,7 @@
     <dt>{{ col }}</dt>
     <dd>
       {% if col == "disclosure_url" and disclosure.disclosure_url %}
-      <a href="{{ disclosure.disclosure_url }}" target="_blank" rel="noopener">{{ disclosure.disclosure_url }}</a>
+      <a href="{{ disclosure.disclosure_url }}" target="_blank" rel="noopener">원문</a>
       {% else %}
       {{ catalog_cell(attr(disclosure, col)) }}
       {% endif %}
@@ -33,9 +33,14 @@
           {% for col in entry_columns %}
           <td>
             {% if col == "viewer_url" and entry.viewer_url %}
-            <a href="{{ entry.viewer_url }}" target="_blank" rel="noopener">{{ entry.viewer_url }}</a>
-            {% elif col == "disclosure_url" and entry.disclosure_url %}
-            <a href="{{ entry.disclosure_url }}" target="_blank" rel="noopener">{{ entry.disclosure_url }}</a>
+            <a href="{{ entry.viewer_url }}" target="_blank" rel="noopener">viewer</a>
+            {% elif col == "disclosure_url" %}
+              {% set doc_url = entry_document_url(entry) %}
+              {% if doc_url %}
+            <a href="{{ doc_url }}" target="_blank" rel="noopener">원문</a>
+              {% else %}
+            —
+              {% endif %}
             {% else %}
             {{ catalog_cell(attr(entry, col)) }}
             {% endif %}
