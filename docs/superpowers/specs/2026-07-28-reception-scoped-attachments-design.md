@@ -2,8 +2,9 @@
 
 날짜: 2026-07-28  
 상태: 브레인스토밍 승인 (구현 전)  
-범위: `@dart-wrapper/entry-extractor` — `#att`/`#doc` 첨부 필터를  
-「이름별 전역 최신」에서 「현재 접수 `rcpNo`와 일치」로 교체
+범위: `@dart-wrapper/entry-extractor` — **첨부(`#att` 및 `#doc`의 첨부 option)만**  
+필터를 「이름별 전역 최신」→「현재 접수 `rcpNo`와 일치」로 교체.  
+**본문(`treeData`)은 이번 변경 대상이 아님.**
 
 관련: `2026-07-27-disclosure-history-final-attachments-design.md`  
 (목록 이력 모드 `finalReport` 미전송은 유지. 첨부 선정 규칙만 개정)
@@ -16,9 +17,12 @@
 골라, 예를 들어 최초 접수에 **이후** `[정정]` 첨부를 붙이거나, 같은 날
 다른 첨부정정·최초 첨부를 한 행에 섞을 수 있다.
 
-목표: **한 목록 행(접수)을 펼칠 때는 그 접수에 속한 본문 세트 또는
-첨부 세트만** entry로 남긴다. 다른 접수에 속한 option은 이미(또는 앞으로)
-해당 행에서 입수하므로 여기서 펼치지 않는다.
+목표: **한 목록 행을 펼칠 때 첨부는 그 접수(`rcpNo`)에 속한 option만**
+entry로 남긴다. 다른 접수 첨부는 이미(또는 앞으로) 해당 행에서 입수한다.
+
+본문: 이력 목록의 각 행마다 그 페이지 `treeData`를 **그대로 전부** 입수한다
+(기재정정·최초 등 행별 본문 세트). 본문에 `rcpNo` 스코프·“최종만” 필터를
+새로 넣지 않는다. `#doc`에 보이는 과거/이후 본문 option도 펼치지 않는다(현행).
 
 ## 2. 확정된 전제
 
@@ -27,7 +31,8 @@
 | 매칭 키 | option의 `rcpNo` === 목록 행의 `rcept_no` (**A**) |
 | 접수일(`reportDate`)만으로 매칭 | 사용하지 않음. 같은 날 서로 다른 `rcpNo`가 `#att`에 공존함 |
 | 목록 `finalReport` | 기존 이력 모드 유지(미전송) |
-| 본문 | `treeData`만. `#doc`의 과거 본문 option은 펼치지 않음(현행과 동일) |
+| 본문 | **불변.** 각 이력 행의 `treeData` 전부 입수. 접수 스코프 필터·최신만 선정 없음 |
+| `#doc` 본문 option | 펼치지 않음(현행). 필터 변경은 **첨부 option만** |
 | SAME 첨부 0건 | 첨부 leaf 없음. 본문만(기재정정만 한 경우) |
 | 이름별 전역 최신 | **폐기**. `selectFinalAttachments`를 접수 스코프 함수로 교체 |
 | 스키마/web-api | 필수 변경 없음. 재수집으로 반영 |
@@ -75,8 +80,9 @@ function selectReceptionAttachments(documents, rceptNo) {
 
 ### 4.3 수집 의미
 
-- 이력 목록의 각 행 → 그 행 `rcept_no`에 속한 첨부(+ 본문 tree)만 leaf
-- 정정 전 첨부·이후 정정 첨부는 **해당 접수 행**에서만 등장
+- **본문:** 이력 각 행 → 해당 페이지 `treeData` leaf 전부(현행)
+- **첨부:** 이력 각 행 → `rcpNo === rcept_no`인 option만
+- 정정 전·이후 첨부는 **그 접수가 목록에 있을 때** 그 행에서만 등장
 
 ## 5. 테스트
 
@@ -89,7 +95,8 @@ function selectReceptionAttachments(documents, rceptNo) {
 
 ## 6. 범위 밖
 
-- 본문 treeData / `#doc` 과거 본문 option 펼침  
+- 본문 “최종만”/접수 스코프 재설계 (이번은 ATT만)  
+- `#doc` 과거·이후 본문 option 펼침  
 - Admin UI `finalReport` 토글  
 - DB 마이그레이션(재수집은 운영 절차)
 
