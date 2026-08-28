@@ -30,7 +30,7 @@
 | 파싱 | 기존 `DartHttp` + `extract_blocks`. 옛 `MatrixGenerator`를 복제하지 않음 |
 | Admin UI | 추출 히트맵·새 화면 없음. Admin API(잡·완전성 집계)·로그 |
 | 최종 패널 뷰 | 없음. export 때 `correction_type`·접수일로 고름 |
-| 회사명 | 목록명은 **그 공시 시점 상호**. `corp_code`당 이름이 여러 개인 것은 이력이지 오류가 아님 |
+| 회사명 | 목록명은 **그 공시 시점 상호**. `corp_code`당 이름이 여러 개인 것은 이력이지 오류가 아님. 같은 접수의 사업 표지·외부감사 실시내용 헤더와만 대조 |
 | 감사인명 | 표지·본문·A001 `1. 외부감사에 관한 사항`은 **당시 회계법인명**. F001·F002 목록 `submitter`는 **현재 명칭**일 수 있어 resolved에 쓰지 않음 |
 
 ## 3. 구조
@@ -67,7 +67,7 @@ Public GET / CSV는 audit_report_facts (+ entries 조인)만 읽음
 | 그룹 | 컬럼 |
 |------|------|
 | 키 | `rcept_no`, `dcm_no`, `source_report_type` (A001/F001/F002), `fs_scope` (separate/consolidated/unknown) |
-| 출처 entry | `cover_entry_id`, `opinion_entry_id`, `a001_opinion_entry_id`, `a001_cover_entry_id` (없으면 null) |
+| 출처 entry | `cover_entry_id`, `opinion_entry_id`, `activity_entry_id`(외부감사 실시내용), `a001_opinion_entry_id`, `a001_cover_entry_id` (없으면 null) |
 | 감사인 | `auditor`(표지 원문), `auditor_body`, `auditor_a001`(A001 본문 표 당기), `auditor_listing`(F001·F002 목록 `submitter`, 현재명), `auditor_status`, `auditor_resolved`, `auditor_source` |
 | 의견 | `opinion_raw`, `opinion_code`, `opinion_status`, `opinion_resolved`, `opinion_source` |
 | 보고일 | `audit_report_date_raw`(후보 연결 문자열), `audit_report_date_candidates`(JSON: `{date, snippet}[]`), `audit_report_date`(ISO 또는 null), `audit_report_date_status`, `audit_report_date_source`, `audit_report_date_override` |
@@ -115,10 +115,11 @@ GAAP 코드: `k-gaap`(일반기업회계기준) / `k-ifrs`(한국채택국제회
 | 의견 본문 | D-3 `*감사인의감사보고서*` | `독립된 감사인의 감사보고서` 또는 `외부감사인의 감사보고서` |
 | A001 본문 의견 공시 | D-3에 없음. 이번에 추가 | `1. 외부감사에 관한 사항` 우선. 없으면 `V. 감사인의 감사의견 등` / `V. 회계감사인의 감사의견 등` / `IV. 감사인의 감사의견 등` |
 | A001 사업 표지 | D-1 `*사업보고서_사업보고서*` | `source=body`, `document_name=사업보고서`, `section_name` compact = `사업보고서` (회사명·기간 검증) |
+| 외부감사 실시내용 | D-4-1 `*외부감사실시내용*` | `외부감사 실시내용`. 투입시간·활동은 뽑지 않고 **회사명·결산월 헤더만** 검증에 씀 |
 
 제외: `2. 감사제도에 관한 사항`(내부 감사제도), `내부회계관리제도 감사 또는 검토의견`.
 
-표지·의견 leaf가 둘 다 있으면 둘 다 fetch한다. 의견만 있으면 표지 필드는 `skipped`.
+표지·의견·실시내용 leaf가 있으면 해당하는 것만 fetch한다. 없는 역할의 필드는 `skipped`.
 
 ## 6. 파서 (옛 코드 대응)
 
@@ -159,6 +160,10 @@ Viewer `extract_blocks` 이후 순수 함수로 나눈다. 하드코딩 경로·
 
 표의 **당기** 칸에서 감사의견·감사인을 읽는다. A001에서 발행사가 공시하는 회계법인명이 이 칸에 있다. 의견에는 적정 boilerplate 기본값을 쓰지 않는다. 칸이 비면 `not_found`.
 
+### 6.4 외부감사 실시내용 헤더 (D-4-1 glob, 필드만 이번 범위)
+
+D-4-1은 `*외부감사실시내용*`에서 **투입시간** 표를 뽑는다(`투입 인원수` 등). 그 시간 추출은 이번 밖이다. 같은 HTML 상단(또는 표 앞 행)에 회사명·결산월(사업연도)이 있다. 이번엔 그 헤더만 읽어 `corp_name`·`year_end` 검증에 쓴다. 시간 칸·`Indexing`/`ParsingTime`은 가져오지 않는다.
+
 ## 7. 값 해소
 
 옛 E-2는 표지 감사인과 본문 감사인을 나란히 merge만 했다. 이번엔 후보를 비교하고 순위로 고르며, 불일치는 `conflicts`에 남긴다. 정규화(공백, `주식회사`, 날짜 형식) 후 비교한다.
@@ -166,8 +171,8 @@ Viewer `extract_blocks` 이후 순수 함수로 나눈다. 하드코딩 경로·
 | 필드 | 우선순위 (앞이 이김) | 검증 |
 |------|----------------------|------|
 | 감사인 | ① 감사 표지 회계법인/감사반 ② A001만 `1. 외부감사에 관한 사항` 당기 칸 ③ 의견 본문 D-3-1 | 문서 출처끼리만 비교해 conflict. F001·F002 목록 `submitter`는 현재 명칭이라 `auditor_listing`으로만 두고 resolved·conflict에 넣지 않음. A001 목록 `submitter`는 회사명이라 무시 |
-| 당기·결산월 | ① 목록 `year_end` ② A001 사업 표지 기간(D-1) ③ 감사 표지 당기 | ②·③은 ①을 확인만 함. 조인 키 `year_end`는 자동 변경하지 않음 |
-| 회사명 | 그 접수의 목록 `corp_name` | 사업 표지 `회사명`과 **같은 `rcept_no`만** 비교. 연도가 다른 행의 이름 차이는 conflict가 아님. 불일치 시 목록명 유지 |
+| 당기·결산월 | ① 목록 `year_end` ② 외부감사 실시내용 헤더 ③ A001 사업 표지 기간(D-1) ④ 감사 표지 당기 | ②~④는 ①을 확인만 함. 조인 키 `year_end`는 자동 변경하지 않음 |
+| 회사명 | 그 접수의 목록 `corp_name` | **같은 `rcept_no`**의 실시내용 헤더·사업 표지 `회사명`과만 비교. 연도가 다른 행의 이름 차이는 conflict가 아님. 불일치 시 목록명 유지 |
 | 감사의견 | ① 첨부/단독 의견 본문(D-3-2) ② A001만 `1. 외부감사에 관한 사항` 당기 칸 | ②는 요약이라 약칭·전기 칸이 섞일 수 있음. 불일치 시 ①. ① 없고 ②만 있으면 ② |
 | GAAP | 의견 본문(D-3-4) | 같은 `corp_code`+`year_end`+`fs_scope`의 F001/F002/A001 첨부 행과 비교 |
 | 감사보고서일 | 의견 본문 후보 중 창을 통과한 값. ambiguous는 LLM 또는 override | 목록 `rcept_dt`로 바꾸지 않음 |
@@ -235,13 +240,13 @@ temperature는 0에 가깝게. 모델·프롬프트 버전·원문 응답을 행
 - GAAP: D-3-4 문구 → `k-gaap`/`k-ifrs`/`other`
 - 날짜 창: 1개 통과 / 0개 / 2개 이상(`ambiguous`)
 - 감사인: A001 `1. 외부감사에 관한 사항` 당기 칸이 2순위. 목록 `submitter`는 resolved에 미사용(현재명). 문서끼리만 conflict
-- 회사명: 같은 접수만 비교. 다른 연도 이름 차이는 conflict 아님
+- 회사명·결산월: 같은 접수의 실시내용 헤더와 비교. 다른 연도 이름 차이는 conflict 아님
 - LLM mock: 인덱스 응답으로 날짜 채움. 범위 밖 인덱스는 `ambiguous` 유지
 - 완전성 API: fixture 카탈로그+facts로 `target`/`ok`/`unextracted`/`ambiguous_dates` 건수
 
 ## 11. 범위 밖
 
-- D-4 실시내용·D-5 계정·D-6 내부통제·D-7 지배구조
+- D-4 투입시간·활동·커뮤니케이션, D-5 계정, D-6 내부통제, D-7 지배구조 (실시내용 **헤더**의 회사명·결산월만 예외)
 - 원문 HTML 저장, 추출 일별 히트맵 UI, 기업명 마스터 테이블
 - Excel식 날짜 선택 화면
 - 최종 접수만 남기는 패널 뷰
