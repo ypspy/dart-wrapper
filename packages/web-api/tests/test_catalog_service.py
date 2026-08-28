@@ -6,6 +6,7 @@ import pytest
 
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.errors import CatalogConflict, CatalogNotFound, SourceFetchError
+from app.repositories.extraction_job_repository import ExtractionJobRepository
 from app.ports.entry_collector import CollectRequest, DisclosureListItem, DisclosureListResult
 from app.schemas.catalog import ExtractRequest
 from app.schemas.entry import EntryRecord
@@ -144,6 +145,21 @@ async def test_start_extract_rejects_when_other_job_is_running(sessionmaker_fixt
         await service.start_extract(
             ExtractRequest(report_type="A001", start_date="20260101", end_date="20260101")
         )
+
+
+async def test_start_extract_rejects_when_audit_extraction_is_running(
+    sessionmaker_fixture,
+) -> None:
+    """감사 추출이 진행 중이면 카탈로그 수집을 거절한다."""
+    async with sessionmaker_fixture() as session:
+        jobs = ExtractionJobRepository(session)
+        await jobs.create("ext-lock", "audit_opinion", {}, mode="extract")
+        await jobs.set_status("ext-lock", "running")
+        await session.commit()
+
+    service = CatalogService(sessionmaker_fixture, FakeCollector())
+    with pytest.raises(CatalogConflict, match="이미 진행 중"):
+        await service.start_extract(REQUEST)
 
 
 async def test_run_job_saves_entries_and_marks_success(sessionmaker_fixture) -> None:

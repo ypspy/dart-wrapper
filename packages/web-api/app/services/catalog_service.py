@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.errors import CatalogConflict, CatalogNotFound
+from app.errors import CatalogNotFound
 from app.models.disclosure import Disclosure
 from app.ports.entry_collector import CollectRequest, DisclosureListItem, EntryCollector
 from app.repositories.disclosure_repository import DisclosureRepository
@@ -31,6 +31,7 @@ from app.schemas.catalog import (
     ResumeRequest,
 )
 from app.schemas.entry import EntryRecord
+from app.services.dart_job_lock import assert_dart_idle
 
 logger = logging.getLogger(__name__)
 
@@ -238,12 +239,7 @@ class CatalogService:
                     job_id=existing.job_id, status=existing.status, mode=existing.mode
                 )
 
-            other = await jobs.find_any_active()
-            if other is not None:
-                raise CatalogConflict(
-                    "다른 수집 작업이 이미 진행 중입니다. "
-                    f"현재 작업({other.job_id[:8]} · {other.status})이 끝난 뒤에 다시 시작해 주세요."
-                )
+            await assert_dart_idle(session)
 
             job_id = uuid.uuid4().hex
             await jobs.create(job_id, params, params_key, mode=mode)

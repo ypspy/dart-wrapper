@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import case, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entry import Entry
@@ -49,3 +49,27 @@ class EntryRepository:
     async def get_by_entry_id(self, entry_id: str) -> Entry | None:
         """entry_id로 단일 엔트리를 조회한다. 없으면 None."""
         return await self._session.get(Entry, entry_id)
+
+    async def list_for_extraction(
+        self,
+        start: str,
+        end: str,
+        report_types: Sequence[str],
+    ) -> list[Entry]:
+        """추출 대상 기간·유형의 엔트리를 반환한다.
+
+        저장된 `rcept_dt`는 `YYYY.MM.DD`이고, 인자는 `YYYYMMDD`이다.
+        점만 제거해 비교하므로 두 형식을 모두 받을 수 있다.
+        """
+        start_key = start.replace(".", "")
+        end_key = end.replace(".", "")
+        rcept_key = func.replace(Entry.rcept_dt, ".", "")
+        statement = (
+            select(Entry)
+            .where(Entry.report_type.in_(list(report_types)))
+            .where(rcept_key >= start_key)
+            .where(rcept_key <= end_key)
+            .order_by(Entry.rcept_no, Entry.dcm_no, Entry.entry_id)
+        )
+        result = await self._session.execute(statement)
+        return list(result.scalars().all())

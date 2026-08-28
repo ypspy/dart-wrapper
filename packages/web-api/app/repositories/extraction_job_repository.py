@@ -43,14 +43,20 @@ class ExtractionJobRepository:
         await self._session.flush()
         return job
 
-    async def find_any_active(self) -> ExtractionJob | None:
-        """진행 중인 추출 작업이 있으면 반환한다."""
-        statement = (
-            select(ExtractionJob)
-            .where(ExtractionJob.status.in_(ACTIVE_STATUSES))
-            .order_by(ExtractionJob.created_at.desc())
-            .limit(1)
+    async def find_any_active(
+        self, extractor_id: str | None = None
+    ) -> ExtractionJob | None:
+        """진행 중인 추출 작업이 있으면 반환한다.
+
+        extractor_id를 주면 해당 추출기만 본다. 감사 추출 잠금은
+        `audit_opinion`만 DART로 취급하고 `resolve_dates`는 제외한다.
+        """
+        statement = select(ExtractionJob).where(
+            ExtractionJob.status.in_(ACTIVE_STATUSES)
         )
+        if extractor_id is not None:
+            statement = statement.where(ExtractionJob.extractor_id == extractor_id)
+        statement = statement.order_by(ExtractionJob.created_at.desc()).limit(1)
         result = await self._session.execute(statement)
         return result.scalars().first()
 

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_report_fact import AuditReportFact
+from app.models.entry import Entry
 
 
 class FactRepository:
@@ -38,6 +39,35 @@ class FactRepository:
         statement = (
             select(AuditReportFact)
             .where(AuditReportFact.audit_report_date_status == "ambiguous")
+            .order_by(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
+        )
+        result = await self._session.execute(statement)
+        return list(result.scalars().all())
+
+    async def list_siblings(
+        self,
+        *,
+        corp_code: str,
+        year_end: str,
+        fs_scope: str,
+        rcept_no: str,
+    ) -> list[AuditReportFact]:
+        """같은 기업·결산월·범위이면서 접수가 다른 추출 행을 반환한다."""
+        rcept_stmt = (
+            select(Entry.rcept_no)
+            .where(Entry.corp_code == corp_code)
+            .where(Entry.year_end == year_end)
+            .where(Entry.rcept_no != rcept_no)
+            .distinct()
+        )
+        rcept_result = await self._session.execute(rcept_stmt)
+        rcept_nos = list(rcept_result.scalars().all())
+        if not rcept_nos:
+            return []
+        statement = (
+            select(AuditReportFact)
+            .where(AuditReportFact.rcept_no.in_(rcept_nos))
+            .where(AuditReportFact.fs_scope == fs_scope)
             .order_by(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
         )
         result = await self._session.execute(statement)
