@@ -28,7 +28,7 @@
 | HTML | 저장하지 않음. 날짜 ambiguous용으로 **후보 날짜와 앞뒤 문장만** 저장 |
 | 패키지 | `packages/web-api` (`app/extracting/` + 잡 서비스). 별도 패키지 없음 |
 | 파싱 | 기존 `DartHttp` + `extract_blocks`. 옛 `MatrixGenerator`를 복제하지 않음 |
-| Admin UI | 추출 히트맵·새 화면 없음. Admin API·잡 로그 |
+| Admin UI | 추출 히트맵·새 화면 없음. Admin API(잡·완전성 집계)·로그 |
 | 최종 패널 뷰 | 없음. export 때 `correction_type`·접수일로 고름 |
 | 회사명 | 목록명은 **그 공시 시점 상호**. `corp_code`당 이름이 여러 개인 것은 이력이지 오류가 아님 |
 
@@ -45,6 +45,10 @@ Admin 날짜 해소 잡
   → status=ambiguous 행만
   → 저장된 후보+문장으로 LLM이 인덱스 선택
   → 날짜 컬럼·source=llm 갱신
+
+Admin GET 완전성
+  → 기간·유형별 대상/성공/실패/미추출/ambiguous 건수
+  → 상태별 문서 목록(cursor)
 
 Public GET / CSV는 audit_report_facts (+ entries 조인)만 읽음
 ```
@@ -194,6 +198,26 @@ temperature는 0에 가깝게. 모델·프롬프트 버전·원문 응답을 행
 - Admin `PATCH` — `audit_report_date_override`
 - 연구 CSV: `entries`와 조인하는 스크립트. 최종 접수만 필터하는 DB 뷰는 없음
 
+### 8.4 추출 완전성 (히트맵 대신)
+
+일별 칸 UI는 없다. 마커는 **상태 코드와 집계 API**다.
+
+`GET /admin/extract/audit-opinion/completeness`  
+쿼리: `start_date`, `end_date`, `report_type`(한 유형).
+
+집계(문서 = `rcept_no`+`dcm_no`, selector 대상 기준):
+
+| 키 | 의미 |
+|----|------|
+| `target` | 카탈로그에서 selector가 고른 문서 수 |
+| `ok` | `fetch_status=ok` |
+| `fetch_failed` / `blocked` / `section_missing` | 해당 `fetch_status` 행 |
+| `unextracted` | 대상인데 facts 행이 없음 |
+| `ambiguous_dates` | `audit_report_date_status=ambiguous` |
+| `field_partial` | `fetch_status=ok`이지만 핵심 필드 중 하나라도 `ok`가 아님 |
+
+같은 경로에 `status`(`unextracted`/`fetch_failed`/`blocked`/`section_missing`/`ambiguous_dates`/`field_partial`)와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 돌려 재개·reparse 대상과 이어 준다.
+
 ## 9. 에러 · 동시성
 
 - DART 일시 오류: 카탈로그와 같은 재시도·차단 연속 중단.
@@ -212,11 +236,12 @@ temperature는 0에 가깝게. 모델·프롬프트 버전·원문 응답을 행
 - 감사인: A001에서 `submitter` 미사용. 표지가 본문·목록보다 앞
 - 회사명: 같은 접수만 비교. 다른 연도 이름 차이는 conflict 아님
 - LLM mock: 인덱스 응답으로 날짜 채움. 범위 밖 인덱스는 `ambiguous` 유지
+- 완전성 API: fixture 카탈로그+facts로 `target`/`ok`/`unextracted`/`ambiguous_dates` 건수
 
 ## 11. 범위 밖
 
 - D-4 실시내용·D-5 계정·D-6 내부통제·D-7 지배구조
-- 원문 HTML 저장, 추출 히트맵, 기업명 마스터 테이블
+- 원문 HTML 저장, 추출 일별 히트맵 UI, 기업명 마스터 테이블
 - Excel식 날짜 선택 화면
 - 최종 접수만 남기는 패널 뷰
 - 추출 전용 Python 패키지 분리
