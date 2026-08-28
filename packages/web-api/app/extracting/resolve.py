@@ -12,6 +12,7 @@ from app.extracting.text import compact
 
 _FULL_DATE = re.compile(r"(\d{4})[.\-](\d{1,2})[.\-](\d{1,2})")
 _YEAR_MONTH = re.compile(r"(\d{4})[.\-](\d{1,2})")
+_MONTH_ONLY = re.compile(r"^(\d{1,2})월$")
 
 
 class Conflict(TypedDict):
@@ -143,7 +144,7 @@ def year_end_conflicts(
             ("a001_cover", a001_cover),
             ("cover_period", cover_period),
         ],
-        key=_year_end_key,
+        equal=_year_ends_match,
     )
 
 
@@ -155,13 +156,23 @@ def _pairwise_conflicts(
     field: str,
     sources: list[tuple[str, str | None]],
     *,
-    key: Callable[[str | None], str],
+    key: Callable[[str | None], str] | None = None,
+    equal: Callable[[str | None, str | None], bool] | None = None,
 ) -> list[Conflict]:
     present = [(source, value) for source, value in sources if value]
+    if equal is not None:
+        matches = equal
+    else:
+        if key is None:
+            raise TypeError("key 또는 equal이 필요합니다.")
+
+        def matches(left: str | None, right: str | None) -> bool:
+            return key(left) == key(right)
+
     conflicts: list[Conflict] = []
     for index, (left_source, left) in enumerate(present):
         for right_source, right in present[index + 1 :]:
-            if key(left) != key(right):
+            if not matches(left, right):
                 conflicts.append(
                     Conflict(
                         field=field,
@@ -174,21 +185,47 @@ def _pairwise_conflicts(
     return conflicts
 
 
-def _year_end_key(value: str | None) -> str:
-    """비교용 결산월 키(YYYY-MM). 파싱 실패 시 compact 원문.
-
-    당기 구간(시작~종료)은 마지막 전체 날짜를 기말로 쓴다. listing의
-    `(2019.12)`처럼 연·월만 있으면 parse_year_end를 쓴다.
-    """
+def _year_end_parts(value: str | None) -> tuple[int | None, int | None, str]:
+    """결산월을 (연, 월, compact 원문)으로 나눈다. 월만 있으면 연은 None."""
     compacted = compact(value)
     full_dates = list(_FULL_DATE.finditer(compacted))
     if full_dates:
         year_s, month_s, _day_s = full_dates[-1].groups()
-        return f"{int(year_s):04d}-{int(month_s):02d}"
+        return int(year_s), int(month_s), compacted
     parsed = parse_year_end(value)
     if parsed is not None:
-        return f"{parsed.year:04d}-{parsed.month:02d}"
+        return parsed.year, parsed.month, compacted
     year_month = _YEAR_MONTH.search(compacted)
     if year_month is not None:
-        return f"{int(year_month.group(1)):04d}-{int(year_month.group(2)):02d}"
-    return compacted
+        return int(year_month.group(1)), int(year_month.group(2)), compacted
+    month_only = _MONTH_ONLY.fullmatch(compacted)
+    if month_only is not None:
+        month = int(month_only.group(1))
+        if 1 <= month <= 12:
+            return None, month, compacted
+    return None, None, compacted
+
+
+def _year_end_key(value: str | None) -> str:
+    """비교용 결산월 키. 연·월이면 YYYY-MM, 월만이면 MM, 실패 시 compact 원문.
+
+    당기 구간(시작~종료)은 마지막 전체 날짜를 기말로 쓴다. listing의
+    `(2019.12)`처럼 연·월만 있으면 parse_year_end를 쓴다. 실시내용
+    `12월`처럼 월만 있으면 월 성분만 키로 둔다.
+    """
+    year, month, fallback = _year_end_parts(value)
+    if year is not None and month is not None:
+        return f"{year:04d}-{month:02d}"
+    if month is not None:
+        return f"{month:02d}"
+    return fallback
+
+
+def _year_ends_match(left: str | None, right: str | None) -> bool:
+    """한쪽이 월만이면 월만, 둘 다 연·월이면 YYYY-MM을 비교한다."""
+    left_year, left_month, _left_fallback = _year_end_parts(left)
+    right_year, right_month, _right_fallback = _year_end_parts(right)
+    if left_month is not None and right_month is not None:
+        if left_year is None or right_year is None:
+            return left_month == right_month
+    return _year_end_key(left) == _year_end_key(right)

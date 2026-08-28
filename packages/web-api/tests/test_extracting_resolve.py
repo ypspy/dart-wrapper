@@ -226,3 +226,20 @@ def test_year_end_conflicts_when_period_differs() -> None:
     assert conflicts[0]["right"] == "2018.01.01부터2018.12.31까지"
     assert conflicts[0]["left_source"] == "listing"
     assert conflicts[0]["right_source"] == "cover_period"
+
+
+def test_year_end_month_only_activity_compares_month() -> None:
+    """실시내용이 월만 있으면 listing (YYYY.MM)과 월만 비교하고 listing 원문은 유지한다."""
+    listing = "(2019.12)"
+    same = year_end_conflicts(listing, "12월", None, None)
+    assert listing == "(2019.12)"
+    assert same == []
+
+    different = year_end_conflicts(listing, "3월", None, None)
+    assert listing == "(2019.12)"
+    assert len(different) == 1
+    assert different[0]["field"] == "year_end"
+    assert different[0]["left"] == "(2019.12)"
+    assert different[0]["right"] == "3월"
+    assert different[0]["left_source"] == "listing"
+    assert different[0]["right_source"] == "activity"
