@@ -31,6 +31,7 @@
 | Admin UI | 추출 히트맵·새 화면 없음. Admin API(잡·완전성 집계)·로그 |
 | 최종 패널 뷰 | 없음. export 때 `correction_type`·접수일로 고름 |
 | 회사명 | 목록명은 **그 공시 시점 상호**. `corp_code`당 이름이 여러 개인 것은 이력이지 오류가 아님 |
+| 감사인명 | 표지·본문·A001 `1. 외부감사에 관한 사항`은 **당시 회계법인명**. F001·F002 목록 `submitter`는 **현재 명칭**일 수 있어 resolved에 쓰지 않음 |
 
 ## 3. 구조
 
@@ -67,7 +68,7 @@ Public GET / CSV는 audit_report_facts (+ entries 조인)만 읽음
 |------|------|
 | 키 | `rcept_no`, `dcm_no`, `source_report_type` (A001/F001/F002), `fs_scope` (separate/consolidated/unknown) |
 | 출처 entry | `cover_entry_id`, `opinion_entry_id`, `a001_opinion_entry_id`, `a001_cover_entry_id` (없으면 null) |
-| 감사인 | `auditor`, `auditor_status`, `auditor_resolved`, `auditor_source` |
+| 감사인 | `auditor`(표지 원문), `auditor_body`, `auditor_a001`(A001 본문 표 당기), `auditor_listing`(F001·F002 목록 `submitter`, 현재명), `auditor_status`, `auditor_resolved`, `auditor_source` |
 | 의견 | `opinion_raw`, `opinion_code`, `opinion_status`, `opinion_resolved`, `opinion_source` |
 | 보고일 | `audit_report_date_raw`(후보 연결 문자열), `audit_report_date_candidates`(JSON: `{date, snippet}[]`), `audit_report_date`(ISO 또는 null), `audit_report_date_status`, `audit_report_date_source`, `audit_report_date_override` |
 | GAAP | `gaap_raw`, `gaap_code`, `gaap_status`, `gaap_resolved`, `gaap_source` |
@@ -156,7 +157,7 @@ Viewer `extract_blocks` 이후 순수 함수로 나눈다. 하드코딩 경로·
 
 ### 6.3 A001 `1. 외부감사에 관한 사항`
 
-표의 **당기** 칸에서 감사의견·감사인을 읽는다. 여기에는 적정 boilerplate 기본값을 쓰지 않는다. 칸이 비면 `not_found`.
+표의 **당기** 칸에서 감사의견·감사인을 읽는다. A001에서 발행사가 공시하는 회계법인명이 이 칸에 있다. 의견에는 적정 boilerplate 기본값을 쓰지 않는다. 칸이 비면 `not_found`.
 
 ## 7. 값 해소
 
@@ -164,7 +165,7 @@ Viewer `extract_blocks` 이후 순수 함수로 나눈다. 하드코딩 경로·
 
 | 필드 | 우선순위 (앞이 이김) | 검증 |
 |------|----------------------|------|
-| 감사인 | ① 감사 표지 회계법인/감사반 ② F001·F002만 목록 `submitter` ③ 의견 본문 D-3-1 | A001 `submitter`는 회사명이므로 감사인에 쓰지 않음 |
+| 감사인 | ① 감사 표지 회계법인/감사반 ② A001만 `1. 외부감사에 관한 사항` 당기 칸 ③ 의견 본문 D-3-1 | 문서 출처끼리만 비교해 conflict. F001·F002 목록 `submitter`는 현재 명칭이라 `auditor_listing`으로만 두고 resolved·conflict에 넣지 않음. A001 목록 `submitter`는 회사명이라 무시 |
 | 당기·결산월 | ① 목록 `year_end` ② A001 사업 표지 기간(D-1) ③ 감사 표지 당기 | ②·③은 ①을 확인만 함. 조인 키 `year_end`는 자동 변경하지 않음 |
 | 회사명 | 그 접수의 목록 `corp_name` | 사업 표지 `회사명`과 **같은 `rcept_no`만** 비교. 연도가 다른 행의 이름 차이는 conflict가 아님. 불일치 시 목록명 유지 |
 | 감사의견 | ① 첨부/단독 의견 본문(D-3-2) ② A001만 `1. 외부감사에 관한 사항` 당기 칸 | ②는 요약이라 약칭·전기 칸이 섞일 수 있음. 불일치 시 ①. ① 없고 ②만 있으면 ② |
@@ -233,7 +234,7 @@ temperature는 0에 가깝게. 모델·프롬프트 버전·원문 응답을 행
 - 의견 키워드: D-3-2 fixture. 서식+키워드 없음 → `unqualified`. 서식 아님 → `not_found`
 - GAAP: D-3-4 문구 → `k-gaap`/`k-ifrs`/`other`
 - 날짜 창: 1개 통과 / 0개 / 2개 이상(`ambiguous`)
-- 감사인: A001에서 `submitter` 미사용. 표지가 본문·목록보다 앞
+- 감사인: A001 `1. 외부감사에 관한 사항` 당기 칸이 2순위. 목록 `submitter`는 resolved에 미사용(현재명). 문서끼리만 conflict
 - 회사명: 같은 접수만 비교. 다른 연도 이름 차이는 conflict 아님
 - LLM mock: 인덱스 응답으로 날짜 채움. 범위 밖 인덱스는 `ambiguous` 유지
 - 완전성 API: fixture 카탈로그+facts로 `target`/`ok`/`unextracted`/`ambiguous_dates` 건수
