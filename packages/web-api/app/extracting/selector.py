@@ -98,7 +98,7 @@ def _is_activity_leaf(entry: SelectorEntry) -> bool:
 
 
 def _is_a001_opinion_leaf(entry: SelectorEntry) -> bool:
-    if entry.source != "body":
+    if entry.report_type != "A001" or entry.source != "body":
         return False
     section = compact(entry.section_name)
     if section == _A001_OPINION_EXCLUDE:
@@ -117,7 +117,7 @@ def _a001_opinion_priority(entry: SelectorEntry) -> int:
 
 
 def _is_a001_cover_leaf(entry: SelectorEntry) -> bool:
-    if entry.source != "body":
+    if entry.report_type != "A001" or entry.source != "body":
         return False
     return (
         compact(entry.document_name) == "사업보고서"
