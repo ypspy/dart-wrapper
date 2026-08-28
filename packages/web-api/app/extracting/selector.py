@@ -1,0 +1,177 @@
+"""감사보고서 대상 문서·leaf selector."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from app.extracting.text import compact
+
+_AUDIT_DOC_EXCLUDE_MARKERS = ("내부회계", "내부감시장치", "감사의감사보고서")
+_A001_ATTACHMENT_DOC_NAMES = frozenset({"감사보고서", "연결감사보고서"})
+_OPINION_SECTION_NAMES = frozenset(
+    {"독립된감사인의감사보고서", "외부감사인의감사보고서"}
+)
+_A001_OPINION_NUMBERED = "1.외부감사에관한사항"
+_A001_OPINION_FALLBACK_MARKERS = ("감사인의감사의견등", "회계감사인의감사의견등")
+_A001_OPINION_EXCLUDE = "2.감사제도에관한사항"
+
+
+@dataclass(frozen=True)
+class SelectorEntry:
+    """카탈로그 entry 한 건."""
+
+    entry_id: str
+    rcept_no: str
+    dcm_no: str
+    report_type: str
+    source: str
+    document_name: str | None
+    section_name: str | None
+
+
+@dataclass(frozen=True)
+class LeafIds:
+    """감사보고서 추출 대상 leaf entry 식별자."""
+
+    cover_entry_id: str | None
+    opinion_entry_id: str | None
+    activity_entry_id: str | None
+    a001_opinion_entry_id: str | None
+    a001_cover_entry_id: str | None
+
+
+def is_audit_document(
+    report_type: str | None,
+    source: str,
+    document_name: str | None,
+) -> bool:
+    """감사보고서 추출 대상 문서인지 판별한다."""
+    if report_type in ("F001", "F002"):
+        return True
+
+    if report_type != "A001" or source != "attachment":
+        return False
+
+    compact_name = compact(document_name)
+    if compact_name not in _A001_ATTACHMENT_DOC_NAMES:
+        return False
+
+    return not any(marker in compact_name for marker in _AUDIT_DOC_EXCLUDE_MARKERS)
+
+
+def fs_scope_for(report_type: str, document_name: str | None) -> str:
+    """재무제표 범위(separate/consolidated/unknown)를 반환한다."""
+    if report_type == "F001":
+        return "separate"
+    if report_type == "F002":
+        return "consolidated"
+
+    if report_type == "A001":
+        compact_name = compact(document_name)
+        if compact_name == "연결감사보고서":
+            return "consolidated"
+        if compact_name == "감사보고서":
+            return "separate"
+
+    return "unknown"
+
+
+def group_by_dcm(entries: list[SelectorEntry]) -> dict[str, list[SelectorEntry]]:
+    """dcm_no별로 entry 목록을 묶는다."""
+    grouped: dict[str, list[SelectorEntry]] = {}
+    for entry in entries:
+        grouped.setdefault(entry.dcm_no, []).append(entry)
+    return grouped
+
+
+def _is_cover_leaf(entry: SelectorEntry) -> bool:
+    section = compact(entry.section_name)
+    return section == "감사보고서" and section != "독립된감사인의감사보고서"
+
+
+def _is_opinion_leaf(entry: SelectorEntry) -> bool:
+    return compact(entry.section_name) in _OPINION_SECTION_NAMES
+
+
+def _is_activity_leaf(entry: SelectorEntry) -> bool:
+    return compact(entry.section_name) == "외부감사실시내용"
+
+
+def _is_a001_opinion_leaf(entry: SelectorEntry) -> bool:
+    if entry.source != "body":
+        return False
+    section = compact(entry.section_name)
+    if section == _A001_OPINION_EXCLUDE:
+        return False
+    if section == _A001_OPINION_NUMBERED:
+        return True
+    return any(marker in section for marker in _A001_OPINION_FALLBACK_MARKERS)
+
+
+def _a001_opinion_priority(entry: SelectorEntry) -> int:
+    """번호 섹션이 fallback보다 우선한다."""
+    section = compact(entry.section_name)
+    if section == _A001_OPINION_NUMBERED:
+        return 0
+    return 1
+
+
+def _is_a001_cover_leaf(entry: SelectorEntry) -> bool:
+    if entry.source != "body":
+        return False
+    return (
+        compact(entry.document_name) == "사업보고서"
+        and compact(entry.section_name) == "사업보고서"
+    )
+
+
+def _first_audit_dcm_no(entries: list[SelectorEntry]) -> str | None:
+    for entry in entries:
+        if is_audit_document(entry.report_type, entry.source, entry.document_name):
+            return entry.dcm_no
+    return None
+
+
+def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
+    """같은 접수번호 entry 목록에서 추출 대상 leaf id를 선정한다."""
+    audit_dcm_no = _first_audit_dcm_no(entries)
+    audit_entries = (
+        [entry for entry in entries if entry.dcm_no == audit_dcm_no]
+        if audit_dcm_no is not None
+        else []
+    )
+
+    cover_entry_id = next(
+        (entry.entry_id for entry in audit_entries if _is_cover_leaf(entry)),
+        None,
+    )
+    opinion_entry_id = next(
+        (entry.entry_id for entry in audit_entries if _is_opinion_leaf(entry)),
+        None,
+    )
+    activity_entry_id = next(
+        (entry.entry_id for entry in audit_entries if _is_activity_leaf(entry)),
+        None,
+    )
+
+    a001_opinion_candidates = [
+        entry for entry in entries if _is_a001_opinion_leaf(entry)
+    ]
+    a001_opinion_entry_id = (
+        min(a001_opinion_candidates, key=_a001_opinion_priority).entry_id
+        if a001_opinion_candidates
+        else None
+    )
+
+    a001_cover_entry_id = next(
+        (entry.entry_id for entry in entries if _is_a001_cover_leaf(entry)),
+        None,
+    )
+
+    return LeafIds(
+        cover_entry_id=cover_entry_id,
+        opinion_entry_id=opinion_entry_id,
+        activity_entry_id=activity_entry_id,
+        a001_opinion_entry_id=a001_opinion_entry_id,
+        a001_cover_entry_id=a001_cover_entry_id,
+    )
