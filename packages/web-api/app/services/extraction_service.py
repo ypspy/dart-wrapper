@@ -186,6 +186,39 @@ def _append_conflict(fact: AuditReportFact, conflict: dict[str, str]) -> None:
     fact.conflicts = conflicts
 
 
+def _copy_operator_fields(
+    fact: AuditReportFact, existing: AuditReportFact | None
+) -> None:
+    """기존 override·LLM 컬럼을 유지하고, override가 있으면 보고일에 우선한다."""
+    if existing is None:
+        return
+    fact.audit_report_date_override = existing.audit_report_date_override
+    fact.date_resolver_model = existing.date_resolver_model
+    fact.date_resolver_prompt_version = existing.date_resolver_prompt_version
+    fact.date_resolver_raw_response = existing.date_resolver_raw_response
+    if existing.audit_report_date_override:
+        fact.audit_report_date = existing.audit_report_date_override
+        fact.audit_report_date_status = "ok"
+        fact.audit_report_date_source = "override"
+
+
+def _failed_fact(sample: Entry, existing: AuditReportFact | None) -> AuditReportFact:
+    """예외가 난 문서의 fetch_failed 행을 만든다."""
+    if existing is not None:
+        existing.fetch_status = "fetch_failed"
+        return existing
+    return AuditReportFact(
+        rcept_no=sample.rcept_no,
+        dcm_no=sample.dcm_no or "",
+        source_report_type=sample.report_type or "",
+        fs_scope=fs_scope_for(sample.report_type or "", sample.document_name),
+        fetch_status="fetch_failed",
+        conflicts=[],
+        audit_report_date_candidates=[],
+        extractor_version=EXTRACTOR_VERSION,
+    )
+
+
 class ExtractionService:
     """감사 추출 잡을 만들고 문서 단위로 실행한다."""
 
@@ -258,7 +291,16 @@ class ExtractionService:
                     ):
                         audit_selectors.append(selector)
                 for dcm_no in group_by_dcm(audit_selectors):
-                    await self._process_document(job_id, filing, dcm_no, mode)
+                    try:
+                        await self._process_document(job_id, filing, dcm_no, mode)
+                    except Exception as exc:
+                        sample = next(
+                            (entry for entry in filing if entry.dcm_no == dcm_no),
+                            None,
+                        )
+                        if sample is None:
+                            raise
+                        await self._mark_document_failed(job_id, sample, exc)
                     processed += 1
 
             async with self._sessionmaker() as session:
@@ -293,18 +335,47 @@ class ExtractionService:
         rcept_no = sample.rcept_no
 
         async with self._sessionmaker() as session:
-            facts = FactRepository(session)
-            existing = await facts.get(rcept_no, dcm_no)
+            existing = await FactRepository(session).get(rcept_no, dcm_no)
             if _should_skip(existing, mode):
                 return
 
+        try:
             fact = await self._extract_document(filing, audit_entries)
+        except Exception as exc:
+            await self._mark_document_failed(job_id, sample, exc)
+            return
+
+        async with self._sessionmaker() as session:
+            facts = FactRepository(session)
+            existing = await facts.get(rcept_no, dcm_no)
+            _copy_operator_fields(fact, existing)
             await facts.upsert(fact)
             await self._apply_sibling_opinion(session, fact, sample)
             await ExtractionJobRepository(session).add_log(
                 job_id,
                 "info",
                 f"{rcept_no}/{dcm_no} 추출 완료({fact.fetch_status}).",
+            )
+            await session.commit()
+
+    async def _mark_document_failed(
+        self,
+        job_id: str,
+        sample: Entry,
+        exc: BaseException,
+    ) -> None:
+        """문서 예외를 fetch_failed로 남기고 다음 문서로 넘어갈 수 있게 한다."""
+        rcept_no = sample.rcept_no
+        dcm_no = sample.dcm_no or ""
+        logger.exception("문서 추출에 실패했습니다: %s/%s", rcept_no, dcm_no)
+        async with self._sessionmaker() as session:
+            facts = FactRepository(session)
+            existing = await facts.get(rcept_no, dcm_no)
+            await facts.upsert(_failed_fact(sample, existing))
+            await ExtractionJobRepository(session).add_log(
+                job_id,
+                "error",
+                f"{rcept_no}/{dcm_no} 추출 실패: {exc}",
             )
             await session.commit()
 

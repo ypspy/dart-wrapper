@@ -433,3 +433,119 @@ async def test_sibling_opinion_conflict_on_both_rows(sessionmaker_fixture) -> No
     assert a001.opinion_code == "qualified"
     assert any(c.get("field") == "sibling_opinion" for c in f001.conflicts)
     assert any(c.get("field") == "sibling_opinion" for c in a001.conflicts)
+
+
+async def test_reparse_preserves_override_and_resolver_columns(
+    sessionmaker_fixture,
+) -> None:
+    """reparse upsert는 override·LLM 컬럼과 override 보고일을 유지한다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F001",
+                fs_scope="separate",
+                fetch_status="ok",
+                opinion_status="not_found",
+                audit_report_date_override="2020-02-21",
+                audit_report_date="2020-02-21",
+                audit_report_date_status="ok",
+                audit_report_date_source="override",
+                date_resolver_model="gpt-test",
+                date_resolver_prompt_version="prompt.v1",
+                date_resolver_raw_response='{"index":0}',
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start(
+            "20200301", "20200331", ["F001"], "reparse"
+        )
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.audit_report_date_override == "2020-02-21"
+    assert fact.date_resolver_model == "gpt-test"
+    assert fact.date_resolver_prompt_version == "prompt.v1"
+    assert fact.date_resolver_raw_response == '{"index":0}'
+    assert fact.audit_report_date == "2020-02-21"
+    assert fact.audit_report_date_status == "ok"
+    assert fact.audit_report_date_source == "override"
+    assert fact.opinion_code == "unqualified"
+
+
+async def test_document_exception_continues_remaining(
+    sessionmaker_fixture,
+) -> None:
+    """한 문서 예외는 fetch_failed로 남기고 다음 문서는 추출·성공으로 끝낸다."""
+    cover2 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=cover"
+    opinion2 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e2-cover",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                viewer_url=cover2,
+            ),
+            _entry(
+                entry_id="e2-opinion",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                section_name="독립된 감사인의 감사보고서",
+                path=["독립된 감사인의 감사보고서"],
+                viewer_url=opinion2,
+            ),
+        ],
+    )
+
+    class _BoomHttp:
+        """첫 문서 leaf만 예상 밖 예외를 내고 나머지는 위임한다."""
+
+        def __init__(self, inner: DartHttpClient) -> None:
+            self._inner = inner
+
+        async def fetch_html(self, url: str) -> str:
+            if url in {COVER_URL, OPINION_URL}:
+                raise RuntimeError("의도한 문서 예외")
+            return await self._inner.fetch_html(url)
+
+    inner, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            cover2: (200, COVER_HTML),
+            opinion2: (200, OPINION_HTML),
+        },
+    )
+    service = ExtractionService(sessionmaker_fixture, _BoomHttp(inner._http))
+    async with client:
+        job_id = await service.start(
+            "20200301", "20200331", ["F001"], "extract"
+        )
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        first = await FactRepository(session).get("20200331000001", "11111")
+        second = await FactRepository(session).get("20200331000002", "22222")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert first is not None
+    assert first.fetch_status == "fetch_failed"
+    assert second is not None
+    assert second.fetch_status == "ok"
+    assert second.opinion_code == "unqualified"
+    assert job is not None
+    assert job.status == "succeeded"
