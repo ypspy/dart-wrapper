@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.adapters.node_entry_collector import NodeEntryCollector
 from app.api.admin import catalog
+from app.api.admin import extract as admin_extract
 from app.api.admin import ui as admin_ui
 from app.api.catalog import ui as catalog_ui
 from app.api.v1 import catalog as catalog_query
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(catalog.router)
+    app.include_router(admin_extract.router)
     app.include_router(admin_ui.router)
     app.include_router(catalog_ui.router)
     app.include_router(catalog_query.router)

@@ -15,6 +15,8 @@ from app.repositories.entry_repository import EntryRepository
 from app.repositories.slice_repository import SliceRepository
 from app.services.catalog_query_service import CatalogQueryService
 from app.services.catalog_service import CatalogService
+from app.services.completeness_service import CompletenessService
+from app.services.extraction_service import ExtractionService
 from app.services.slice_query_service import SliceQueryService
 from app.services.viewer_service import ViewerService
 
@@ -108,3 +110,31 @@ def get_catalog_query_service(
         DisclosureRepository(session),
         EntryRepository(session),
     )
+
+
+def get_extraction_service(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+) -> ExtractionService:
+    """Admin 감사 추출 서비스를 제공한다.
+
+    백그라운드 작업이 요청 세션 수명에 묶이지 않도록 세션메이커를 직접 넘긴다.
+    HTTP 클라이언트를 재사용하므로 앱 상태에 인스턴스를 하나만 둔다.
+    """
+    service = getattr(request.app.state, "extraction_service", None)
+    if service is None:
+        http = DartHttpClient(
+            request.app.state.http_client,
+            timeout_seconds=settings.dart_fetch_timeout_seconds,
+            max_retries=settings.dart_fetch_max_retries,
+        )
+        service = ExtractionService(request.app.state.sessionmaker, http)
+        request.app.state.extraction_service = service
+    return service
+
+
+def get_completeness_service(
+    session: AsyncSession = Depends(get_session),
+) -> CompletenessService:
+    """감사 추출 완전성 조회·날짜 보정 서비스를 제공한다."""
+    return CompletenessService(session)

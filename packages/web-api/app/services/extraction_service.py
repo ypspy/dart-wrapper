@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.adapters.dart_http import DartHttpClient
-from app.errors import SourceFetchError
+from app.errors import CatalogNotFound, SourceFetchError
 from app.extracting.a001_section import extract_a001_current_audit
 from app.extracting.activity_header import extract_activity_header
 from app.extracting.auditor_body import extract_body_auditor
@@ -47,6 +47,8 @@ from app.models.extraction_job import ExtractionJob
 from app.repositories.entry_repository import EntryRepository
 from app.repositories.extraction_job_repository import ExtractionJobRepository
 from app.repositories.fact_repository import FactRepository
+from app.schemas.catalog import JobLogItem
+from app.schemas.extract import ExtractJobStatusResponse
 from app.services.dart_job_lock import DART_EXTRACTOR_ID, assert_dart_idle
 
 logger = logging.getLogger(__name__)
@@ -252,6 +254,28 @@ class ExtractionService:
             await jobs.add_log(job_id, "info", "추출 작업을 등록했습니다.")
             await session.commit()
         return job_id
+
+    async def get_status(self, job_id: str) -> ExtractJobStatusResponse:
+        """추출 작업 현황과 최근 로그를 반환한다.
+
+        :raises CatalogNotFound: 해당 작업이 없는 경우
+        """
+        async with self._sessionmaker() as session:
+            job = await session.get(ExtractionJob, job_id)
+            if job is None:
+                raise CatalogNotFound(f"추출 작업을 찾을 수 없습니다: {job_id}")
+            logs = await ExtractionJobRepository(session).recent_logs(job_id)
+
+        return ExtractJobStatusResponse(
+            job_id=job.job_id,
+            status=job.status,
+            mode=job.mode,
+            params=job.params,
+            error_message=job.error_message,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            logs=[JobLogItem.model_validate(log) for log in logs],
+        )
 
     async def run_job(self, job_id: str) -> None:
         """기간 안 감사 문서를 하나씩 추출하고 커밋한다."""
