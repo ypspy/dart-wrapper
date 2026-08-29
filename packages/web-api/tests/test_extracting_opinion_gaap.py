@@ -123,3 +123,77 @@ def test_citation_without_cut_skips_hit_then_unqualified() -> None:
     result = classify_opinion(text, looks_like_letter=True)
     assert result.code == "unqualified"
     assert result.raw == "boilerplate_unqualified"
+
+
+def test_trailing_qualified_after_management_responsibility() -> None:
+    """종전 후행형: 경영진의책임 뒤 한정의견근거는 전문에서 qualified이다."""
+    text = (
+        "우리는 연결재무제표를 감사하였습니다. "
+        "연결재무제표에 대한 경영진의 책임 경영진은 작성 책임이 있습니다. "
+        "감사인의 책임 우리는 감사하였습니다. "
+        "한정의견근거 재고자산 과대계상. "
+        "감사의견 한정의견근거단락에기술된사항이미치는영향을제외하고는 적정합니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.status == "ok"
+    assert result.code == "qualified"
+    assert result.raw == "한정의견근거"
+
+
+def test_trailing_disclaimer_after_management_responsibility() -> None:
+    """종전 후행형: 경영진의책임 뒤 의견거절근거는 전문에서 disclaimer이다."""
+    text = (
+        "우리는 연결재무제표를 감사하였습니다. "
+        "연결재무제표에 대한 경영진의 책임 경영진은 작성 책임이 있습니다. "
+        "의견거절근거 감사범위 제한. "
+        "감사의견 우리는 의견을 표명하지 않습니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.code == "disclaimer"
+    assert result.raw == "의견거절근거"
+
+
+def test_new_unlisted_qualified_before_governance_responsibility() -> None:
+    """신 비상장: KAM·감사의견근거 없이 근거는 창 안, 책임 단락의 거절은 창 밖이다."""
+    text = (
+        "감사의견 한정의견근거단락에기술된사항이미치는영향을제외하고는 적정합니다. "
+        "경영진과 지배기구의 책임 경영진은 책임이 있습니다. "
+        "과거 감사에서 의견을 표명하지 않았습니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.code == "qualified"
+    assert result.raw == "한정의견근거단락에기술된사항이미치는영향을제외"
+
+
+def test_going_concern_paragraph_after_opinion_is_cut() -> None:
+    """선행형: 계속기업 단락의 거절 문구는 창 밖이라 적정이 된다."""
+    text = (
+        "감사의견 우리는 적정하다고 봅니다. "
+        "감사의견근거 회계감사기준에 따라 감사를 수행하였습니다. "
+        "계속기업 관련 중요한 불확실성. 의견을 표명하지 않습니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.code == "unqualified"
+    assert result.raw == "boilerplate_unqualified"
+
+
+def test_new_format_disclaimer_before_kam() -> None:
+    """신 상장: 앞쪽 의견을표명하지않습니다는 disclaimer이다."""
+    text = (
+        "재무제표감사에 대한 보고 "
+        "감사의견 우리는 의견을 표명하지 않습니다. "
+        "의견거절근거 감사범위 제한. "
+        "핵심감사사항 수익인식."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.code == "disclaimer"
+    assert result.raw == "의견을표명하지않"
+
+
+def test_preceding_cut_at_start_stays_unqualified() -> None:
+    """선행형 표지가 맨 앞이면 구간이 비어 적정이 되고 전문으로 되돌리지 않는다."""
+    text = "강조사항 의견을 표명하지 않습니다. " + ("가" * 80)
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.status == "ok"
+    assert result.code == "unqualified"
+    assert result.raw == "boilerplate_unqualified"

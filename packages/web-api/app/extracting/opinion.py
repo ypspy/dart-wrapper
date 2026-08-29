@@ -30,13 +30,25 @@ _OPINION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _SNIPPET_RADIUS = 80
-_CUT_MARKERS = (
+_PRECEDING_HEADINGS = (
+    "재무제표감사에대한보고",
+    "연결재무제표감사에대한보고",
+    "핵심감사사항",
+    "감사의견근거",
+)
+_TRAILING_GROUNDS = (
+    "한정의견근거",
+    "의견거절근거",
+    "부적정의견근거",
+)
+_PRECEDING_CUT_MARKERS = (
     "강조사항",
     "핵심감사사항",
     "기타사항",
-    "재무제표에대한경",
+    "계속기업관련중요한불확실성",
     "감사의견에는영향을미치지않는사항",
     "영향을미치지않는사항",
+    "경영진과지배기구의책임",
 )
 _CITATION_MARKERS = (
     "일자로발행한감사보고서에서",
@@ -44,13 +56,31 @@ _CITATION_MARKERS = (
 )
 
 
-def _opinion_window(compacted: str) -> str:
-    """끊는 표지 앞만 남긴다. 표지가 없으면 전체다."""
-    cuts = [compacted.find(marker) for marker in _CUT_MARKERS]
+def _is_trailing_layout(compacted: str) -> bool:
+    """종전 후행형인지 본다. 신 서식 표지가 없고 경영진의책임 뒤에 근거 표지가 있을 때다."""
+    if any(heading in compacted for heading in _PRECEDING_HEADINGS):
+        return False
+    start = compacted.find("경영진의책임")
+    if start < 0:
+        return False
+    after = compacted[start + len("경영진의책임") :]
+    return any(ground in after for ground in _TRAILING_GROUNDS)
+
+
+def _preceding_window(compacted: str) -> str:
+    """선행형: 끊는 표지 앞만 남긴다. 표지가 없으면 전체다."""
+    cuts = [compacted.find(marker) for marker in _PRECEDING_CUT_MARKERS]
     cuts = [index for index in cuts if index >= 0]
     if not cuts:
         return compacted
     return compacted[: min(cuts)]
+
+
+def _opinion_window(compacted: str) -> str:
+    """후행형이면 전문, 아니면 선행형 창이다. 빈 창을 전문으로 되돌리지 않는다."""
+    if _is_trailing_layout(compacted):
+        return compacted
+    return _preceding_window(compacted)
 
 
 def _is_prior_report_citation(compacted: str, start: int, length: int) -> bool:
@@ -65,14 +95,16 @@ def classify_opinion(text: str, *, looks_like_letter: bool) -> FieldResult:
     """감사의견 본문을 분류한다.
 
     looks_like_letter가 False이면 즉시 not_found를 반환한다.
-    True이면 끊는 표지 앞 구간에서 D-3-2 키워드를 거절→한정→부적정 순으로 찾고,
-    과거 보고서 인용 히트는 건너뛴다. 없으면 boilerplate 적정을 반환한다.
+    True이면 compact 본문으로 선행형·후행형을 가른 뒤, 해당 구간에서
+    D-3-2 키워드를 거절→한정→부적정 순으로 찾고 과거 보고서 인용 히트는
+    건너뛴다. 없으면 boilerplate 적정을 반환한다.
     """
     if not looks_like_letter:
         return FieldResult(raw=None, code=None, status="not_found")
 
     window = _opinion_window(compact(text))
     for code, keywords in _OPINION_GROUPS:
+        best: tuple[int, int, str] | None = None
         for keyword in keywords:
             start = 0
             while True:
@@ -80,8 +112,12 @@ def classify_opinion(text: str, *, looks_like_letter: bool) -> FieldResult:
                 if found < 0:
                     break
                 if not _is_prior_report_citation(window, found, len(keyword)):
-                    return FieldResult(raw=keyword, code=code, status="ok")
+                    candidate = (found, -len(keyword), keyword)
+                    if best is None or candidate < best:
+                        best = candidate
                 start = found + 1
+        if best is not None:
+            return FieldResult(raw=best[2], code=code, status="ok")
 
     return FieldResult(
         raw="boilerplate_unqualified",
