@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.errors import Unauthorized
 from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
+from app.repositories.fact_repository import FactRepository
 from app.repositories.slice_repository import SliceRepository
 from app.services.catalog_query_service import CatalogQueryService
 from app.services.catalog_service import CatalogService
@@ -53,6 +54,11 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
 def get_entry_repository(session: AsyncSession = Depends(get_session)) -> EntryRepository:
     """엔트리 저장소를 제공한다."""
     return EntryRepository(session)
+
+
+def get_fact_repository(session: AsyncSession = Depends(get_session)) -> FactRepository:
+    """감사 추출 결과 저장소를 제공한다."""
+    return FactRepository(session)
 
 
 def get_viewer_service(

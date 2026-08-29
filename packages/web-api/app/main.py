@@ -14,6 +14,7 @@ from app.api.admin import extract as admin_extract
 from app.api.admin import ui as admin_ui
 from app.api.catalog import ui as catalog_ui
 from app.api.v1 import catalog as catalog_query
+from app.api.v1 import facts as audit_facts
 from app.api.v1 import viewer
 from app.config import get_settings
 from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog_ui.router)
     app.include_router(catalog_query.router)
     app.include_router(viewer.router)
+    app.include_router(audit_facts.router)
 
     @app.get("/health", tags=["시스템"])
     async def health() -> dict[str, str]:
