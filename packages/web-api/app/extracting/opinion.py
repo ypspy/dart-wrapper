@@ -29,22 +29,59 @@ _OPINION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("adverse", _ADVERSE_KEYWORDS),
 )
 
+_SNIPPET_RADIUS = 80
+_CUT_MARKERS = (
+    "강조사항",
+    "핵심감사사항",
+    "기타사항",
+    "재무제표에대한경",
+    "감사의견에는영향을미치지않는사항",
+    "영향을미치지않는사항",
+)
+_CITATION_MARKERS = (
+    "일자로발행한감사보고서에서",
+    "비교표시목적으로",
+)
+
+
+def _opinion_window(compacted: str) -> str:
+    """끊는 표지 앞만 남긴다. 표지가 없으면 전체다."""
+    cuts = [compacted.find(marker) for marker in _CUT_MARKERS]
+    cuts = [index for index in cuts if index >= 0]
+    if not cuts:
+        return compacted
+    return compacted[: min(cuts)]
+
+
+def _is_prior_report_citation(compacted: str, start: int, length: int) -> bool:
+    """히트 앞뒤 80자에 과거 보고서 인용 표지가 있는지 본다."""
+    left = max(0, start - _SNIPPET_RADIUS)
+    right = min(len(compacted), start + length + _SNIPPET_RADIUS)
+    snippet = compacted[left:right]
+    return any(marker in snippet for marker in _CITATION_MARKERS)
+
 
 def classify_opinion(text: str, *, looks_like_letter: bool) -> FieldResult:
     """감사의견 본문을 분류한다.
 
     looks_like_letter가 False이면 즉시 not_found를 반환한다.
-    True이면 D-3-2 키워드를 거절→한정→부적정 순으로 찾고,
-    없으면 boilerplate 적정을 반환한다.
+    True이면 끊는 표지 앞 구간에서 D-3-2 키워드를 거절→한정→부적정 순으로 찾고,
+    과거 보고서 인용 히트는 건너뛴다. 없으면 boilerplate 적정을 반환한다.
     """
     if not looks_like_letter:
         return FieldResult(raw=None, code=None, status="not_found")
 
-    compacted = compact(text)
+    window = _opinion_window(compact(text))
     for code, keywords in _OPINION_GROUPS:
         for keyword in keywords:
-            if keyword in compacted:
-                return FieldResult(raw=keyword, code=code, status="ok")
+            start = 0
+            while True:
+                found = window.find(keyword, start)
+                if found < 0:
+                    break
+                if not _is_prior_report_citation(window, found, len(keyword)):
+                    return FieldResult(raw=keyword, code=code, status="ok")
+                start = found + 1
 
     return FieldResult(
         raw="boilerplate_unqualified",
