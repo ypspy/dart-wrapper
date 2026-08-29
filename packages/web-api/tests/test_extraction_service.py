@@ -155,7 +155,7 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.fetch_status == "ok"
     assert fact.opinion_code == "unqualified"
     assert fact.opinion_status == "ok"
-    assert fact.extractor_version == "audit_opinion.v1"
+    assert fact.extractor_version == "audit_opinion.v2"
 
 
 async def test_start_raises_when_catalog_running(sessionmaker_fixture) -> None:
