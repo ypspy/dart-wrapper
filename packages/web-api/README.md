@@ -47,9 +47,15 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | GET | `/admin/catalog/slices/{slice_id}` | 슬라이스 상세와 공시별 처리 결과 |
 | POST | `/admin/catalog/slices/{slice_id}/retry` | 해당 슬라이스 실패분 재시도 |
 | POST | `/admin/catalog/jobs/{job_id}/soft-stop` | 다음 공시 경계에서 중단 |
+| POST | `/admin/extract/audit-opinion` | 감사 표지·의견 추출 트리거 (202, `job_id`) |
+| GET | `/admin/extract/status?job_id=` | 추출 작업 현황·로그 |
+| GET | `/admin/extract/audit-opinion/completeness` | 기간·유형별 추출 완전성 집계 |
+| PATCH | `/admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date` | 감사보고서일 수동 보정 |
+| POST | `/admin/extract/resolve-dates` | ambiguous 감사보고서일 LLM 해소 |
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}` | 공시 단건 요약 |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | entry 목록 (전 feature, `all_entries`) |
+| GET | `/api/v1/disclosures/{rcp_no}/audit-facts` | 공시별 감사 추출 결과 (인증 없음) |
 | GET | `/api/v1/viewer/{rcp_no}` | 접수번호의 모든 entry 섹션 원문 (종합 분석용) |
 | GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 특정 entry 섹션 원문 (단건 조회) |
 | GET | `/catalog` | 공시 목록 표 (`DisclosureSummary` 전 컬럼). `disclosure_url`은 「원문」 링크(새 탭) |
@@ -67,6 +73,79 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 상세는 [`../entry-extractor/README.md`](../entry-extractor/README.md)를 보세요.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
+
+## 감사보고서 추출
+
+카탈로그에 있는 `viewer_url`로 감사 표지·의견 5필드(감사인, 의견, 보고일, GAAP, 당기)를
+뽑아 `audit_report_facts`에 저장합니다. 원문 HTML은 저장하지 않습니다.
+추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
+
+카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
+날짜 LLM 해소는 DART를 쓰지 않아 수집과 병행할 수 있습니다.
+
+### Admin 추출
+
+`POST /admin/extract/audit-opinion`에 기간·유형·모드를 보냅니다.
+
+```json
+{
+  "start_date": "20200301",
+  "end_date": "20200331",
+  "report_types": ["F001", "F002", "A001"],
+  "mode": "extract"
+}
+```
+
+`mode`는 `extract`(신규), `resume`(행 없음·fetch 실패 재시도), `reparse`(필드 `not_found` 재파싱)입니다.
+바로 `job_id`를 돌려주고 실제 추출은 백그라운드에서 진행됩니다.
+현황은 `GET /admin/extract/status?job_id=`로 봅니다.
+
+감사보고서일만 손으로 고치려면
+`PATCH /admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date`에 `{"iso": "2020-02-20"}`를 보냅니다.
+
+### 완전성
+
+`GET /admin/extract/audit-opinion/completeness?start_date=&end_date=&report_type=`
+한 유형의 기간 집계입니다. 문서 단위는 `rcept_no`+`dcm_no`입니다.
+
+| 키 | 의미 |
+|----|------|
+| `target` | selector가 고른 대상 문서 수 |
+| `ok` | `fetch_status=ok` |
+| `fetch_failed` / `blocked` / `section_missing` | 해당 fetch 상태 |
+| `unextracted` | 대상인데 facts 행이 없음 |
+| `ambiguous_dates` | `audit_report_date_status=ambiguous` |
+| `field_partial` | fetch는 됐지만 핵심 필드 중 `ok`가 아닌 것이 있음 |
+
+같은 경로에 `status`와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 받습니다.
+
+### Public 조회
+
+`GET /api/v1/disclosures/{rcp_no}/audit-facts`는 인증 없이 해당 접수의 추출 행을 반환합니다.
+행이 없으면 404가 아니라 빈 목록입니다. 회사명·접수일 등은 facts에 없고,
+아래 export가 `entries`/`disclosures`와 조인합니다.
+
+### DATE_RESOLVER
+
+ambiguous 감사보고서일은 `POST /admin/extract/resolve-dates`로 LLM이 후보 인덱스를 고릅니다.
+설정은 `.env`의 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`(기본 `gpt-4o-mini`),
+`DATE_RESOLVER_PROMPT_VERSION`(기본 `v1`)입니다. API 키가 비어 있으면 400입니다.
+
+### CSV/TSV export
+
+연구용 TSV는 facts와 카탈로그를 조인해 회사명·결산월·접수일·정정구분을 붙입니다.
+정정 전·후 접수를 모두 넣으며, 최종 접수만 남기는 플래그는 없습니다.
+`correction_type`과 `rcept_dt`로 고르면 됩니다.
+
+`packages/web-api`에서 실행합니다.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/export_audit_report_facts.py
+.\.venv\Scripts\python.exe scripts/export_audit_report_facts.py --out facts.tsv
+.\.venv\Scripts\python.exe scripts/export_audit_report_facts.py --database-url sqlite+aiosqlite:///./dart_catalog.db --out facts.tsv
+```
+
+`--database-url` 기본값은 앱 `DATABASE_URL`과 같고, `--out`이 없으면 표준 출력으로 씁니다.
 
 ## 본문 정제 (blocks)
 
@@ -165,3 +244,6 @@ HTMX가 작업 카드·로그·슬라이스 요약·히트맵은 5초, 연도 �
 Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`, `HEATMAP_REPORT_TYPES`입니다.
 `HEATMAP_REPORT_TYPES`는 히트맵·유형 토글에 고정 표시할 보고서 유형(쉼표 구분, 기본 `A001,A002,A003,F001,F002,F004`)입니다.
 코드별 한국어 명칭은 `app/report_types.py`에 있으며, 목록에 없는 코드는 코드 그대로 표시합니다.
+
+감사보고서일 LLM 해소는 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`, `DATE_RESOLVER_PROMPT_VERSION`입니다.
+키가 비어 있으면 `POST /admin/extract/resolve-dates`는 시작하지 않습니다.
