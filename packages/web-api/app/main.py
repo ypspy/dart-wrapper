@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -19,6 +20,9 @@ from app.api.v1 import viewer
 from app.config import get_settings
 from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
 from app.errors import register_exception_handlers
+from app.repositories.job_repository import JobRepository
+
+logger = logging.getLogger(__name__)
 
 # DART는 일반 브라우저 요청과 유사한 헤더를 기대한다.
 _DEFAULT_HEADERS = {
@@ -41,10 +45,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     http_client = httpx.AsyncClient(headers=_DEFAULT_HEADERS, follow_redirects=True)
     # OpenAI 호출에는 DART Referer를 붙이지 않는다.
     llm_http_client = httpx.AsyncClient(follow_redirects=True)
+    sessionmaker = create_sessionmaker(engine)
 
     app.state.settings = settings
     app.state.engine = engine
-    app.state.sessionmaker = create_sessionmaker(engine)
+    app.state.sessionmaker = sessionmaker
     app.state.http_client = http_client
     app.state.llm_http_client = llm_http_client
     app.state.entry_collector = NodeEntryCollector(
@@ -52,6 +57,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.entry_collector_script,
         timeout_seconds=settings.collector_timeout_seconds,
     )
+
+    # --reload·프로세스 종료로 워커만 사라지고 DB에 running이 남은 작업을 정리한다.
+    async with sessionmaker() as session:
+        abandoned = await JobRepository(session).abandon_orphans()
+        await session.commit()
+    if abandoned:
+        logger.warning(
+            "서버 기동 시 고아 수집 작업 %d건을 partial로 마감했습니다: %s",
+            len(abandoned),
+            ", ".join(job_id[:8] for job_id in abandoned),
+        )
 
     try:
         yield

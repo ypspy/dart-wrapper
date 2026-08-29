@@ -306,7 +306,7 @@ async def test_soft_stop_halts_remaining_slices(sessionmaker_fixture) -> None:
     assert any("남은 슬라이스" in log.message for log in status.logs)
 
 
-async def test_job_records_saved_entry_counts(sessionmaker_fixture) -> None:
+async def test_job_records_disclosure_progress_counts(sessionmaker_fixture) -> None:
     collector = ScriptedCollector()
     service = _service(sessionmaker_fixture, collector)
 
@@ -315,5 +315,6 @@ async def test_job_records_saved_entry_counts(sessionmaker_fixture) -> None:
     status = await service.get_status(response.job_id)
 
     assert status.status == "succeeded"
+    # ScriptedCollector는 공시당 엔트리 1건 → 해당일 입수/대상 = (3, 3)
     assert (status.total_entries, status.saved_entries) == (3, 3)
     assert status.params["report_type"] == "F001"

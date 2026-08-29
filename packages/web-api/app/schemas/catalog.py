@@ -144,8 +144,9 @@ class JobStatusResponse(BaseModel):
     status: str
     mode: str = "collect"
     params: dict[str, Any] = Field(default_factory=dict)
-    total_entries: int = 0
-    saved_entries: int = 0
+    # 컬럼명은 entries이지만 UI 값은 해당일 입수대상/입수 공시 건수다.
+    total_entries: int = 0  # 해당일 입수대상(목록) 공시 수
+    saved_entries: int = 0  # 해당일 입수(처리) 공시 수
     error_message: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None

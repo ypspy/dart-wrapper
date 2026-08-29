@@ -96,6 +96,38 @@ async def test_latest_returns_none_when_no_job_exists(sessionmaker_fixture) -> N
     assert latest is None
 
 
+async def test_abandon_orphans_marks_active_jobs_partial(sessionmaker_fixture) -> None:
+    async with sessionmaker_fixture() as session:
+        repository = JobRepository(session)
+        await repository.create("job-live", {"report_type": "F001"}, "key-live")
+        await repository.mark_running("job-live")
+        await repository.update_progress("job-live", saved_entries=3, total_entries=10)
+        await repository.create("job-done", {}, "key-done")
+        await repository.mark_succeeded("job-done", total_entries=1, saved_entries=1)
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        repository = JobRepository(session)
+        abandoned = await repository.abandon_orphans()
+        await session.commit()
+
+    assert abandoned == ["job-live"]
+
+    async with sessionmaker_fixture() as session:
+        repository = JobRepository(session)
+        live = await repository.get("job-live")
+        done = await repository.get("job-done")
+        active = await repository.find_any_active()
+        logs = await repository.recent_logs("job-live")
+
+    assert live is not None and live.status == "partial"
+    assert live.saved_entries == 3 and live.total_entries == 10
+    assert "서버가 재시작" in (live.error_message or "")
+    assert done is not None and done.status == "succeeded"
+    assert active is None
+    assert any("서버가 재시작" in log.message for log in logs)
+
+
 async def test_mark_failed_records_message(sessionmaker_fixture) -> None:
     async with sessionmaker_fixture() as session:
         repository = JobRepository(session)

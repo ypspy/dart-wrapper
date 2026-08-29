@@ -22,7 +22,7 @@
     {% if job.stop_requested %}
     중단 요청됨 — 현재 공시 처리가 끝나는 대로 멈춥니다.
     {% else %}
-    수집이 진행 중입니다. 아래 저장 수치와 로그가 5초마다 갱신됩니다.
+    수집이 진행 중입니다. 해당일 입수 수치와 로그가 5초마다 갱신됩니다.
     {% endif %}
   </p>
   {% endif %}
@@ -33,7 +33,10 @@
       <dd>{{ job.params.get("start_date", "—") }} ~ {{ job.params.get("end_date", "—") }}</dd>
     </div>
     <div><dt>유형</dt><dd>{{ job.params.get("report_type", "—") }}</dd></div>
-    <div><dt>저장</dt><dd>{{ saved }}{% if total %} / {{ total }}{% endif %}{% if active and total %} ({{ percent }}%){% endif %}</dd></div>
+    <div>
+      <dt>해당일 입수 / 입수대상</dt>
+      <dd>{{ saved }}{% if total %} / {{ total }}{% endif %}{% if active and total %} ({{ percent }}%){% endif %}</dd>
+    </div>
     {% if job.started_at %}
     <div><dt>시작</dt><dd>{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</dd></div>
     {% endif %}

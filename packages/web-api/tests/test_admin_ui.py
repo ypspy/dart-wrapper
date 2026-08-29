@@ -444,6 +444,8 @@ async def test_job_status_partial_renders_running_job(client_factory) -> None:
     assert "job-1234" in body
     assert "실행 중" in body
     assert "4 / 10" in body
+    assert "해당일 입수 / 입수대상" in body
+    assert 'width: 40%' in body
     assert "20260701 ~ 20260726" in body
     assert "소프트 스톱" in body
     assert "강제 종료" in body

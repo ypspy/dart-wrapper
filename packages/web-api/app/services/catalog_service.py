@@ -261,8 +261,12 @@ class CatalogService:
             await jobs.add_log(job_id, "info", f"슬라이스 {len(targets)}개를 처리합니다.")
             await session.commit()
 
-        saved_total = 0
-        listed_total = 0
+        saved_total = 0  # 저장한 entry 수(마감 로그용)
+        processed_total = 0  # 처리한 공시 수(마감 로그용)
+        listed_total = 0  # 목록 공시 수(마감 로그용)
+        # UI 프로그레스는 해당일만 보여 주므로, 마지막 슬라이스 수치를 마감에도 남긴다.
+        day_processed = 0
+        day_listed = 0
         incomplete = 0
         stopped = False
 
@@ -279,15 +283,17 @@ class CatalogService:
                     incomplete += 1
                     break
 
-                saved, listed, is_complete = await self._process_slice(
+                saved, processed, listed, is_complete = await self._process_slice(
                     job_id,
                     report_type,
                     slice_date,
                     include_attachments,
-                    progress_base=(saved_total, listed_total),
                 )
                 saved_total += saved
+                processed_total += processed
                 listed_total += listed
+                day_processed = processed
+                day_listed = listed
                 if not is_complete:
                     incomplete += 1
 
@@ -318,17 +324,21 @@ class CatalogService:
 
         async with self._sessionmaker() as session:
             jobs = JobRepository(session)
+            # 카드 수치는 해당일 입수/입수대상. 전체 합계는 로그만 남긴다.
             await jobs.mark_finished(
                 job_id,
                 status,
-                total_entries=max(listed_total, saved_total),
-                saved_entries=saved_total,
+                total_entries=day_listed,
+                saved_entries=day_processed,
                 error_message=message,
             )
             await jobs.add_log(
                 job_id,
                 "info" if incomplete == 0 else "warning",
-                f"엔트리 {saved_total}건을 저장했습니다. 미완료 슬라이스 {incomplete}개.",
+                (
+                    f"공시 {processed_total}/{listed_total}건 처리, "
+                    f"엔트리 {saved_total}건 저장. 미완료 슬라이스 {incomplete}개."
+                ),
             )
             await session.commit()
 
@@ -338,11 +348,12 @@ class CatalogService:
         report_type: str,
         slice_date: str,
         include_attachments: bool,
-        *,
-        progress_base: tuple[int, int] = (0, 0),
-    ) -> tuple[int, int, bool]:
-        """하루치 슬라이스를 처리하고 (저장 수, 목록 수, 완료 여부)를 반환한다."""
-        base_saved, base_listed = progress_base
+    ) -> tuple[int, int, int, bool]:
+        """하루치 슬라이스를 처리한다.
+
+        반환: (저장 entry 수, 처리 공시 수, 목록 공시 수, 슬라이스 완료 여부)
+        작업 현황 프로그레스는 해당일 입수/입수대상만 갱신한다.
+        """
         async with self._sessionmaker() as session:
             slices = SliceRepository(session)
             slice_row = await slices.get_or_create_slice(report_type, slice_date)
@@ -366,8 +377,12 @@ class CatalogService:
                 await JobRepository(session).add_log(
                     job_id, "error", f"{slice_date} 목록 수집에 실패했습니다: {exc}"
                 )
+                # 해당일 목록을 못 가져왔으면 진행 수치를 비운다.
+                await JobRepository(session).update_progress(
+                    job_id, saved_entries=0, total_entries=0
+                )
                 await session.commit()
-            return 0, 0, False
+            return 0, 0, 0, False
 
         async with self._sessionmaker() as session:
             await SliceRepository(session).set_listed(slice_id, listed.listed_count, job_id)
@@ -376,8 +391,8 @@ class CatalogService:
             )
             await JobRepository(session).update_progress(
                 job_id,
-                saved_entries=base_saved,
-                total_entries=max(base_listed + listed.listed_count, base_saved),
+                saved_entries=0,
+                total_entries=listed.listed_count,
             )
             await session.commit()
 
@@ -397,15 +412,12 @@ class CatalogService:
             saved_total += saved
             processed += 1
 
-            # 공시 단위로도 진행 수치를 밀어 폴링 화면에 숨이 보이게 한다.
+            # 해당일 입수/입수대상만 밀어 폴링 화면에 숨이 보이게 한다.
             async with self._sessionmaker() as session:
                 await JobRepository(session).update_progress(
                     job_id,
-                    saved_entries=base_saved + saved_total,
-                    total_entries=max(
-                        base_listed + listed.listed_count,
-                        base_saved + saved_total,
-                    ),
+                    saved_entries=processed,
+                    total_entries=listed.listed_count,
                 )
                 # 긴 파싱 구간에서도 살아 있음을 보이도록 중간 로그를 남긴다.
                 if processed == 1 or processed % 5 == 0 or processed == listed.listed_count:
@@ -413,7 +425,7 @@ class CatalogService:
                         job_id,
                         "info",
                         f"{slice_date} 진행 {processed}/{listed.listed_count}건"
-                        f" (저장 {base_saved + saved_total}건)",
+                        f" (엔트리 +{saved_total}건)",
                     )
                 await session.commit()
 
@@ -450,7 +462,7 @@ class CatalogService:
             )
             await session.commit()
 
-        return saved_total, listed.listed_count, is_complete
+        return saved_total, processed, listed.listed_count, is_complete
 
     async def _process_disclosure(
         self,

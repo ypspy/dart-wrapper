@@ -203,7 +203,8 @@ async def test_run_job_saves_entries_and_marks_success(sessionmaker_fixture) -> 
     status = await service.get_status(response.job_id)
 
     assert status.status == "succeeded"
-    assert (status.total_entries, status.saved_entries) == (3, 3)
+    # 카드 수치는 해당일 입수/입수대상. 이 Fake는 목록 2건·엔트리 3건.
+    assert (status.total_entries, status.saved_entries) == (2, 2)
     assert collector.calls[0].report_type == "F001"
 
     from app.repositories.disclosure_repository import DisclosureRepository
@@ -214,7 +215,8 @@ async def test_run_job_saves_entries_and_marks_success(sessionmaker_fixture) -> 
 
     assert d1 is not None and d1.entry_count == 2
     assert d2 is not None and d2.entry_count == 1
-    assert any("수집" in log.message for log in status.logs)
+    assert any("공시 2/2건 처리" in log.message for log in status.logs)
+    assert any("엔트리 3건 저장" in log.message for log in status.logs)
 
 
 async def test_run_job_reports_partial_when_slice_fails(sessionmaker_fixture) -> None:

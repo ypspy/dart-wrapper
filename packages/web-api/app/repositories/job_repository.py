@@ -65,6 +65,39 @@ class JobRepository:
         result = await self._session.execute(statement)
         return result.scalars().first()
 
+    async def list_active(self) -> list[CatalogJob]:
+        """pending/running 상태인 작업을 모두 반환한다."""
+        statement = (
+            select(CatalogJob)
+            .where(CatalogJob.status.in_(ACTIVE_STATUSES))
+            .order_by(CatalogJob.created_at.desc())
+        )
+        result = await self._session.execute(statement)
+        return list(result.scalars().all())
+
+    async def abandon_orphans(
+        self,
+        *,
+        reason: str = "서버가 재시작되어 진행 중이던 작업을 중단했습니다. 이어하기로 재개하세요.",
+    ) -> list[str]:
+        """프로세스에 워커가 없는 좀비 작업을 partial로 마감한다.
+
+        uvicorn --reload나 프로세스 종료 시 BackgroundTasks 워커는 사라지지만
+        DB 상태는 running으로 남을 수 있다. 기동 시 이를 정리한다.
+        """
+        abandoned: list[str] = []
+        for job in await self.list_active():
+            await self.mark_finished(
+                job.job_id,
+                "partial",
+                total_entries=max(job.total_entries, job.saved_entries),
+                saved_entries=job.saved_entries,
+                error_message=reason,
+            )
+            await self.add_log(job.job_id, "warning", reason)
+            abandoned.append(job.job_id)
+        return abandoned
+
     async def get(self, job_id: str) -> CatalogJob | None:
         """작업을 조회한다. 없으면 None."""
         return await self._session.get(CatalogJob, job_id)
