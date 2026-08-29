@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # 히트맵·유형 토글에 항상 표시할 보고서 유형(쉼표 구분)
     heatmap_report_types: str = "A001,A002,A003,F001,F002,F004"
 
+    # ambiguous 감사보고서일 LLM 해소. 키가 비어 있으면 잡을 시작하지 않는다.
+    date_resolver_api_key: str = ""
+    date_resolver_model: str = "gpt-4o-mini"
+    date_resolver_prompt_version: str = "v1"
+
     @property
     def heatmap_report_type_list(self) -> tuple[str, ...]:
         """히트맵 고정 보고서 유형을 중복 없이 정규화한다."""

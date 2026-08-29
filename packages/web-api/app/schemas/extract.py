@@ -62,6 +62,13 @@ class CompletenessResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class ResolveDatesResponse(BaseModel):
+    """날짜 LLM 해소 트리거 응답. 즉시 반환된다."""
+
+    job_id: str
+    status: str = "pending"
+
+
 class DateOverrideRequest(BaseModel):
     """감사보고서일 수동 보정 요청."""
 

@@ -6,9 +6,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
 from app.api.deps import (
     get_completeness_service,
+    get_date_resolver_service,
     get_extraction_service,
+    get_settings_dep,
     require_admin,
 )
+from app.config import Settings
+from app.errors import BadRequest
 from app.schemas.extract import (
     CompletenessResponse,
     DateOverrideRequest,
@@ -16,8 +20,10 @@ from app.schemas.extract import (
     ExtractAuditRequest,
     ExtractAuditResponse,
     ExtractJobStatusResponse,
+    ResolveDatesResponse,
 )
 from app.services.completeness_service import CompletenessService
+from app.services.date_resolver_service import DateResolverService
 from app.services.extraction_service import ExtractionService
 
 router = APIRouter(
@@ -85,6 +91,28 @@ async def read_completeness(
         cursor=cursor,
         limit=limit,
     )
+
+
+@router.post(
+    "/resolve-dates",
+    response_model=ResolveDatesResponse,
+    status_code=202,
+    summary="ambiguous 감사보고서일 LLM 해소",
+)
+async def resolve_dates(
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings_dep),
+    service: DateResolverService = Depends(get_date_resolver_service),
+) -> ResolveDatesResponse:
+    """ambiguous 날짜를 LLM 인덱스로 고른다. DART는 호출하지 않는다."""
+    if not settings.date_resolver_api_key:
+        raise BadRequest(
+            "날짜 해소용 API 키가 설정되어 있지 않습니다. "
+            "DATE_RESOLVER_API_KEY를 확인한 뒤 다시 시도해 주세요."
+        )
+    job_id = await service.start()
+    background_tasks.add_task(service.run, job_id)
+    return ResolveDatesResponse(job_id=job_id, status="pending")
 
 
 @router.patch(

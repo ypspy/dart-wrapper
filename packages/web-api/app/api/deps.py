@@ -8,6 +8,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.dart_http import DartHttpClient
+from app.adapters.llm_date_resolver import LlmDateResolver
 from app.config import Settings, get_settings
 from app.errors import Unauthorized
 from app.repositories.disclosure_repository import DisclosureRepository
@@ -17,6 +18,7 @@ from app.repositories.slice_repository import SliceRepository
 from app.services.catalog_query_service import CatalogQueryService
 from app.services.catalog_service import CatalogService
 from app.services.completeness_service import CompletenessService
+from app.services.date_resolver_service import DateResolverService
 from app.services.extraction_service import ExtractionService
 from app.services.slice_query_service import SliceQueryService
 from app.services.viewer_service import ViewerService
@@ -144,3 +146,29 @@ def get_completeness_service(
 ) -> CompletenessService:
     """감사 추출 완전성 조회·날짜 보정 서비스를 제공한다."""
     return CompletenessService(session)
+
+
+def get_date_resolver_service(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+) -> DateResolverService:
+    """날짜 LLM 해소 서비스를 제공한다.
+
+    백그라운드 작업이 요청 세션 수명에 묶이지 않도록 세션메이커를 직접 넘긴다.
+    """
+    service = getattr(request.app.state, "date_resolver_service", None)
+    if service is None:
+        resolver = LlmDateResolver(
+            request.app.state.http_client,
+            api_key=settings.date_resolver_api_key,
+            model=settings.date_resolver_model,
+            prompt_version=settings.date_resolver_prompt_version,
+        )
+        service = DateResolverService(
+            request.app.state.sessionmaker,
+            resolver,
+            model=settings.date_resolver_model,
+            prompt_version=settings.date_resolver_prompt_version,
+        )
+        request.app.state.date_resolver_service = service
+    return service
