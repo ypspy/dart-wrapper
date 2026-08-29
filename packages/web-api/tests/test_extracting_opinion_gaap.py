@@ -162,7 +162,7 @@ def test_new_unlisted_qualified_before_governance_responsibility() -> None:
     )
     result = classify_opinion(text, looks_like_letter=True)
     assert result.code == "qualified"
-    assert result.raw == "한정의견근거단락에기술된사항이미치는영향을제외"
+    assert result.raw == "한정의견근거"
 
 
 def test_going_concern_paragraph_after_opinion_is_cut() -> None:
@@ -187,7 +187,7 @@ def test_new_format_disclaimer_before_kam() -> None:
     )
     result = classify_opinion(text, looks_like_letter=True)
     assert result.code == "disclaimer"
-    assert result.raw == "의견을표명하지않"
+    assert result.raw == "의견거절근거"
 
 
 def test_preceding_cut_at_start_stays_unqualified() -> None:

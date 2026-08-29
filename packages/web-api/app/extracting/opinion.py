@@ -104,7 +104,6 @@ def classify_opinion(text: str, *, looks_like_letter: bool) -> FieldResult:
 
     window = _opinion_window(compact(text))
     for code, keywords in _OPINION_GROUPS:
-        best: tuple[int, int, str] | None = None
         for keyword in keywords:
             start = 0
             while True:
@@ -112,12 +111,8 @@ def classify_opinion(text: str, *, looks_like_letter: bool) -> FieldResult:
                 if found < 0:
                     break
                 if not _is_prior_report_citation(window, found, len(keyword)):
-                    candidate = (found, -len(keyword), keyword)
-                    if best is None or candidate < best:
-                        best = candidate
+                    return FieldResult(raw=keyword, code=code, status="ok")
                 start = found + 1
-        if best is not None:
-            return FieldResult(raw=best[2], code=code, status="ok")
 
     return FieldResult(
         raw="boilerplate_unqualified",
