@@ -71,9 +71,21 @@ def test_emphasis_of_matter_prior_disclaimer_is_unqualified() -> None:
 
 
 def test_disclaimer_in_opinion_paragraph_still_disclaimer() -> None:
-    """결론 문단의 거절 키워드는 그대로 disclaimer이다."""
+    """결론 문단의 짧은 거절 키워드는 그대로 disclaimer이다."""
     text = (
         "감사의견 우리는 의견을 표명하지 않습니다. "
+        + ("가" * 80)
+        + " 강조사항 과거 보고서는 무효입니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.code == "disclaimer"
+    assert result.raw == "의견을표명하지않"
+
+
+def test_disclaimer_grounds_keyword_before_cut_still_disclaimer() -> None:
+    """의견거절근거 근거 문구는 끊는 표지 앞 구간에서 disclaimer이다."""
+    text = (
+        "감사의견 우리는 재무제표를 감사하였습니다. "
         "의견거절근거 감사범위 제한. "
         + ("가" * 80)
         + " 강조사항 과거 보고서는 무효입니다."
