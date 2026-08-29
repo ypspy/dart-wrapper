@@ -137,7 +137,11 @@ async def _export(database_url: str, out: str | None) -> None:
         async with sessionmaker() as session:
             rows = list(await iter_rows(session))
         if out is None:
-            write_tsv(rows, sys.stdout)
+            stdout = sys.stdout
+            reconfigure = getattr(stdout, "reconfigure", None)
+            if callable(reconfigure):
+                reconfigure(encoding="utf-8")
+            write_tsv(rows, stdout)
             return
         path = Path(out)
         with path.open("w", encoding="utf-8", newline="") as handle:

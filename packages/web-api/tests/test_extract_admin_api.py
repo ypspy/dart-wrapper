@@ -463,6 +463,23 @@ async def test_completeness_rejects_unknown_status(
     assert "status" in response.json()["detail"]
 
 
+async def test_completeness_rejects_unknown_report_type(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """허용하지 않는 report_type은 400이다."""
+    app, _sessionmaker = memory_app
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params={**COMPLETENESS_PARAMS, "report_type": "A002"},
+            headers=TOKEN_HEADER,
+        )
+
+    assert response.status_code == 400
+    assert "report_type" in response.json()["detail"]
+
+
 async def test_completeness_paginates_status_list(
     client_factory, memory_app: tuple[FastAPI, object]
 ) -> None:

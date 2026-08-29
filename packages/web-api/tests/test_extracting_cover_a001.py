@@ -93,6 +93,14 @@ def test_cover_auditor_from_p_when_no_td() -> None:
     assert result.raw == "한영회계법인"
 
 
+def test_cover_auditor_from_audit_ban_label() -> None:
+    """회계법인 대신 감사반 문구도 표지 감사인으로 읽는다."""
+    html = "<html><body><p>제1감사반</p></body></html>"
+    result = extract_cover_auditor(html)
+    assert result.status == "ok"
+    assert result.raw == "제1감사반"
+
+
 def test_cover_auditor_not_found() -> None:
     """회계법인·감사반이 없으면 not_found이다."""
     result = extract_cover_auditor("<p>감사보고서</p>")

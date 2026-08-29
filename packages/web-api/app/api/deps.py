@@ -163,8 +163,11 @@ def get_date_resolver_service(
     """
     service = getattr(request.app.state, "date_resolver_service", None)
     if service is None:
+        llm_client = getattr(request.app.state, "llm_http_client", None)
+        if llm_client is None:
+            llm_client = request.app.state.http_client
         resolver = LlmDateResolver(
-            request.app.state.http_client,
+            llm_client,
             api_key=settings.date_resolver_api_key,
             model=settings.date_resolver_model,
             prompt_version=settings.date_resolver_prompt_version,

@@ -57,3 +57,17 @@ async def test_fetch_html_retries_then_raises_on_server_error() -> None:
             await fetcher.fetch_html("https://dart.fss.or.kr/report/viewer.do")
 
     assert attempts == 2
+
+
+async def test_fetch_html_attaches_status_code_on_client_error() -> None:
+    """4xx는 재시도하지 않고 SourceFetchError.status_code에 HTTP 코드를 담는다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, content=b"forbidden")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        fetcher = DartHttpClient(client, max_retries=2, retry_backoff_seconds=0.0)
+        with pytest.raises(SourceFetchError) as exc_info:
+            await fetcher.fetch_html("https://dart.fss.or.kr/report/viewer.do")
+
+    assert exc_info.value.status_code == 403

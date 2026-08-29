@@ -8,6 +8,8 @@ from typing import Protocol
 class DateResolver(Protocol):
     """ambiguous 날짜 후보 중 인덱스를 고른다. 고를 수 없으면 None."""
 
+    last_raw_response: str | None
+
     async def pick_index(
         self,
         *,

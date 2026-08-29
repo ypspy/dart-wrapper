@@ -29,6 +29,10 @@ class Unauthorized(DartWrapperError):
 class SourceFetchError(DartWrapperError):
     """DART 원문을 가져오지 못했을 때 발생한다."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class ParseError(DartWrapperError):
     """원문 HTML 정제·표 파싱에 실패했을 때 발생한다."""

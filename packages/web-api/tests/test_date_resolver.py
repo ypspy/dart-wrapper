@@ -208,6 +208,17 @@ async def test_run_maps_task7_date_key_into_llm_date_raw(
     ]
 
 
+def test_llm_candidates_keeps_index_for_non_dict_items() -> None:
+    """dict가 아닌 칸은 건너뛰지 않고 빈 payload로 인덱스를 맞춘다."""
+    from app.services.date_resolver_service import _llm_candidates
+
+    payload = _llm_candidates(["bad", {"date": "2020-03-15", "snippet": "서명"}])
+    assert payload == [
+        {"date_raw": "", "snippet": ""},
+        {"date_raw": "2020-03-15", "snippet": "서명"},
+    ]
+
+
 @pytest.mark.parametrize("index", [-1, None])
 async def test_run_keeps_ambiguous_when_resolver_returns_invalid_index(
     sessionmaker_fixture,
@@ -514,6 +525,26 @@ async def test_resolve_dates_accepts_request_and_schedules_job(
     assert response.json()["status"] == "pending"
     assert service.started == 1
     assert service.executed == ["job-dates-1"]
+
+
+async def test_resolve_dates_conflict_returns_409(client_factory) -> None:
+    """이미 진행 중인 날짜 해소 잡은 HTTP 409이다."""
+    from app.errors import CatalogConflict
+
+    class BusyDateResolverService:
+        async def start(self) -> str:
+            raise CatalogConflict("날짜 해소 작업이 이미 진행 중입니다.")
+
+        async def run(self, job_id: str) -> None:
+            return None
+
+    async with client_factory(_app_with_resolver(BusyDateResolverService())) as client:
+        response = await client.post(
+            "/admin/extract/resolve-dates", headers=TOKEN_HEADER
+        )
+
+    assert response.status_code == 409
+    assert "진행" in response.json()["detail"]
 
 
 @pytest.fixture

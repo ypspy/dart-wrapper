@@ -270,6 +270,60 @@ async def test_block_page_sets_blocked(sessionmaker_fixture) -> None:
     assert fact.fetch_status == "blocked"
 
 
+async def test_http_403_sets_blocked(sessionmaker_fixture) -> None:
+    """HTTP 403은 fetch_failed가 아니라 blocked이다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (403, "forbidden"),
+            OPINION_URL: (200, OPINION_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start(
+            "20200301", "20200331", ["F001"], "extract"
+        )
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.fetch_status == "blocked"
+
+
+async def test_missing_optional_leaf_url_does_not_fail_document(
+    sessionmaker_fixture,
+) -> None:
+    """실시내용처럼 선택 leaf의 viewer_url이 없어도 문서는 추출한다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-activity",
+                section_name="외부감사 실시내용",
+                path=["외부감사 실시내용"],
+                viewer_url=None,
+            ),
+        ],
+    )
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start(
+            "20200301", "20200331", ["F001"], "extract"
+        )
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.opinion_code == "unqualified"
+
+
 async def test_section_missing_when_cover_and_opinion_leaves_absent(
     sessionmaker_fixture,
 ) -> None:
@@ -333,6 +387,11 @@ async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
         await service.run_job(job_id)
 
     assert calls == []
+    async with sessionmaker_fixture() as session:
+        job = await session.get(ExtractionJob, job_id)
+        logs = await ExtractionJobRepository(session).recent_logs(job_id)
+    assert job is not None and job.status == "succeeded"
+    assert any("문서 0건" in log.message for log in logs)
 
 
 async def test_reparse_refetches_when_field_is_not_found(

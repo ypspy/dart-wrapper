@@ -81,12 +81,25 @@ def test_f001_cover_versus_body_conflict() -> None:
         a001=None,
         body=_ok("한영회계법인"),
         listing="삼일회계법인",
-        report_type="F002",
+        report_type="F001",
     )
     assert resolved["value"] == "삼일회계법인"
     assert resolved["source"] == "cover"
     assert [c["right_source"] for c in resolved["conflicts"]] == ["body"]
     assert resolved["conflicts"][0]["right"] == "한영회계법인"
+
+
+def test_resolve_auditor_stores_normalized_firm_name() -> None:
+    """해소 값은 주식회사·공백을 뺀 상호다."""
+    resolved = resolve_auditor(
+        cover=_ok("삼일회계법인주식회사"),
+        a001=None,
+        body=_missing(),
+        listing=None,
+        report_type="F001",
+    )
+    assert resolved["value"] == "삼일회계법인"
+    assert resolved["source"] == "cover"
 
 
 def test_a001_falls_back_cover_then_a001_then_body() -> None:
@@ -139,7 +152,7 @@ def test_auditor_names_match_after_normalize() -> None:
         report_type="A001",
     )
     assert resolved["conflicts"] == []
-    assert resolved["value"] == "삼일 회계법인"
+    assert resolved["value"] == "삼일회계법인"
 
 
 def test_resolve_opinion_letter_wins_without_conflict() -> None:

@@ -39,11 +39,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await ensure_schema(engine)
 
     http_client = httpx.AsyncClient(headers=_DEFAULT_HEADERS, follow_redirects=True)
+    # OpenAI 호출에는 DART Referer를 붙이지 않는다.
+    llm_http_client = httpx.AsyncClient(follow_redirects=True)
 
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessionmaker = create_sessionmaker(engine)
     app.state.http_client = http_client
+    app.state.llm_http_client = llm_http_client
     app.state.entry_collector = NodeEntryCollector(
         settings.node_executable,
         settings.entry_collector_script,
@@ -53,6 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await llm_http_client.aclose()
         await http_client.aclose()
         await engine.dispose()
 

@@ -26,11 +26,14 @@ _OTHERS_PATTERNS = (
     "지방공기업법과행정자치부의지방공기업결산지침,대구도시공사정관및회계규정에따라",
 )
 
-# (code, tag 한글명, patterns)
-_GAAP_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("k-gaap", "일반기업회계기준", _KGAAP_PATTERNS),
-    ("k-ifrs", "한국채택국제회계기준", _KIFRS_PATTERNS),
-    ("other", "기타기준", _OTHERS_PATTERNS),
+# (code, tag 한글명, compact 패턴)
+_GAAP_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = tuple(
+    (code, tag, tuple(compact(pattern) for pattern in patterns))
+    for code, tag, patterns in (
+        ("k-gaap", "일반기업회계기준", _KGAAP_PATTERNS),
+        ("k-ifrs", "한국채택국제회계기준", _KIFRS_PATTERNS),
+        ("other", "기타기준", _OTHERS_PATTERNS),
+    )
 )
 
 
@@ -42,7 +45,7 @@ def classify_gaap(text: str) -> FieldResult:
     compacted = compact(text)
     for code, tag, patterns in _GAAP_GROUPS:
         for pattern in patterns:
-            if compact(pattern) in compacted:
+            if pattern in compacted:
                 return FieldResult(raw=tag, code=code, status="ok")
 
     return FieldResult(raw="예외", code="other", status="ok")

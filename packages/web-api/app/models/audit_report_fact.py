@@ -69,9 +69,7 @@ class AuditReportFact(Base):
 
     fetch_status: Mapped[str] = mapped_column(String(32), nullable=False)
     conflicts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
-    extracted_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now, onupdate=_now
-    )
+    extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     extractor_version: Mapped[str] = mapped_column(
         String(32), default=EXTRACTOR_VERSION, nullable=False
     )

@@ -82,6 +82,15 @@ _A001_OPINION_CODES = (
     ("적정", "unqualified"),
     ("거절", "disclaimer"),
 )
+_REQUIRED_LEAF_ROLES = ("cover_entry_id", "opinion_entry_id")
+_LEAF_ROLES = (
+    "cover_entry_id",
+    "opinion_entry_id",
+    "activity_entry_id",
+    "a001_opinion_entry_id",
+    "a001_cover_entry_id",
+)
+_BLOCK_HTTP_STATUSES = frozenset({403, 429})
 _AUDITOR_NAMES_PATH = (
     Path(__file__).resolve().parent.parent / "extracting" / "data" / "auditor_names.txt"
 )
@@ -385,7 +394,8 @@ class ExtractionService:
                             raise
                         await self._mark_document_failed(job_id, sample, exc)
                         fetch_status = "fetch_failed"
-                    processed += 1
+                    if fetch_status is not None:
+                        processed += 1
                     if fetch_status == "blocked":
                         block_streak += 1
                         if block_streak >= self._block_streak_threshold:
@@ -526,24 +536,23 @@ class ExtractionService:
         section_missing = (
             leaves.cover_entry_id is None and leaves.opinion_entry_id is None
         )
-        for role in (
-            "cover_entry_id",
-            "opinion_entry_id",
-            "activity_entry_id",
-            "a001_opinion_entry_id",
-            "a001_cover_entry_id",
-        ):
+        for role in _LEAF_ROLES:
             entry_id = getattr(leaves, role)
             if not entry_id:
                 continue
             entry = by_id.get(entry_id)
+            required = role in _REQUIRED_LEAF_ROLES
             if entry is None or not entry.viewer_url:
-                failed = True
+                if required:
+                    failed = True
                 continue
             try:
                 html = await self._http.fetch_html(entry.viewer_url)
-            except SourceFetchError:
-                failed = True
+            except SourceFetchError as exc:
+                if exc.status_code in _BLOCK_HTTP_STATUSES:
+                    blocked = True
+                elif required:
+                    failed = True
                 continue
             if html_looks_blocked(html):
                 blocked = True
@@ -728,12 +737,14 @@ class ExtractionService:
         """같은 기업·결산월·범위의 F001/F002와 A001 의견이 다르면 양쪽에 기록한다."""
         if not sample.corp_code or not sample.year_end or not fact.opinion_code:
             return
-        siblings = await FactRepository(session).list_siblings(
+        facts = FactRepository(session)
+        siblings = await facts.list_siblings(
             corp_code=sample.corp_code,
             year_end=sample.year_end,
             fs_scope=fact.fs_scope,
             rcept_no=fact.rcept_no,
         )
+        mutated = False
         for sibling in siblings:
             dedicated = fact.source_report_type in _DEDICATED_REPORTS
             other_dedicated = sibling.source_report_type in _DEDICATED_REPORTS
@@ -743,5 +754,7 @@ class ExtractionService:
                 continue
             _append_conflict(fact, _sibling_conflict(fact, sibling))
             _append_conflict(sibling, _sibling_conflict(sibling, fact))
-            await FactRepository(session).upsert(sibling)
-        await FactRepository(session).upsert(fact)
+            await facts.upsert(sibling)
+            mutated = True
+        if mutated:
+            await facts.upsert(fact)

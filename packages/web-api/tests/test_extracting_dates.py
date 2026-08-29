@@ -100,6 +100,26 @@ def test_snippet_uses_original_text_around_match() -> None:
     assert candidates[0].snippet == f"{prefix}2019년3월15일{suffix} 의견근거 중간 재무제표에대한경"
 
 
+def test_snippet_is_capped_at_forty_chars_each_side() -> None:
+    """매칭 앞뒤가 길면 snippet은 각각 40자만 남긴다."""
+    prefix = "가" * 50
+    suffix = "나" * 50
+    text = f"{prefix}2019년3월15일{suffix}"
+    candidates = extract_date_candidates(text)
+    assert len(candidates) == 1
+    assert candidates[0].snippet == ("가" * 40) + "2019년3월15일" + ("나" * 40)
+
+
+def test_snippet_uses_later_occurrence_of_the_same_date() -> None:
+    """같은 날짜가 두 번이면 두 번째 snippet은 뒤 매칭을 기준으로 한다."""
+    first = ("가" * 40) + "2019년3월15일" + ("나" * 40)
+    second = ("다" * 40) + "2019년3월15일" + ("라" * 40)
+    candidates = extract_date_candidates(first + "중간" + second)
+    assert [c.iso for c in candidates] == ["2019-03-15", "2019-03-15"]
+    assert candidates[0].snippet == first
+    assert candidates[1].snippet == second
+
+
 def test_same_day_rcept_dt_is_allowed() -> None:
     """접수 당일 날짜는 창을 통과한다."""
     text = "서명 2019년3월31일 의견근거 중간 재무제표에대한경"

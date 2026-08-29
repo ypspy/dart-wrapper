@@ -129,7 +129,7 @@ class DateResolverService:
         if window_status != "ok":
             return False
 
-        raw_response = getattr(self._resolver, "last_raw_response", None)
+        raw_response = self._resolver.last_raw_response
         async with self._sessionmaker() as session:
             facts = FactRepository(session)
             current = await facts.get(fact.rcept_no, fact.dcm_no)
@@ -168,10 +168,11 @@ class DateResolverService:
 
 
 def _llm_candidates(stored: list[Any]) -> list[dict]:
-    """저장 후보에서 LLM에 넘길 date_raw·snippet만 남긴다."""
+    """저장 후보와 1:1로 LLM payload를 만든다. 잘못된 칸은 빈 값으로 둔다."""
     payload: list[dict] = []
     for item in stored:
         if not isinstance(item, dict):
+            payload.append({"date_raw": "", "snippet": ""})
             continue
         payload.append(
             {

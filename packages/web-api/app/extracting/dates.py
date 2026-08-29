@@ -32,13 +32,20 @@ def extract_date_candidates(text: str) -> list[DateCandidate]:
     compact_text = compact(text)
     scanned = _preprocess(compact_text)
     candidates: list[DateCandidate] = []
+    original_from = 0
     for index, match in enumerate(_DATE_PATTERN.finditer(scanned)):
         date_raw = match.group(0)
+        found_at = text.find(date_raw, original_from)
+        if found_at >= 0:
+            snippet = _slice_around(text, found_at, len(date_raw))
+            original_from = found_at + 1
+        else:
+            snippet = _slice_around(scanned, match.start(), len(date_raw))
         candidates.append(
             DateCandidate(
                 date_raw=date_raw,
                 iso=_to_iso(date_raw),
-                snippet=_snippet(text, scanned, date_raw, match.start()),
+                snippet=snippet,
                 index=index,
             )
         )
@@ -139,14 +146,6 @@ def _parse_iso(iso: str) -> date | None:
         return date.fromisoformat(iso)
     except ValueError:
         return None
-
-
-def _snippet(original: str, scanned: str, date_raw: str, match_start: int) -> str:
-    """원문에서 매칭 전후 40자를 취하고, 없으면 compact 기준으로 자른다."""
-    found_at = original.find(date_raw)
-    if found_at >= 0:
-        return _slice_around(original, found_at, len(date_raw))
-    return _slice_around(scanned, match_start, len(date_raw))
 
 
 def _slice_around(source: str, start: int, length: int) -> str:

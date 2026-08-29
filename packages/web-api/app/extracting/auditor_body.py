@@ -19,7 +19,7 @@ def extract_body_auditor(text: str, names: Sequence[str]) -> FieldResult:
         compacted = compact(name)
         if not compacted:
             continue
-        pos = content.find(compacted)
+        pos = content.rfind(compacted)
         if pos == -1:
             continue
         if pos >= best_pos:

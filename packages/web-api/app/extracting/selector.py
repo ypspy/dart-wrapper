@@ -86,7 +86,7 @@ def group_by_dcm(entries: list[SelectorEntry]) -> dict[str, list[SelectorEntry]]
 
 def _is_cover_leaf(entry: SelectorEntry) -> bool:
     section = compact(entry.section_name)
-    return section == "감사보고서" and section != "독립된감사인의감사보고서"
+    return section == "감사보고서"
 
 
 def _is_opinion_leaf(entry: SelectorEntry) -> bool:

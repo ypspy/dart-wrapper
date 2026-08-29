@@ -16,6 +16,7 @@ from app.repositories.entry_repository import EntryRepository
 from app.repositories.fact_repository import FactRepository
 from app.schemas.extract import CompletenessItem, CompletenessResponse, DateOverrideResponse
 
+_ALLOWED_REPORT_TYPES = frozenset({"A001", "F001", "F002"})
 LIST_STATUSES = (
     "unextracted",
     "fetch_failed",
@@ -119,6 +120,8 @@ class CompletenessService:
         limit: int = 50,
     ) -> CompletenessResponse:
         """selector 대상 문서 기준으로 상태 건수와 선택적 목록을 반환한다."""
+        if report_type not in _ALLOWED_REPORT_TYPES:
+            raise BadRequest("report_type은 A001, F001, F002 중 하나여야 합니다.")
         if status is not None and status not in LIST_STATUSES:
             raise BadRequest(
                 "status는 unextracted, fetch_failed, blocked, section_missing, "

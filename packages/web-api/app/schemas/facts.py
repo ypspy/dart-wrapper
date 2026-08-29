@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class AuditReportFactItem(BaseModel):
-    """감사보고서 문서 한 행. `audit_report_facts` 컬럼을 그대로 노출한다."""
+    """감사보고서 문서 한 행. LLM 내부 메타(date_resolver_*)는 공개하지 않는다."""
 
     model_config = ConfigDict(from_attributes=True)
 

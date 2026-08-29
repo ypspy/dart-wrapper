@@ -83,7 +83,8 @@ class DartHttpClient:
                     last_reason = f"DART 서버 오류(HTTP {response.status_code})"
                 elif response.status_code >= 400:
                     raise SourceFetchError(
-                        f"원문을 가져오지 못했습니다(HTTP {response.status_code}): {url}"
+                        f"원문을 가져오지 못했습니다(HTTP {response.status_code}): {url}",
+                        status_code=response.status_code,
                     )
                 else:
                     return decode_html(response.content, response.headers.get("Content-Type"))

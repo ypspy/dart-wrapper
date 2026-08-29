@@ -77,7 +77,11 @@ def resolve_auditor(
     if not ranked:
         return ResolvedAuditor(value=None, source=None, conflicts=conflicts)
     source, winner = ranked[0]
-    return ResolvedAuditor(value=winner.raw, source=source, conflicts=conflicts)
+    return ResolvedAuditor(
+        value=normalize_firm_name(winner.raw) or None,
+        source=source,
+        conflicts=conflicts,
+    )
 
 
 def resolve_opinion(
