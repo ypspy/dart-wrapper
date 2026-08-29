@@ -5,7 +5,11 @@ from pathlib import Path
 from app.extracting.a001_section import extract_a001_current_audit
 from app.extracting.activity_header import extract_activity_header
 from app.extracting.auditor_body import extract_body_auditor
-from app.extracting.cover import extract_cover_auditor, extract_cover_period
+from app.extracting.cover import (
+    extract_cover_auditor,
+    extract_cover_company_name,
+    extract_cover_period,
+)
 from app.extracting.text import compact
 
 _COVER_HTML = """
@@ -94,6 +98,20 @@ def test_cover_auditor_not_found() -> None:
     result = extract_cover_auditor("<p>감사보고서</p>")
     assert result.status == "not_found"
     assert result.raw is None
+
+
+def test_cover_company_name_from_label_cell() -> None:
+    """표지 표의 회사명 칸을 읽는다."""
+    html = """
+    <html><body>
+    <table>
+    <tr><td>회사명</td><td>현대자동차주식회사</td></tr>
+    <tr><td>제51기</td><td>2019.01.01부터 2019.12.31까지</td></tr>
+    </table>
+    </body></html>
+    """
+    assert extract_cover_company_name(html) == "현대자동차주식회사"
+    assert extract_cover_company_name("<p>표지만</p>") is None
 
 
 def test_activity_header_company_and_year_end() -> None:

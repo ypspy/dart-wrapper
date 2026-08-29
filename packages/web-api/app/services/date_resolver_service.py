@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import date
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.extracting.dates import parse_rcept_dt, parse_year_end
+from app.errors import CatalogConflict
+from app.extracting.dates import (
+    DateCandidate,
+    parse_rcept_dt,
+    parse_year_end,
+    pick_audit_report_date,
+)
 from app.models.audit_report_fact import AuditReportFact
 from app.models.extraction_job import ExtractionJob
 from app.ports.date_resolver import DateResolver
@@ -40,8 +47,17 @@ class DateResolverService:
     async def start(self) -> str:
         """DART 잠금 없이 해소 잡을 등록한다. 실행은 호출측에서 run으로 돌린다."""
         async with self._sessionmaker() as session:
-            job_id = uuid.uuid4().hex
             jobs = ExtractionJobRepository(session)
+            existing = await jobs.find_any_active(
+                extractor_id=RESOLVE_DATES_EXTRACTOR_ID
+            )
+            if existing is not None:
+                raise CatalogConflict(
+                    "날짜 해소 작업이 이미 진행 중입니다. "
+                    f"현재 작업({existing.job_id[:8]} · {existing.status})이 끝난 뒤에 "
+                    "다시 시작해 주세요."
+                )
+            job_id = uuid.uuid4().hex
             await jobs.create(job_id, RESOLVE_DATES_EXTRACTOR_ID, {})
             await jobs.add_log(job_id, "info", "날짜 해소 작업을 등록했습니다.")
             await session.commit()
@@ -100,6 +116,17 @@ class DateResolverService:
             return False
         iso = _candidate_iso(stored[index]) if isinstance(stored[index], dict) else None
         if not iso:
+            return False
+
+        period_date = date.fromisoformat(period_end) if period_end else None
+        received_date = date.fromisoformat(rcept_dt) if rcept_dt else None
+        chosen = DateCandidate(date_raw=iso, iso=iso, snippet="", index=index)
+        _picked, window_status, _passing = pick_audit_report_date(
+            [chosen],
+            period_end=period_date,
+            rcept_dt=received_date,
+        )
+        if window_status != "ok":
             return False
 
         raw_response = getattr(self._resolver, "last_raw_response", None)

@@ -539,6 +539,23 @@ async def test_patch_date_sets_override_without_wiping_other_fields(
     assert fact.audit_report_date_source == "override"
 
 
+async def test_patch_date_rejects_invalid_iso(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """YYYY-MM-DD가 아니거나 달력에 없는 날짜는 422다."""
+    app, sessionmaker = memory_app
+    await _seed(sessionmaker, [_entry()], [_ok_fact()])
+
+    async with client_factory(app) as client:
+        for iso in ("not-a-date", "2020-13-01", "20200301", "2020-02-30"):
+            response = await client.patch(
+                "/admin/extract/audit-opinion/20200331000001/11111/date",
+                json={"iso": iso},
+                headers=TOKEN_HEADER,
+            )
+            assert response.status_code == 422, iso
+
+
 async def test_patch_date_requires_admin_token(client_factory) -> None:
     """날짜 보정도 Admin 토큰이 필요하다."""
     app = create_app()

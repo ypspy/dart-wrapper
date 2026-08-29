@@ -234,6 +234,59 @@ async def test_run_keeps_ambiguous_when_resolver_returns_invalid_index(
     assert fact.date_resolver_model is None
 
 
+async def test_run_keeps_ambiguous_when_llm_picks_out_of_window(
+    sessionmaker_fixture,
+) -> None:
+    """창 밖 ISO를 골라도 ok로 쓰지 않고 ambiguous로 둔다."""
+    stored = [
+        {
+            "date_raw": "2020년2월1일",
+            "date": "2020-02-01",
+            "snippet": "머리 2020년2월1일",
+        },
+        {
+            "date_raw": "2018년6월1일",
+            "date": "2018-06-01",
+            "snippet": "옛날짜 2018년6월1일",
+        },
+    ]
+    await _seed(
+        sessionmaker_fixture,
+        entries=[_entry()],
+        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+    )
+    resolver = FakeDateResolver(1)
+    service = _service(sessionmaker_fixture, resolver)
+    job_id = await service.start()
+    await service.run(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.audit_report_date is None
+    assert fact.audit_report_date_status == "ambiguous"
+    assert fact.audit_report_date_source is None
+    assert fact.date_resolver_model is None
+
+
+async def test_start_rejects_second_active_resolve_dates_job(
+    sessionmaker_fixture,
+) -> None:
+    """이미 진행 중인 resolve_dates 잡이 있으면 CatalogConflict다."""
+    from app.errors import CatalogConflict
+
+    await _seed(
+        sessionmaker_fixture,
+        entries=[_entry()],
+        facts=[_ambiguous_fact()],
+    )
+    service = _service(sessionmaker_fixture, FakeDateResolver(1))
+    await service.start()
+    with pytest.raises(CatalogConflict, match="이미 진행 중"):
+        await service.start()
+
+
 async def test_run_does_not_take_dart_lock(sessionmaker_fixture) -> None:
     """날짜 해소는 DART 잠금 없이 수집·추출이 살아 있어도 돈다."""
     await _seed(

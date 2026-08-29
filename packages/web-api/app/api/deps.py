@@ -136,7 +136,12 @@ def get_extraction_service(
             timeout_seconds=settings.dart_fetch_timeout_seconds,
             max_retries=settings.dart_fetch_max_retries,
         )
-        service = ExtractionService(request.app.state.sessionmaker, http)
+        service = ExtractionService(
+            request.app.state.sessionmaker,
+            http,
+            block_streak_threshold=settings.block_streak_threshold,
+            block_wait_seconds=settings.block_wait_seconds,
+        )
         request.app.state.extraction_service = service
     return service
 

@@ -162,6 +162,38 @@ async def test_start_extract_rejects_when_audit_extraction_is_running(
         await service.start_extract(REQUEST)
 
 
+async def test_start_extract_recovers_stale_running_extraction(
+    sessionmaker_fixture,
+) -> None:
+    """오래된 running 추출 잡은 잠금을 풀고 카탈로그 수집을 시작한다."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.extraction_job import ExtractionJob
+    from app.services.dart_job_lock import STALE_RUNNING_SECONDS
+
+    async with sessionmaker_fixture() as session:
+        jobs = ExtractionJobRepository(session)
+        await jobs.create("ext-stale", "audit_opinion", {}, mode="extract")
+        await jobs.set_status("ext-stale", "running")
+        job = await session.get(ExtractionJob, "ext-stale")
+        assert job is not None
+        job.started_at = datetime.now(timezone.utc) - timedelta(
+            seconds=STALE_RUNNING_SECONDS + 60
+        )
+        await session.commit()
+
+    service = CatalogService(sessionmaker_fixture, FakeCollector())
+    response = await service.start_extract(REQUEST)
+
+    assert response.status == "pending"
+    async with sessionmaker_fixture() as session:
+        stale = await session.get(ExtractionJob, "ext-stale")
+    assert stale is not None
+    assert stale.status == "failed"
+    assert stale.error_message is not None
+    assert "중단" in stale.error_message
+
+
 async def test_run_job_saves_entries_and_marks_success(sessionmaker_fixture) -> None:
     collector = FakeCollector()
     service = CatalogService(sessionmaker_fixture, collector)

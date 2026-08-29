@@ -54,3 +54,18 @@ def extract_cover_auditor(html: str) -> FieldResult:
     if not firm_name:
         return _NOT_FOUND
     return FieldResult(raw=firm_name, code=None, status="ok")
+
+
+def extract_cover_company_name(html: str) -> str | None:
+    """표지 표의 회사명 라벨 옆 칸을 읽는다."""
+    soup = BeautifulSoup(html, "lxml")
+    for table in soup.find_all("table"):
+        for row in table.find_all("tr"):
+            cells = [compact(cell.get_text()) for cell in row.find_all(["th", "td"])]
+            for index, text in enumerate(cells):
+                if "회사명" not in text or index + 1 >= len(cells):
+                    continue
+                value = cells[index + 1]
+                if value:
+                    return value
+    return None

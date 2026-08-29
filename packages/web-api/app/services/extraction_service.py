@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections import defaultdict
@@ -16,7 +17,11 @@ from app.extracting.a001_section import extract_a001_current_audit
 from app.extracting.activity_header import extract_activity_header
 from app.extracting.auditor_body import extract_body_auditor
 from app.extracting.constants import EXTRACTOR_VERSION
-from app.extracting.cover import extract_cover_auditor, extract_cover_period
+from app.extracting.cover import (
+    extract_cover_auditor,
+    extract_cover_company_name,
+    extract_cover_period,
+)
 from app.extracting.dates import (
     extract_date_candidates,
     parse_rcept_dt,
@@ -202,6 +207,10 @@ def _copy_operator_fields(
         fact.audit_report_date = existing.audit_report_date_override
         fact.audit_report_date_status = "ok"
         fact.audit_report_date_source = "override"
+    elif existing.audit_report_date_source in {"llm", "override"}:
+        fact.audit_report_date = existing.audit_report_date
+        fact.audit_report_date_status = existing.audit_report_date_status
+        fact.audit_report_date_source = existing.audit_report_date_source
 
 
 def _failed_fact(sample: Entry, existing: AuditReportFact | None) -> AuditReportFact:
@@ -221,6 +230,10 @@ def _failed_fact(sample: Entry, existing: AuditReportFact | None) -> AuditReport
     )
 
 
+class _BlockStreakExceeded(Exception):
+    """연속 차단 응답으로 추출 잡을 멈출 때 쓴다."""
+
+
 class ExtractionService:
     """감사 추출 잡을 만들고 문서 단위로 실행한다."""
 
@@ -228,10 +241,15 @@ class ExtractionService:
         self,
         sessionmaker: async_sessionmaker[AsyncSession],
         http: DartHttpClient,
+        *,
+        block_streak_threshold: int = 5,
+        block_wait_seconds: float = 60.0,
     ) -> None:
         self._sessionmaker = sessionmaker
         self._http = http
         self._auditor_names = _load_auditor_names()
+        self._block_streak_threshold = block_streak_threshold
+        self._block_wait_seconds = block_wait_seconds
 
     async def start(
         self,
@@ -304,6 +322,7 @@ class ExtractionService:
                 by_rcept[entry.rcept_no].append(entry)
 
             processed = 0
+            block_streak = 0
             for rcept_no, filing in by_rcept.items():
                 audit_selectors: list[SelectorEntry] = []
                 for entry in filing:
@@ -316,7 +335,9 @@ class ExtractionService:
                         audit_selectors.append(selector)
                 for dcm_no in group_by_dcm(audit_selectors):
                     try:
-                        await self._process_document(job_id, filing, dcm_no, mode)
+                        fetch_status = await self._process_document(
+                            job_id, filing, dcm_no, mode
+                        )
                     except Exception as exc:
                         sample = next(
                             (entry for entry in filing if entry.dcm_no == dcm_no),
@@ -325,7 +346,19 @@ class ExtractionService:
                         if sample is None:
                             raise
                         await self._mark_document_failed(job_id, sample, exc)
+                        fetch_status = "fetch_failed"
                     processed += 1
+                    if fetch_status == "blocked":
+                        block_streak += 1
+                        if block_streak >= self._block_streak_threshold:
+                            if self._block_wait_seconds > 0:
+                                await asyncio.sleep(self._block_wait_seconds)
+                            raise _BlockStreakExceeded(
+                                "추출이 차단된 것으로 보여 중단합니다. "
+                                "재개로 이어서 처리하세요."
+                            )
+                    elif fetch_status is not None:
+                        block_streak = 0
 
             async with self._sessionmaker() as session:
                 jobs = ExtractionJobRepository(session)
@@ -350,24 +383,27 @@ class ExtractionService:
         filing: list[Entry],
         dcm_no: str,
         mode: str,
-    ) -> None:
-        """문서 하나를 추출·저장하고 형제 의견 conflict를 갱신한다."""
+    ) -> str | None:
+        """문서 하나를 추출·저장하고 형제 의견 conflict를 갱신한다.
+
+        건너뛰면 None, 처리하면 fetch_status를 반환한다.
+        """
         audit_entries = [entry for entry in filing if entry.dcm_no == dcm_no]
         if not audit_entries:
-            return
+            return None
         sample = audit_entries[0]
         rcept_no = sample.rcept_no
 
         async with self._sessionmaker() as session:
             existing = await FactRepository(session).get(rcept_no, dcm_no)
             if _should_skip(existing, mode):
-                return
+                return None
 
         try:
             fact = await self._extract_document(filing, audit_entries)
         except Exception as exc:
             await self._mark_document_failed(job_id, sample, exc)
-            return
+            return "fetch_failed"
 
         async with self._sessionmaker() as session:
             facts = FactRepository(session)
@@ -381,6 +417,7 @@ class ExtractionService:
                 f"{rcept_no}/{dcm_no} 추출 완료({fact.fetch_status}).",
             )
             await session.commit()
+        return fact.fetch_status
 
     async def _mark_document_failed(
         self,
@@ -527,6 +564,11 @@ class ExtractionService:
             if a001_cover_html is not None
             else _SKIPPED
         )
+        a001_cover_corp = (
+            extract_cover_company_name(a001_cover_html)
+            if a001_cover_html is not None
+            else None
+        )
 
         listing = sample.submitter if sample.report_type in _DEDICATED_REPORTS else None
         auditor = resolve_auditor(
@@ -540,7 +582,7 @@ class ExtractionService:
         conflicts = [
             *auditor["conflicts"],
             *opinion["conflicts"],
-            *corp_name_conflicts(sample.corp_name, activity_corp, None),
+            *corp_name_conflicts(sample.corp_name, activity_corp, a001_cover_corp),
             *year_end_conflicts(
                 sample.year_end,
                 activity_year,

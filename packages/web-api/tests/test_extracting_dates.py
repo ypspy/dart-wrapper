@@ -2,6 +2,8 @@
 
 from datetime import date
 
+import pytest
+
 from app.extracting.dates import (
     extract_date_candidates,
     parse_rcept_dt,
@@ -123,6 +125,30 @@ def test_omits_missing_window_bounds() -> None:
     )
     assert status == "ok"
     assert iso == "2017-01-01"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "우리는 감사를 수행하였습니다. 2020년2월20일",
+        "머리 2020년2월20일 의견근거 중간설명만",
+        "머리 재무제표에대한경 서명 2020년2월20일",
+    ],
+)
+def test_single_in_window_date_ok_when_markers_missing_or_partial(text: str) -> None:
+    """마커가 없거나 하나만 있어도 창 안 날짜 1개는 ok이고 중복 후보가 아니다."""
+    candidates = extract_date_candidates(text)
+    assert [c.iso for c in candidates] == ["2020-02-20"]
+
+    iso, status, passing = pick_audit_report_date(
+        candidates,
+        period_end=date(2019, 12, 31),
+        rcept_dt=date(2020, 3, 31),
+    )
+    assert status == "ok"
+    assert iso == "2020-02-20"
+    assert len(passing) == 1
+    assert passing[0].iso == "2020-02-20"
 
 
 def test_parse_year_end_and_rcept_dt() -> None:

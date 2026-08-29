@@ -67,6 +67,11 @@ def pick_audit_report_date(
             continue
         passing.append(candidate)
 
+    unique: dict[str, DateCandidate] = {}
+    for candidate in passing:
+        unique.setdefault(candidate.iso, candidate)
+    passing = list(unique.values())
+
     if len(passing) == 1:
         return passing[0].iso, "ok", passing
     if not passing:
@@ -104,10 +109,21 @@ def parse_rcept_dt(rcept_dt: str | None) -> date | None:
 
 
 def _preprocess(compact_text: str) -> str:
-    """의견근거 앞과 마지막 재무제표에대한경 이후를 이어 붙인다."""
-    first_part = compact_text.split(_OPINION_GROUNDS)[0]
-    second_part = compact_text.split(_FS_SECTION)[-1]
-    return first_part + second_part
+    """의견근거 앞과 마지막 재무제표에대한경 이후를 이어 붙인다.
+
+    마커가 없으면 본문을 두 번 붙이지 않는다. 하나만 있으면 그 구간만 쓴다.
+    """
+    first_part = (
+        compact_text.split(_OPINION_GROUNDS)[0]
+        if _OPINION_GROUNDS in compact_text
+        else ""
+    )
+    second_part = (
+        compact_text.split(_FS_SECTION)[-1] if _FS_SECTION in compact_text else ""
+    )
+    if first_part or second_part:
+        return first_part + second_part
+    return compact_text
 
 
 def _to_iso(date_raw: str) -> str:

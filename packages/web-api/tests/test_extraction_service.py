@@ -110,6 +110,7 @@ def _html_handler(
 def _service(
     sessionmaker,
     mapping: dict[str, tuple[int, str]] | None = None,
+    **kwargs: object,
 ) -> tuple[ExtractionService, httpx.AsyncClient]:
     transport = _html_handler(
         mapping
@@ -120,7 +121,7 @@ def _service(
     )
     client = httpx.AsyncClient(transport=transport)
     http = DartHttpClient(client, max_retries=0, retry_backoff_seconds=0.0)
-    return ExtractionService(sessionmaker, http), client
+    return ExtractionService(sessionmaker, http, **kwargs), client
 
 
 async def _seed_entries(sessionmaker, records: list[EntryRecord]) -> None:
@@ -549,3 +550,172 @@ async def test_document_exception_continues_remaining(
     assert second.opinion_code == "unqualified"
     assert job is not None
     assert job.status == "succeeded"
+
+
+async def test_block_streak_stops_job_after_threshold(sessionmaker_fixture) -> None:
+    """연속 blocked가 임계치에 이르면 남은 문서는 건드리지 않고 잡을 실패로 멈춘다."""
+    cover2 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=cover"
+    opinion2 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
+    cover3 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=3&eleId=cover"
+    opinion3 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=3&eleId=opinion"
+    block_html = "<html><body>비정상적인 접근이 감지되었습니다. captcha</body></html>"
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e2-cover",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                viewer_url=cover2,
+            ),
+            _entry(
+                entry_id="e2-opinion",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                section_name="독립된 감사인의 감사보고서",
+                path=["독립된 감사인의 감사보고서"],
+                viewer_url=opinion2,
+            ),
+            _entry(
+                entry_id="e3-cover",
+                rcept_no="20200331000003",
+                dcm_no="33333",
+                viewer_url=cover3,
+            ),
+            _entry(
+                entry_id="e3-opinion",
+                rcept_no="20200331000003",
+                dcm_no="33333",
+                section_name="독립된 감사인의 감사보고서",
+                path=["독립된 감사인의 감사보고서"],
+                viewer_url=opinion3,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, block_html),
+            OPINION_URL: (200, block_html),
+            cover2: (200, block_html),
+            opinion2: (200, block_html),
+            cover3: (200, COVER_HTML),
+            opinion3: (200, OPINION_HTML),
+        },
+        block_streak_threshold=2,
+        block_wait_seconds=0.0,
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        first = await FactRepository(session).get("20200331000001", "11111")
+        second = await FactRepository(session).get("20200331000002", "22222")
+        third = await FactRepository(session).get("20200331000003", "33333")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert first is not None and first.fetch_status == "blocked"
+    assert second is not None and second.fetch_status == "blocked"
+    assert third is None
+    assert job is not None
+    assert job.status == "failed"
+    assert job.error_message is not None
+    assert "차단" in job.error_message
+
+
+async def test_reparse_preserves_llm_resolved_date(sessionmaker_fixture) -> None:
+    """reparse는 override가 없어도 LLM 해소 날짜·상태·출처를 유지한다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F001",
+                fs_scope="separate",
+                fetch_status="ok",
+                opinion_status="not_found",
+                audit_report_date="2020-02-21",
+                audit_report_date_status="ok",
+                audit_report_date_source="llm",
+                date_resolver_model="gpt-test",
+                date_resolver_prompt_version="prompt.v1",
+                date_resolver_raw_response='{"index":0}',
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start(
+            "20200301", "20200331", ["F001"], "reparse"
+        )
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.audit_report_date == "2020-02-21"
+    assert fact.audit_report_date_status == "ok"
+    assert fact.audit_report_date_source == "llm"
+    assert fact.date_resolver_model == "gpt-test"
+    assert fact.opinion_code == "unqualified"
+
+
+A001_COVER_HTML = """
+<html><body>
+<table>
+<tr><td>회사명</td><td>현대자동차주식회사</td></tr>
+<tr><td>제51기</td><td>2019.01.01부터 2019.12.31까지</td></tr>
+</table>
+</body></html>
+"""
+
+
+async def test_a001_cover_company_name_feeds_corp_name_conflicts(
+    sessionmaker_fixture,
+) -> None:
+    """같은 접수의 A001 표지 회사명이 목록명과 다르면 corp_name conflict를 남긴다."""
+    a001_cover = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=a001cover"
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="a001-cover",
+                report_type="A001",
+                source="body",
+                dcm_no="99999",
+                document_name="사업보고서",
+                section_name="사업보고서",
+                viewer_url=a001_cover,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            a001_cover: (200, A001_COVER_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start(
+            "20200301", "20200331", ["F001", "A001"], "extract"
+        )
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    matches = [c for c in fact.conflicts if c.get("field") == "corp_name"]
+    assert matches
+    assert any(c.get("right_source") == "a001_cover" for c in matches)
+    assert any("현대자동차" in (c.get("right") or "") for c in matches)

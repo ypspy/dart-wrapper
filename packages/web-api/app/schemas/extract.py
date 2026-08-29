@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.catalog import JobLogItem
 
@@ -72,7 +72,17 @@ class ResolveDatesResponse(BaseModel):
 class DateOverrideRequest(BaseModel):
     """감사보고서일 수동 보정 요청."""
 
-    iso: str
+    iso: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+    @field_validator("iso")
+    @classmethod
+    def iso_must_be_calendar_date(cls, value: str) -> str:
+        """패턴을 통과한 뒤에도 실제 달력 날짜인지 확인한다."""
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("iso는 YYYY-MM-DD 달력 날짜여야 합니다.") from exc
+        return value
 
 
 class DateOverrideResponse(BaseModel):

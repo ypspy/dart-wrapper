@@ -42,6 +42,9 @@ def _fact(**overrides: object) -> AuditReportFact:
         "conflicts": [{"field": "auditor", "left": "표지", "right": "본문"}],
         "audit_report_date_candidates": [],
         "extractor_version": EXTRACTOR_VERSION,
+        "date_resolver_model": "gpt-4o-mini",
+        "date_resolver_prompt_version": "v1",
+        "date_resolver_raw_response": '{"index":0}',
     }
     values.update(overrides)
     return AuditReportFact(**values)
@@ -96,6 +99,9 @@ async def test_audit_facts_returns_resolved_source_conflicts_and_fetch_status(
     assert row["current_period_source"] == "cover"
     assert row["fetch_status"] == "ok"
     assert row["conflicts"] == [{"field": "auditor", "left": "표지", "right": "본문"}]
+    assert "date_resolver_model" not in row
+    assert "date_resolver_prompt_version" not in row
+    assert "date_resolver_raw_response" not in row
 
 
 async def test_audit_facts_does_not_require_admin_token(client_factory) -> None:

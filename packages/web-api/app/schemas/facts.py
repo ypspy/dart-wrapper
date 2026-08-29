@@ -60,7 +60,3 @@ class AuditReportFactItem(BaseModel):
     conflicts: list[Any] = Field(default_factory=list)
     extracted_at: datetime
     extractor_version: str
-
-    date_resolver_model: str | None = None
-    date_resolver_prompt_version: str | None = None
-    date_resolver_raw_response: str | None = None
