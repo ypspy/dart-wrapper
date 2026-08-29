@@ -137,9 +137,7 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     await _seed_entries(sessionmaker_fixture, _f001_leaves())
     service, client = _service(sessionmaker_fixture)
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -210,9 +208,7 @@ async def test_list_for_extraction_uses_dotted_rcept_dt(
     )
     service, client = _service(sessionmaker_fixture)
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -234,9 +230,7 @@ async def test_fetch_error_sets_fetch_failed(sessionmaker_fixture) -> None:
         },
     )
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -258,9 +252,7 @@ async def test_block_page_sets_blocked(sessionmaker_fixture) -> None:
         },
     )
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -281,9 +273,7 @@ async def test_http_403_sets_blocked(sessionmaker_fixture) -> None:
         },
     )
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -311,9 +301,7 @@ async def test_missing_optional_leaf_url_does_not_fail_document(
     )
     service, client = _service(sessionmaker_fixture)
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -341,9 +329,7 @@ async def test_section_missing_when_cover_and_opinion_leaves_absent(
     )
     service, client = _service(sessionmaker_fixture)
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -354,7 +340,7 @@ async def test_section_missing_when_cover_and_opinion_leaves_absent(
 
 
 async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
-    """fetch_status가 ok인 행은 resume에서 다시 fetch하지 않는다."""
+    """같은 버전의 ok 행은 resume에서 다시 fetch하지 않는다."""
     await _seed_entries(sessionmaker_fixture, _f001_leaves())
     async with sessionmaker_fixture() as session:
         await FactRepository(session).upsert(
@@ -381,9 +367,7 @@ async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         http = DartHttpClient(client, max_retries=0, retry_backoff_seconds=0.0)
         service = ExtractionService(sessionmaker_fixture, http)
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "resume"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "resume")
         await service.run_job(job_id)
 
     assert calls == []
@@ -392,6 +376,41 @@ async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
         logs = await ExtractionJobRepository(session).recent_logs(job_id)
     assert job is not None and job.status == "succeeded"
     assert any("문서 0건" in log.message for log in logs)
+
+
+async def test_extract_refetches_when_extractor_version_differs(
+    sessionmaker_fixture,
+) -> None:
+    """fetch_status가 ok여도 추출기 버전이 다르면 extract가 다시 가져온다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F001",
+                fs_scope="separate",
+                fetch_status="ok",
+                opinion_code="disclaimer",
+                opinion_status="ok",
+                extractor_version="audit_opinion.v2",
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.opinion_code == "unqualified"
+    assert fact.extractor_version == "audit_opinion.v3"
 
 
 async def test_reparse_refetches_when_field_is_not_found(
@@ -416,9 +435,7 @@ async def test_reparse_refetches_when_field_is_not_found(
 
     service, client = _service(sessionmaker_fixture)
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "reparse"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "reparse")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -479,9 +496,7 @@ async def test_sibling_opinion_conflict_on_both_rows(sessionmaker_fixture) -> No
         },
     )
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001", "A001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001", "A001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -524,9 +539,7 @@ async def test_reparse_preserves_override_and_resolver_columns(
 
     service, client = _service(sessionmaker_fixture)
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "reparse"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "reparse")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -592,9 +605,7 @@ async def test_document_exception_continues_remaining(
     )
     service = ExtractionService(sessionmaker_fixture, _BoomHttp(inner._http))
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -710,9 +721,7 @@ async def test_reparse_preserves_llm_resolved_date(sessionmaker_fixture) -> None
 
     service, client = _service(sessionmaker_fixture)
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001"], "reparse"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "reparse")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:
@@ -765,9 +774,7 @@ async def test_a001_cover_company_name_feeds_corp_name_conflicts(
         },
     )
     async with client:
-        job_id = await service.start(
-            "20200301", "20200331", ["F001", "A001"], "extract"
-        )
+        job_id = await service.start("20200301", "20200331", ["F001", "A001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:

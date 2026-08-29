@@ -126,7 +126,7 @@ def test_citation_without_cut_skips_hit_then_unqualified() -> None:
 
 
 def test_trailing_qualified_after_management_responsibility() -> None:
-    """종전 후행형: 경영진의책임 뒤 한정의견근거는 전문에서 qualified이다."""
+    """종전 후행형: 경영진의책임 뒤 한정의견근거는 qualified이다."""
     text = (
         "우리는 연결재무제표를 감사하였습니다. "
         "연결재무제표에 대한 경영진의 책임 경영진은 작성 책임이 있습니다. "
@@ -141,7 +141,7 @@ def test_trailing_qualified_after_management_responsibility() -> None:
 
 
 def test_trailing_disclaimer_after_management_responsibility() -> None:
-    """종전 후행형: 경영진의책임 뒤 의견거절근거는 전문에서 disclaimer이다."""
+    """종전 후행형: 경영진의책임 뒤 의견거절근거는 disclaimer이다."""
     text = (
         "우리는 연결재무제표를 감사하였습니다. "
         "연결재무제표에 대한 경영진의 책임 경영진은 작성 책임이 있습니다. "
@@ -151,6 +151,33 @@ def test_trailing_disclaimer_after_management_responsibility() -> None:
     result = classify_opinion(text, looks_like_letter=True)
     assert result.code == "disclaimer"
     assert result.raw == "의견거절근거"
+
+
+def test_trailing_qualified_ignores_emphasis_prior_disclaimer() -> None:
+    """후행형 강조사항의 전기 거절 인용은 당기 한정을 덮지 않는다."""
+    text = (
+        "우리는 연결재무제표를 감사하였습니다. "
+        "연결재무제표에 대한 경영진의 책임 경영진은 작성 책임이 있습니다. "
+        "한정의견근거 재고자산 과대계상. "
+        "감사의견 한정의견근거단락에기술된사항이미치는영향을제외하고는 적정합니다. "
+        "강조사항 회사는 전기에 대하여 감사의견을 표명하지 아니합니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.code == "qualified"
+    assert result.raw == "한정의견근거"
+
+
+def test_trailing_qualified_ignores_tokki_prior_disclaimer() -> None:
+    """후행형 특기사항의 전기 거절 인용은 당기 한정을 덮지 않는다."""
+    text = (
+        "우리는 연결재무제표를 감사하였습니다. "
+        "연결재무제표에 대한 경영진의 책임 경영진은 작성 책임이 있습니다. "
+        "한정의견근거 재고자산 과대계상. "
+        "특기사항 전기 재무제표에 대하여 전임감사인은 의견을 표명하지 아니하였습니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
+    assert result.code == "qualified"
+    assert result.raw == "한정의견근거"
 
 
 def test_new_unlisted_qualified_before_governance_responsibility() -> None:
@@ -195,5 +222,17 @@ def test_preceding_cut_at_start_stays_unqualified() -> None:
     text = "강조사항 의견을 표명하지 않습니다. " + ("가" * 80)
     result = classify_opinion(text, looks_like_letter=True)
     assert result.status == "ok"
+    assert result.code == "unqualified"
+    assert result.raw == "boilerplate_unqualified"
+
+
+def test_preceding_tokki_cut_keeps_unqualified() -> None:
+    """선행형: 특기사항 단락의 거절 문구는 창 밖이라 적정이 된다."""
+    text = (
+        "감사의견 우리는 적정하다고 봅니다. "
+        "감사의견근거 회계감사기준에 따라 감사를 수행하였습니다. "
+        "특기사항 전기 재무제표에 대하여 의견을 표명하지 아니하였습니다."
+    )
+    result = classify_opinion(text, looks_like_letter=True)
     assert result.code == "unqualified"
     assert result.raw == "boilerplate_unqualified"

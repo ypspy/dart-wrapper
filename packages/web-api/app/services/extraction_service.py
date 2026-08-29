@@ -145,12 +145,12 @@ def _has_not_found_field(fact: AuditReportFact) -> bool:
 
 
 def _should_skip(fact: AuditReportFact | None, mode: str) -> bool:
-    """이미 성공한 행은 건너뛰고, reparse는 not_found가 있을 때만 다시 가져온다."""
+    """같은 버전의 성공 행은 건너뛰고, reparse는 not_found가 있을 때만 다시 가져온다."""
     if fact is None:
         return False
     if mode == "reparse":
         return not _has_not_found_field(fact)
-    return fact.fetch_status == "ok"
+    return fact.fetch_status == "ok" and fact.extractor_version == EXTRACTOR_VERSION
 
 
 def _map_a001_opinion(result: FieldResult) -> FieldResult:
@@ -201,9 +201,7 @@ def _append_conflict(fact: AuditReportFact, conflict: dict[str, str]) -> None:
     fact.conflicts = conflicts
 
 
-def _copy_operator_fields(
-    fact: AuditReportFact, existing: AuditReportFact | None
-) -> None:
+def _copy_operator_fields(fact: AuditReportFact, existing: AuditReportFact | None) -> None:
     """기존 override·LLM 컬럼을 유지하고, override가 있으면 보고일에 우선한다."""
     if existing is None:
         return
@@ -382,9 +380,7 @@ class ExtractionService:
                         audit_selectors.append(selector)
                 for dcm_no in group_by_dcm(audit_selectors):
                     try:
-                        fetch_status = await self._process_document(
-                            job_id, filing, dcm_no, mode
-                        )
+                        fetch_status = await self._process_document(job_id, filing, dcm_no, mode)
                     except Exception as exc:
                         sample = next(
                             (entry for entry in filing if entry.dcm_no == dcm_no),
@@ -402,8 +398,7 @@ class ExtractionService:
                             if self._block_wait_seconds > 0:
                                 await asyncio.sleep(self._block_wait_seconds)
                             raise _BlockStreakExceeded(
-                                "추출이 차단된 것으로 보여 중단합니다. "
-                                "재개로 이어서 처리하세요."
+                                "추출이 차단된 것으로 보여 중단합니다. " "재개로 이어서 처리하세요."
                             )
                     else:
                         block_streak = 0
@@ -411,27 +406,21 @@ class ExtractionService:
             async with self._sessionmaker() as session:
                 jobs = ExtractionJobRepository(session)
                 await jobs.set_status(job_id, "succeeded")
-                await jobs.add_log(
-                    job_id, "info", f"추출 작업을 마쳤습니다. 문서 {processed}건."
-                )
+                await jobs.add_log(job_id, "info", f"추출 작업을 마쳤습니다. 문서 {processed}건.")
                 await session.commit()
         except _BlockStreakExceeded as exc:
             logger.warning("추출 작업이 차단으로 중단되었습니다: %s", job_id)
             async with self._sessionmaker() as session:
                 jobs = ExtractionJobRepository(session)
                 await jobs.set_status(job_id, "failed", error_message=str(exc))
-                await jobs.add_log(
-                    job_id, "error", f"추출 작업이 중단되었습니다: {exc}"
-                )
+                await jobs.add_log(job_id, "error", f"추출 작업이 중단되었습니다: {exc}")
                 await session.commit()
         except Exception as exc:
             logger.exception("추출 작업이 중단되었습니다: %s", job_id)
             async with self._sessionmaker() as session:
                 jobs = ExtractionJobRepository(session)
                 await jobs.set_status(job_id, "failed", error_message=str(exc))
-                await jobs.add_log(
-                    job_id, "error", f"추출 작업이 중단되었습니다: {exc}"
-                )
+                await jobs.add_log(job_id, "error", f"추출 작업이 중단되었습니다: {exc}")
                 await session.commit()
 
     async def _finish_partial(self, job_id: str, processed: int) -> None:
@@ -517,15 +506,12 @@ class ExtractionService:
         """leaf HTML을 가져와 파서·해소 후 fact 행을 만든다."""
         sample = audit_entries[0]
         audit_selectors = [
-            selector
-            for entry in audit_entries
-            if (selector := _to_selector(entry)) is not None
+            selector for entry in audit_entries if (selector := _to_selector(entry)) is not None
         ]
         other_selectors = [
             selector
             for entry in filing
-            if entry.dcm_no != sample.dcm_no
-            and (selector := _to_selector(entry)) is not None
+            if entry.dcm_no != sample.dcm_no and (selector := _to_selector(entry)) is not None
         ]
         leaves = select_leaves(audit_selectors + other_selectors)
         by_id = {entry.entry_id: entry for entry in filing}
@@ -533,9 +519,7 @@ class ExtractionService:
         html_by_role: dict[str, str] = {}
         blocked = False
         failed = False
-        section_missing = (
-            leaves.cover_entry_id is None and leaves.opinion_entry_id is None
-        )
+        section_missing = leaves.cover_entry_id is None and leaves.opinion_entry_id is None
         for role in _LEAF_ROLES:
             entry_id = getattr(leaves, role)
             if not entry_id:
@@ -602,9 +586,7 @@ class ExtractionService:
             )
             body_auditor = extract_body_auditor(opinion_text, self._auditor_names)
             date_raw = " ".join(item.date_raw for item in date_candidates) or None
-            date_payload = [
-                {"date": item.iso, "snippet": item.snippet} for item in date_candidates
-            ]
+            date_payload = [{"date": item.iso, "snippet": item.snippet} for item in date_candidates]
         else:
             letter_opinion = _SKIPPED
             gaap = _SKIPPED
@@ -622,20 +604,14 @@ class ExtractionService:
 
         activity_html = html_by_role.get("activity_entry_id")
         activity_corp, activity_year = (
-            extract_activity_header(activity_html)
-            if activity_html is not None
-            else (None, None)
+            extract_activity_header(activity_html) if activity_html is not None else (None, None)
         )
         a001_cover_html = html_by_role.get("a001_cover_entry_id")
         a001_cover_period = (
-            extract_cover_period(a001_cover_html)
-            if a001_cover_html is not None
-            else _SKIPPED
+            extract_cover_period(a001_cover_html) if a001_cover_html is not None else _SKIPPED
         )
         a001_cover_corp = (
-            extract_cover_company_name(a001_cover_html)
-            if a001_cover_html is not None
-            else None
+            extract_cover_company_name(a001_cover_html) if a001_cover_html is not None else None
         )
 
         listing = sample.submitter if sample.report_type in _DEDICATED_REPORTS else None
@@ -700,9 +676,9 @@ class ExtractionService:
             ),
             auditor_resolved=auditor["value"],
             auditor_source=auditor["source"],
-            opinion_raw=letter_opinion.raw
-            if letter_opinion.status != "skipped"
-            else a001_opinion.raw,
+            opinion_raw=(
+                letter_opinion.raw if letter_opinion.status != "skipped" else a001_opinion.raw
+            ),
             opinion_code=opinion["value"],
             opinion_status=_field_status(opinion["value"], letter_opinion, a001_opinion),
             opinion_resolved=opinion["value"],
@@ -717,9 +693,7 @@ class ExtractionService:
             gaap_status=gaap.status,
             gaap_resolved=gaap.code if gaap.status == "ok" else None,
             gaap_source="letter" if gaap.status == "ok" else None,
-            current_period_raw=cover_period.raw
-            if cover_period.status != "skipped"
-            else None,
+            current_period_raw=cover_period.raw if cover_period.status != "skipped" else None,
             current_period_status=current_status,
             current_period_resolved=current_resolved,
             current_period_source=current_source,

@@ -41,8 +41,15 @@ _TRAILING_GROUNDS = (
     "의견거절근거",
     "부적정의견근거",
 )
+_TRAILING_RESPONSIBILITY = "경영진의책임"
+_TRAILING_TAIL_MARKERS = (
+    "강조사항",
+    "특기사항",
+    "기타사항",
+)
 _PRECEDING_CUT_MARKERS = (
     "강조사항",
+    "특기사항",
     "핵심감사사항",
     "기타사항",
     "계속기업관련중요한불확실성",
@@ -60,10 +67,10 @@ def _is_trailing_layout(compacted: str) -> bool:
     """종전 후행형인지 본다. 신 서식 표지가 없고 경영진의책임 뒤에 근거 표지가 있을 때다."""
     if any(heading in compacted for heading in _PRECEDING_HEADINGS):
         return False
-    start = compacted.find("경영진의책임")
+    start = compacted.find(_TRAILING_RESPONSIBILITY)
     if start < 0:
         return False
-    after = compacted[start + len("경영진의책임") :]
+    after = compacted[start + len(_TRAILING_RESPONSIBILITY) :]
     return any(ground in after for ground in _TRAILING_GROUNDS)
 
 
@@ -76,10 +83,28 @@ def _preceding_window(compacted: str) -> str:
     return compacted[: min(cuts)]
 
 
-def _opinion_window(compacted: str) -> str:
-    """후행형이면 전문, 아니면 선행형 창이다. 빈 창을 전문으로 되돌리지 않는다."""
-    if _is_trailing_layout(compacted):
+def _trailing_window(compacted: str) -> str:
+    """후행형: 근거 표지 뒤 첫 강조·특기·기타사항 앞만 남긴다. 없으면 전체다."""
+    resp = compacted.find(_TRAILING_RESPONSIBILITY)
+    if resp < 0:
         return compacted
+    search_from = resp + len(_TRAILING_RESPONSIBILITY)
+    grounds_hits = [compacted.find(ground, search_from) for ground in _TRAILING_GROUNDS]
+    grounds_hits = [index for index in grounds_hits if index >= 0]
+    if not grounds_hits:
+        return compacted
+    after_grounds = min(grounds_hits)
+    cuts = [compacted.find(marker, after_grounds) for marker in _TRAILING_TAIL_MARKERS]
+    cuts = [index for index in cuts if index >= 0]
+    if not cuts:
+        return compacted
+    return compacted[: min(cuts)]
+
+
+def _opinion_window(compacted: str) -> str:
+    """후행형이면 꼬리 앞, 아니면 선행형 창이다. 빈 창을 전문으로 되돌리지 않는다."""
+    if _is_trailing_layout(compacted):
+        return _trailing_window(compacted)
     return _preceding_window(compacted)
 
 
