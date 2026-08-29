@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import case, func, select
+from sqlalchemy import ColumnElement, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entry import Entry
@@ -50,6 +50,37 @@ class EntryRepository:
         """entry_id로 단일 엔트리를 조회한다. 없으면 None."""
         return await self._session.get(Entry, entry_id)
 
+    def _extraction_filters(
+        self, start: str, end: str, report_types: Sequence[str]
+    ) -> tuple[ColumnElement[bool], ColumnElement[bool], ColumnElement[bool]]:
+        """기간·유형 조건을 반환한다. 저장된 rcept_dt는 YYYY.MM.DD이다."""
+        start_key = start.replace(".", "")
+        end_key = end.replace(".", "")
+        rcept_key = func.replace(Entry.rcept_dt, ".", "")
+        return (
+            Entry.report_type.in_(list(report_types)),
+            rcept_key >= start_key,
+            rcept_key <= end_key,
+        )
+
+    async def list_rcept_nos_for_extraction(
+        self,
+        start: str,
+        end: str,
+        report_types: Sequence[str],
+    ) -> list[str]:
+        """추출 대상 기간·유형에 해당하는 접수번호를 중복 없이 반환한다.
+
+        한 접수 안의 leaf는 `list_by_rcept_no`로 따로 읽어 메모리에
+        기간 전체를 올리지 않는다.
+        """
+        filters = self._extraction_filters(start, end, report_types)
+        statement = (
+            select(Entry.rcept_no).where(*filters).distinct().order_by(Entry.rcept_no)
+        )
+        result = await self._session.execute(statement)
+        return list(result.scalars().all())
+
     async def list_for_extraction(
         self,
         start: str,
@@ -61,14 +92,10 @@ class EntryRepository:
         저장된 `rcept_dt`는 `YYYY.MM.DD`이고, 인자는 `YYYYMMDD`이다.
         점만 제거해 비교하므로 두 형식을 모두 받을 수 있다.
         """
-        start_key = start.replace(".", "")
-        end_key = end.replace(".", "")
-        rcept_key = func.replace(Entry.rcept_dt, ".", "")
+        filters = self._extraction_filters(start, end, report_types)
         statement = (
             select(Entry)
-            .where(Entry.report_type.in_(list(report_types)))
-            .where(rcept_key >= start_key)
-            .where(rcept_key <= end_key)
+            .where(*filters)
             .order_by(Entry.rcept_no, Entry.dcm_no, Entry.entry_id)
         )
         result = await self._session.execute(statement)

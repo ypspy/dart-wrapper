@@ -68,6 +68,34 @@ async def read_extract_status(
     return await service.get_status(job_id)
 
 
+@router.post(
+    "/jobs/{job_id}/soft-stop",
+    status_code=202,
+    summary="진행 중 추출 중단 요청",
+)
+async def soft_stop_extract_job(
+    job_id: str,
+    service: ExtractionService = Depends(get_extraction_service),
+) -> dict[str, str]:
+    """다음 접수 경계에서 추출을 멈춘다. 이미 저장한 문서는 유지된다."""
+    await service.request_soft_stop(job_id)
+    return {"job_id": job_id, "detail": "중단을 요청했습니다."}
+
+
+@router.post(
+    "/jobs/{job_id}/force-finish",
+    status_code=202,
+    summary="멈춘 추출 작업 강제 종료",
+)
+async def force_finish_extract_job(
+    job_id: str,
+    service: ExtractionService = Depends(get_extraction_service),
+) -> dict[str, str]:
+    """워커가 죽은 추출 잡을 부분 종료해 DART 잠금을 푼다."""
+    await service.force_finish(job_id)
+    return {"job_id": job_id, "detail": "작업을 강제 종료했습니다."}
+
+
 @router.get(
     "/audit-opinion/completeness",
     response_model=CompletenessResponse,

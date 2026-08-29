@@ -125,18 +125,22 @@ class CompletenessService:
                 "ambiguous_dates, field_partial 중 하나여야 합니다."
             )
 
-        entries = await EntryRepository(self._session).list_for_extraction(
+        repo = EntryRepository(self._session)
+        rcept_nos = await repo.list_rcept_nos_for_extraction(
             start_date, end_date, [report_type]
         )
-        keys = _document_keys(entries)
+        keys: list[DocKey] = []
+        for rcept_no in rcept_nos:
+            filing = await repo.list_by_rcept_no(rcept_no)
+            keys.extend(_document_keys(filing))
         key_set = set(keys)
         facts_by_key: dict[DocKey, AuditReportFact] = {}
-        facts_repo = FactRepository(self._session)
-        for rcept_no in {rcept for rcept, _ in keys}:
-            for fact in await facts_repo.list_by_rcept_no(rcept_no):
-                pair = (fact.rcept_no, fact.dcm_no)
-                if pair in key_set:
-                    facts_by_key[pair] = fact
+        for fact in await FactRepository(self._session).list_by_rcept_nos(
+            [rcept for rcept, _ in keys]
+        ):
+            pair = (fact.rcept_no, fact.dcm_no)
+            if pair in key_set:
+                facts_by_key[pair] = fact
 
         buckets: dict[str, list[DocKey]] = {name: [] for name in LIST_STATUSES}
         ok = fetch_failed = blocked = section_missing = 0

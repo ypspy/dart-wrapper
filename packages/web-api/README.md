@@ -49,6 +49,8 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | POST | `/admin/catalog/jobs/{job_id}/soft-stop` | 다음 공시 경계에서 중단 |
 | POST | `/admin/extract/audit-opinion` | 감사 표지·의견 추출 트리거 (202, `job_id`) |
 | GET | `/admin/extract/status?job_id=` | 추출 작업 현황·로그 |
+| POST | `/admin/extract/jobs/{job_id}/soft-stop` | 다음 접수 경계에서 추출 중단 |
+| POST | `/admin/extract/jobs/{job_id}/force-finish` | 멈춘 추출 잡 강제 종료(DART 잠금 해제) |
 | GET | `/admin/extract/audit-opinion/completeness` | 기간·유형별 추출 완전성 집계 |
 | PATCH | `/admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date` | 감사보고서일 수동 보정 |
 | POST | `/admin/extract/resolve-dates` | ambiguous 감사보고서일 LLM 해소 |
@@ -99,6 +101,8 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 `mode`는 `extract`(신규), `resume`(행 없음·fetch 실패 재시도), `reparse`(필드 `not_found` 재파싱)입니다.
 바로 `job_id`를 돌려주고 실제 추출은 백그라운드에서 진행됩니다.
 현황은 `GET /admin/extract/status?job_id=`로 봅니다.
+워커가 살아 있으면 `POST /admin/extract/jobs/{job_id}/soft-stop`으로 다음 접수에서 멈춥니다.
+프로세스가 죽은 채 `pending`/`running`이면 `force-finish`로 잠금을 풉니다.
 
 감사보고서일만 손으로 고치려면
 `PATCH /admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date`에 `{"iso": "2020-02-20"}`를 보냅니다.

@@ -220,6 +220,26 @@ async def test_list_by_rcept_no_returns_same_filing(sessionmaker_fixture) -> Non
     assert dcm_nos == ["111", "222"]
 
 
+async def test_list_by_rcept_nos_batches_filings(sessionmaker_fixture) -> None:
+    """여러 접수번호를 한 번에 조회한다."""
+    async with sessionmaker_fixture() as session:
+        repo = FactRepository(session)
+        await repo.upsert(_make_fact(dcm_no="111"))
+        await repo.upsert(_make_fact(rcept_no="20260331000002", dcm_no="222"))
+        await repo.upsert(_make_fact(rcept_no="20260331000003", dcm_no="333"))
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        rows = await FactRepository(session).list_by_rcept_nos(
+            ["20260331000001", "20260331000003"]
+        )
+
+    assert sorted(row.rcept_no for row in rows) == [
+        "20260331000001",
+        "20260331000003",
+    ]
+
+
 async def test_list_ambiguous_dates(sessionmaker_fixture) -> None:
     """감사보고서일 상태가 ambiguous인 행만 반환한다."""
     async with sessionmaker_fixture() as session:

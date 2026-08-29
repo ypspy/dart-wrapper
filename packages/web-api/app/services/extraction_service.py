@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections import defaultdict
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -250,6 +249,7 @@ class ExtractionService:
         self._auditor_names = _load_auditor_names()
         self._block_streak_threshold = block_streak_threshold
         self._block_wait_seconds = block_wait_seconds
+        self._stop_requested: set[str] = set()
 
     async def start(
         self,
@@ -272,6 +272,43 @@ class ExtractionService:
             await jobs.add_log(job_id, "info", "추출 작업을 등록했습니다.")
             await session.commit()
         return job_id
+
+    async def request_soft_stop(self, job_id: str) -> None:
+        """다음 접수 경계에서 추출을 멈춘다. 이미 저장한 문서는 유지한다."""
+        self._stop_requested.add(job_id)
+        async with self._sessionmaker() as session:
+            jobs = ExtractionJobRepository(session)
+            job = await session.get(ExtractionJob, job_id)
+            if job is None:
+                raise CatalogNotFound(f"추출 작업을 찾을 수 없습니다: {job_id}")
+            await jobs.add_log(
+                job_id,
+                "warning",
+                "중단 요청을 받았습니다. 진행 중인 접수까지만 처리합니다.",
+            )
+            await session.commit()
+
+    async def force_finish(self, job_id: str) -> None:
+        """멈춘 것으로 보이는 추출 잡을 즉시 부분 종료해 잠금을 푼다."""
+        self._stop_requested.add(job_id)
+        async with self._sessionmaker() as session:
+            jobs = ExtractionJobRepository(session)
+            job = await session.get(ExtractionJob, job_id)
+            if job is None:
+                raise CatalogNotFound(f"추출 작업을 찾을 수 없습니다: {job_id}")
+            if job.status not in {"pending", "running"}:
+                return
+            await jobs.set_status(
+                job_id,
+                "partial",
+                error_message="운영자가 작업을 강제 종료했습니다.",
+            )
+            await jobs.add_log(
+                job_id,
+                "warning",
+                "운영자가 작업을 강제 종료했습니다. 미완료분은 이어하기로 재개하세요.",
+            )
+            await session.commit()
 
     async def get_status(self, job_id: str) -> ExtractJobStatusResponse:
         """추출 작업 현황과 최근 로그를 반환한다.
@@ -313,17 +350,18 @@ class ExtractionService:
 
         try:
             async with self._sessionmaker() as session:
-                entries = await EntryRepository(session).list_for_extraction(
+                rcept_nos = await EntryRepository(session).list_rcept_nos_for_extraction(
                     start_date, end_date, report_types
                 )
 
-            by_rcept: dict[str, list[Entry]] = defaultdict(list)
-            for entry in entries:
-                by_rcept[entry.rcept_no].append(entry)
-
             processed = 0
             block_streak = 0
-            for rcept_no, filing in by_rcept.items():
+            for rcept_no in rcept_nos:
+                if job_id in self._stop_requested:
+                    await self._finish_partial(job_id, processed)
+                    return
+                async with self._sessionmaker() as session:
+                    filing = await EntryRepository(session).list_by_rcept_no(rcept_no)
                 audit_selectors: list[SelectorEntry] = []
                 for entry in filing:
                     selector = _to_selector(entry)
@@ -357,7 +395,7 @@ class ExtractionService:
                                 "추출이 차단된 것으로 보여 중단합니다. "
                                 "재개로 이어서 처리하세요."
                             )
-                    elif fetch_status is not None:
+                    else:
                         block_streak = 0
 
             async with self._sessionmaker() as session:
@@ -365,6 +403,15 @@ class ExtractionService:
                 await jobs.set_status(job_id, "succeeded")
                 await jobs.add_log(
                     job_id, "info", f"추출 작업을 마쳤습니다. 문서 {processed}건."
+                )
+                await session.commit()
+        except _BlockStreakExceeded as exc:
+            logger.warning("추출 작업이 차단으로 중단되었습니다: %s", job_id)
+            async with self._sessionmaker() as session:
+                jobs = ExtractionJobRepository(session)
+                await jobs.set_status(job_id, "failed", error_message=str(exc))
+                await jobs.add_log(
+                    job_id, "error", f"추출 작업이 중단되었습니다: {exc}"
                 )
                 await session.commit()
         except Exception as exc:
@@ -376,6 +423,18 @@ class ExtractionService:
                     job_id, "error", f"추출 작업이 중단되었습니다: {exc}"
                 )
                 await session.commit()
+
+    async def _finish_partial(self, job_id: str, processed: int) -> None:
+        """soft-stop으로 중간 종료한다."""
+        async with self._sessionmaker() as session:
+            jobs = ExtractionJobRepository(session)
+            await jobs.set_status(job_id, "partial")
+            await jobs.add_log(
+                job_id,
+                "warning",
+                f"중단 요청으로 추출을 멈췄습니다. 처리한 문서 {processed}건.",
+            )
+            await session.commit()
 
     async def _process_document(
         self,

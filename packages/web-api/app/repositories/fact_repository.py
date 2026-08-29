@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,13 +28,25 @@ class FactRepository:
 
     async def list_by_rcept_no(self, rcept_no: str) -> list[AuditReportFact]:
         """해당 접수의 문서 행을 dcm_no 순으로 반환한다."""
-        statement = (
-            select(AuditReportFact)
-            .where(AuditReportFact.rcept_no == rcept_no)
-            .order_by(AuditReportFact.dcm_no)
-        )
-        result = await self._session.execute(statement)
-        return list(result.scalars().all())
+        return await self.list_by_rcept_nos([rcept_no])
+
+    async def list_by_rcept_nos(self, rcept_nos: Sequence[str]) -> list[AuditReportFact]:
+        """여러 접수의 문서 행을 rcept_no·dcm_no 순으로 반환한다."""
+        if not rcept_nos:
+            return []
+        rows: list[AuditReportFact] = []
+        unique = list(dict.fromkeys(rcept_nos))
+        chunk_size = 500
+        for index in range(0, len(unique), chunk_size):
+            chunk = unique[index : index + chunk_size]
+            statement = (
+                select(AuditReportFact)
+                .where(AuditReportFact.rcept_no.in_(chunk))
+                .order_by(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
+            )
+            result = await self._session.execute(statement)
+            rows.extend(result.scalars().all())
+        return rows
 
     async def list_ambiguous_dates(self) -> list[AuditReportFact]:
         """감사보고서일이 ambiguous인 행을 반환한다."""

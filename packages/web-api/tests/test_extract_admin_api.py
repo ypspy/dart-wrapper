@@ -158,6 +158,8 @@ class FakeExtractionService:
     def __init__(self) -> None:
         self.started: list[tuple[str, str, list[str], str]] = []
         self.executed: list[str] = []
+        self.soft_stopped: list[str] = []
+        self.force_finished: list[str] = []
 
     async def start(
         self,
@@ -178,6 +180,14 @@ class FakeExtractionService:
         return ExtractJobStatusResponse(
             job_id=job_id, status="succeeded", mode="extract", params=EXTRACT_PAYLOAD
         )
+
+    async def request_soft_stop(self, job_id: str) -> None:
+        self.soft_stopped.append(job_id)
+
+    async def force_finish(self, job_id: str) -> None:
+        if job_id != "job-extract-1":
+            raise CatalogNotFound(f"추출 작업을 찾을 수 없습니다: {job_id}")
+        self.force_finished.append(job_id)
 
 
 def _app_with_extract(service: FakeExtractionService):
@@ -583,3 +593,42 @@ async def test_patch_date_returns_404_when_fact_missing(
         )
 
     assert response.status_code == 404
+
+
+async def test_soft_stop_extract_job_requires_token(client_factory) -> None:
+    """추출 중단도 Admin 토큰이 필요하다."""
+    async with client_factory(_app_with_extract(FakeExtractionService())) as client:
+        response = await client.post("/admin/extract/jobs/job-extract-1/soft-stop")
+
+    assert response.status_code == 401
+
+
+async def test_soft_stop_extract_job_records_request(client_factory) -> None:
+    """추출 중단 요청은 202이고 서비스에 job_id를 넘긴다."""
+    service = FakeExtractionService()
+    async with client_factory(_app_with_extract(service)) as client:
+        response = await client.post(
+            "/admin/extract/jobs/job-extract-1/soft-stop",
+            headers=TOKEN_HEADER,
+        )
+
+    assert response.status_code == 202
+    assert service.soft_stopped == ["job-extract-1"]
+
+
+async def test_force_finish_extract_job_records_request(client_factory) -> None:
+    """강제 종료는 202이고 없는 잡은 404이다."""
+    service = FakeExtractionService()
+    async with client_factory(_app_with_extract(service)) as client:
+        ok = await client.post(
+            "/admin/extract/jobs/job-extract-1/force-finish",
+            headers=TOKEN_HEADER,
+        )
+        missing = await client.post(
+            "/admin/extract/jobs/missing/force-finish",
+            headers=TOKEN_HEADER,
+        )
+
+    assert ok.status_code == 202
+    assert service.force_finished == ["job-extract-1"]
+    assert missing.status_code == 404

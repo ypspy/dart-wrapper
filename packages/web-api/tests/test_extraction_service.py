@@ -719,3 +719,92 @@ async def test_a001_cover_company_name_feeds_corp_name_conflicts(
     assert matches
     assert any(c.get("right_source") == "a001_cover" for c in matches)
     assert any("현대자동차" in (c.get("right") or "") for c in matches)
+
+
+async def test_run_job_extracts_two_filings_without_loading_all_leaves_at_once(
+    sessionmaker_fixture,
+) -> None:
+    """접수번호 목록만 먼저 읽고 접수마다 leaf를 가져와 두 문서를 모두 추출한다."""
+    cover2 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=cover"
+    opinion2 = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e2-cover",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                viewer_url=cover2,
+            ),
+            _entry(
+                entry_id="e2-opinion",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                section_name="독립된 감사인의 감사보고서",
+                path=["독립된 감사인의 감사보고서"],
+                viewer_url=opinion2,
+            ),
+        ],
+    )
+    async with sessionmaker_fixture() as session:
+        rcept_nos = await EntryRepository(session).list_rcept_nos_for_extraction(
+            "20200301", "20200331", ["F001"]
+        )
+    assert rcept_nos == ["20200331000001", "20200331000002"]
+
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            cover2: (200, COVER_HTML),
+            opinion2: (200, OPINION_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        first = await FactRepository(session).get("20200331000001", "11111")
+        second = await FactRepository(session).get("20200331000002", "22222")
+
+    assert first is not None and first.fetch_status == "ok"
+    assert second is not None and second.fetch_status == "ok"
+
+
+async def test_soft_stop_before_run_saves_nothing_and_marks_partial(
+    sessionmaker_fixture,
+) -> None:
+    """run_job 전에 중단을 요청하면 문서를 추출하지 않고 partial로 끝낸다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.request_soft_stop(job_id)
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        rows = await FactRepository(session).list_by_rcept_no("20200331000001")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert rows == []
+    assert job is not None
+    assert job.status == "partial"
+
+
+async def test_force_finish_unlocks_pending_extraction(sessionmaker_fixture) -> None:
+    """강제 종료한 pending 추출 잡이 있으면 새 추출을 시작할 수 있다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        first = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.force_finish(first)
+        second = await service.start("20200301", "20200331", ["F001"], "extract")
+
+    assert first != second
+    async with sessionmaker_fixture() as session:
+        job = await session.get(ExtractionJob, first)
+    assert job is not None
+    assert job.status == "partial"
