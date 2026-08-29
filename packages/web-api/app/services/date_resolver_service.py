@@ -148,7 +148,9 @@ def _llm_candidates(stored: list[Any]) -> list[dict]:
             continue
         payload.append(
             {
-                "date_raw": str(item.get("date_raw") or ""),
+                "date_raw": str(
+                    item.get("date_raw") or item.get("date") or item.get("iso") or ""
+                ),
                 "snippet": str(item.get("snippet") or ""),
             }
         )

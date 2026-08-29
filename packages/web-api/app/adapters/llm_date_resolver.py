@@ -11,6 +11,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _CHAT_URL = "https://api.openai.com/v1/chat/completions"
+# 공유 httpx 클라이언트 기본 타임아웃(5초)보다 길다. DART fetch는 요청마다 15초.
+_LLM_TIMEOUT_SECONDS = 30.0
 _PROMPTS: dict[str, str] = {
     "v1": (
         "당신은 감사보고서일 후보 중 실제 서명일(감사보고서일)을 고릅니다. "
@@ -52,6 +54,7 @@ class LlmDateResolver:
                 _CHAT_URL,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json=self._payload(candidates, period_end, rcept_dt),
+                timeout=_LLM_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
             body = response.json()

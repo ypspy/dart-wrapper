@@ -176,6 +176,38 @@ async def test_run_stores_second_candidate_iso_when_resolver_returns_one(
     ]
 
 
+async def test_run_maps_task7_date_key_into_llm_date_raw(
+    sessionmaker_fixture,
+) -> None:
+    """추출 후보가 date+snippet만 있어도 LLM에는 ISO가 date_raw로 간다."""
+    stored = [
+        {"date": "2020-02-01", "snippet": "머리 2020년2월1일 의견"},
+        {"date": "2020-03-15", "snippet": "서명 2020년3월15일"},
+    ]
+    await _seed(
+        sessionmaker_fixture,
+        entries=[_entry()],
+        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+    )
+    resolver = FakeDateResolver(1)
+    service = _service(sessionmaker_fixture, resolver)
+    job_id = await service.start()
+    await service.run(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.audit_report_date == "2020-03-15"
+    assert fact.audit_report_date_source == "llm"
+    assert resolver.calls
+    candidates = resolver.calls[0]["candidates"]
+    assert candidates == [
+        {"date_raw": "2020-02-01", "snippet": "머리 2020년2월1일 의견"},
+        {"date_raw": "2020-03-15", "snippet": "서명 2020년3월15일"},
+    ]
+
+
 @pytest.mark.parametrize("index", [-1, None])
 async def test_run_keeps_ambiguous_when_resolver_returns_invalid_index(
     sessionmaker_fixture,
@@ -316,6 +348,30 @@ async def test_llm_adapter_out_of_range_or_parse_failure_returns_none(
 
     assert index is None
     assert adapter.last_raw_response == content
+
+
+async def test_llm_adapter_posts_with_longer_timeout() -> None:
+    """OpenAI POST는 공유 클라이언트 기본 5초가 아니라 명시 타임아웃을 쓴다."""
+    from app.adapters.llm_date_resolver import LlmDateResolver
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return _openai_response('{"index": 0}')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        adapter = LlmDateResolver(client, api_key="sk-test")
+        await adapter.pick_index(
+            candidates=[{"date_raw": "2020-03-15", "snippet": "서명"}],
+            period_end="2019-12-31",
+            rcept_dt="2020-03-31",
+        )
+
+    assert captured
+    timeout = captured[0].extensions["timeout"]
+    assert timeout["read"] == 30.0
+    assert timeout["connect"] == 30.0
 
 
 async def test_llm_adapter_http_error_returns_none() -> None:
