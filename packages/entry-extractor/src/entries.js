@@ -48,6 +48,21 @@ function collectBodyDcmNos(tree) {
 }
 
 /**
+ * 목록 행이 첨부정정 접수인지 판별한다.
+ * @param {object|null|undefined} disclosure
+ * @returns {boolean}
+ */
+function isAttachmentCorrectionFiling(disclosure) {
+  const type = String(disclosure?.correction_type || '').replace(/\s+/g, '');
+  const reportNm = String(disclosure?.report_nm || '').replace(/\s+/g, '');
+  return (
+    type.includes('첨부정정') ||
+    reportNm.includes('[첨부정정]') ||
+    reportNm.includes('첨부정정')
+  );
+}
+
+/**
  * parseDetail 결과(tree/documents)와 공시 features를 합쳐
  * leaf 단위 flat 엔트리 배열을 만든다.
  *
@@ -67,6 +82,7 @@ function buildEntries(
   const { tree = [], documents = [] } = detail || {};
   const features = pickFeatures(disclosure);
   const disclosureUrl = disclosure?.url || null;
+  const attachmentFiling = isAttachmentCorrectionFiling(disclosure);
 
   // dcmNo -> 본문 문서명 매핑 (엔트리에 document_name으로 반영)
   const bodyNameByDcmNo = new Map();
@@ -85,7 +101,8 @@ function buildEntries(
       const entry = {
         ...features,
         disclosure_url: disclosureUrl,
-        source: 'body',
+        // 첨부정정: 상세 treeData가 첨부 TOC이므로 attachment로 표기
+        source: attachmentFiling ? 'attachment' : 'body',
         dcmNo: node.dcmNo,
         document_name: bodyNameByDcmNo.get(node.dcmNo) || null,
         section_name: node.name,
@@ -318,6 +335,7 @@ module.exports = {
   collectEntries,
   collectAttachmentTrees,
   collectBodyDcmNos,
+  isAttachmentCorrectionFiling,
   pickFeatures,
   makeEntryId,
   DISCLOSURE_FEATURE_KEYS,

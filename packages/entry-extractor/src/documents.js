@@ -383,6 +383,46 @@ function dedupe(documents) {
 }
 
 /**
+ * #att option 표시명. [정정] 등이 있으면 접두로 붙인다.
+ * @param {{ name?: string, correctionType?: string }} att
+ * @returns {string}
+ */
+function attachmentOptionDisplayName(att) {
+  const name = (att?.name || '').trim();
+  const tag = (att?.correctionType || '').trim();
+  if (!name) return tag ? `[${tag}]` : '';
+  if (!tag) return name;
+  if (name.startsWith('[')) return name;
+  return `[${tag}] ${name}`;
+}
+
+/**
+ * 본문 dcmNo와 같은 첨부 option이 있으면 본문 document명을 option명으로 덮어쓴다.
+ * 첨부정정처럼 treeData가 첨부 TOC인데 resolveBodyName이 report_nm(사업보고서)을
+ * 쓰는 경우를 고친다. dedupe 전에 호출해야 한다.
+ *
+ * @param {object[]} documents
+ * @returns {object[]}
+ */
+function applyAttachmentOptionNames(documents) {
+  const byDcm = new Map();
+  for (const doc of documents || []) {
+    if (doc.source !== 'attachment' || !doc.dcmNo) continue;
+    byDcm.set(String(doc.dcmNo), doc);
+  }
+  for (const doc of documents || []) {
+    if (doc.source !== 'body' || !doc.dcmNo) continue;
+    const att = byDcm.get(String(doc.dcmNo));
+    if (!att) continue;
+    doc.name = attachmentOptionDisplayName(att);
+    doc.originalName = att.originalName || att.name || doc.originalName;
+    doc.correctionType = att.correctionType || '';
+    doc.namedFromAttachment = true;
+  }
+  return documents || [];
+}
+
+/**
  * 상세 URL·disclosure에서 현재 접수번호(rcpNo)를 구한다.
  * disclosure.rcept_no 우선, 없으면 URL의 rcpNo.
  * @param {object|null} disclosure
@@ -450,6 +490,7 @@ async function parseDetail(
   }
 
   const rceptNo = resolveReceptionRcpNo(disclosure, disclosureUrl);
+  applyAttachmentOptionNames(documents);
 
   return {
     tree,
@@ -519,5 +560,7 @@ module.exports = {
   resolveBodyName,
   resolveReceptionRcpNo,
   selectReceptionAttachments,
+  applyAttachmentOptionNames,
+  attachmentOptionDisplayName,
   viewerUrl,
 };
