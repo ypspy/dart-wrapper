@@ -53,6 +53,8 @@ compact 문자열에서 **끊는 표지**가 처음 나오는 위치 앞만 검�
 근거 단락의 D-3-2 키워드를 남기기 위함이다.
 
 끊는 표지가 하나도 없으면 본문 전체를 구간으로 쓴다. 앞 N자로 자르지 않는다.
+표지가 맨 앞에 있으면 구간이 비어 `unqualified`가 된다. 그 서식은 극히 드물어
+본문 전체로 되돌리지 않는다.
 
 ### 3.2 키워드
 
@@ -71,8 +73,10 @@ compact 문자열에서 **끊는 표지**가 처음 나오는 위치 앞만 검�
 
 `EXTRACTOR_VERSION`을 `audit_opinion.v2`로 올린다.
 
-이미 `fetch_status=ok`인 행은 `extract`/`resume`이 건너뛴다. 오탐을 고치려면
-`mode=reparse`로 의견 필드를 다시 뽑는다. override·LLM 날짜 보존은 기존 reparse 규칙을 따른다.
+이미 `fetch_status=ok`인 행은 `extract`/`resume`이 건너뛴다. `reparse`는 필드가
+`not_found`인 행만 다시 뽑는다. 의견이 `ok`로 잘못 저장된 오탐은 버전만 올려서는
+고쳐지지 않으므로, 해당 fact를 지운 뒤 `extract`를 다시 돌린다.
+override·LLM 날짜 보존은 기존 reparse 규칙을 따른다.
 
 ## 5. 테스트
 

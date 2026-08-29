@@ -86,9 +86,7 @@ def test_disclaimer_grounds_keyword_before_cut_still_disclaimer() -> None:
     """의견거절근거 근거 문구는 끊는 표지 앞 구간에서 disclaimer이다."""
     text = (
         "감사의견 우리는 재무제표를 감사하였습니다. "
-        "의견거절근거 감사범위 제한. "
-        + ("가" * 80)
-        + " 강조사항 과거 보고서는 무효입니다."
+        "의견거절근거 감사범위 제한. " + ("가" * 80) + " 강조사항 과거 보고서는 무효입니다."
     )
     result = classify_opinion(text, looks_like_letter=True)
     assert result.code == "disclaimer"
@@ -99,8 +97,7 @@ def test_qualified_grounds_before_kam_still_qualified() -> None:
     """한정의견 근거 문구는 핵심감사사항 앞 구간에 있으면 qualified이다."""
     text = (
         "감사의견 한정의견근거단락에기술된사항이미치는영향을제외하고는 적정합니다. "
-        "핵심감사사항 재고자산."
-        + ("가" * 80)
+        "핵심감사사항 재고자산." + ("가" * 80)
     )
     result = classify_opinion(text, looks_like_letter=True)
     assert result.code == "qualified"
