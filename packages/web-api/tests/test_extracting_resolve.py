@@ -142,6 +142,20 @@ def test_a001_listing_argument_is_ignored() -> None:
     assert resolved["conflicts"] == []
 
 
+def test_f002_skipped_cover_body_does_not_use_listing() -> None:
+    """표지·본문이 skipped(None)이면 F002 listing을 resolved에 쓰지 않는다."""
+    resolved = resolve_auditor(
+        cover=None,
+        a001=None,
+        body=None,
+        listing="우리회계법인",
+        report_type="F002",
+    )
+    assert resolved["value"] is None
+    assert resolved["source"] is None
+    assert resolved["conflicts"] == []
+
+
 def test_f002_listing_fills_when_cover_and_body_missing() -> None:
     """F002 표지·본문이 없으면 listing을 정규화해 고른다."""
     resolved = resolve_auditor(

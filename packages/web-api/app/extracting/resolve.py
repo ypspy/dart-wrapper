@@ -58,7 +58,8 @@ def resolve_auditor(
     """문서 출처 순위로 감사인을 고르고, listing은 conflict에 넣지 않는다.
 
     순위는 표지 → (A001만 당기 칸) → 본문 → (F001·F002만 목록 submitter).
-    listing은 앞 출처가 모두 없고 정규화 후 비어 있지 않을 때만 쓴다.
+    listing은 F001·F002에서 표지·본문을 읽었으나 둘 다 not_found이고
+    정규화 후 비어 있지 않을 때만 쓴다. skipped는 None으로 들어와 listing에 쓰지 않는다.
     A001 listing(회사명)은 호출자가 넘기더라도 이 함수에서 무시한다.
     """
     ranked: list[tuple[str, FieldResult]] = []
@@ -81,7 +82,7 @@ def resolve_auditor(
             source=source,
             conflicts=conflicts,
         )
-    if report_type in {"F001", "F002"}:
+    if report_type in {"F001", "F002"} and cover is not None and body is not None:
         listing_name = normalize_firm_name(listing)
         if listing_name:
             return ResolvedAuditor(
