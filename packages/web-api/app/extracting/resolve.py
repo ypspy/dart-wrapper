@@ -57,10 +57,10 @@ def resolve_auditor(
 ) -> ResolvedAuditor:
     """문서 출처 순위로 감사인을 고르고, listing은 conflict에 넣지 않는다.
 
-    순위는 표지 → (A001만 당기 칸) → 본문. F001·F002 listing(현재명)과
+    순위는 표지 → (A001만 당기 칸) → 본문 → (F001·F002만 목록 submitter).
+    listing은 앞 출처가 모두 없고 정규화 후 비어 있지 않을 때만 쓴다.
     A001 listing(회사명)은 호출자가 넘기더라도 이 함수에서 무시한다.
     """
-    _ = listing
     ranked: list[tuple[str, FieldResult]] = []
     if _is_ok(cover):
         ranked.append(("cover", cover))
@@ -74,14 +74,22 @@ def resolve_auditor(
         [(source, item.raw or "") for source, item in ranked],
         key=normalize_firm_name,
     )
-    if not ranked:
-        return ResolvedAuditor(value=None, source=None, conflicts=conflicts)
-    source, winner = ranked[0]
-    return ResolvedAuditor(
-        value=normalize_firm_name(winner.raw) or None,
-        source=source,
-        conflicts=conflicts,
-    )
+    if ranked:
+        source, winner = ranked[0]
+        return ResolvedAuditor(
+            value=normalize_firm_name(winner.raw) or None,
+            source=source,
+            conflicts=conflicts,
+        )
+    if report_type in {"F001", "F002"}:
+        listing_name = normalize_firm_name(listing)
+        if listing_name:
+            return ResolvedAuditor(
+                value=listing_name,
+                source="listing",
+                conflicts=conflicts,
+            )
+    return ResolvedAuditor(value=None, source=None, conflicts=conflicts)
 
 
 def resolve_opinion(
@@ -108,9 +116,7 @@ def resolve_opinion(
                 )
             )
     if _is_ok(letter):
-        return ResolvedOpinion(
-            value=letter.code, source="letter", conflicts=conflicts
-        )
+        return ResolvedOpinion(value=letter.code, source="letter", conflicts=conflicts)
     if _is_ok(a001):
         return ResolvedOpinion(value=a001.code, source="a001", conflicts=[])
     return ResolvedOpinion(value=None, source=None, conflicts=[])

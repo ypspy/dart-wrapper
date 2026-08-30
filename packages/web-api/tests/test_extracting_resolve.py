@@ -142,6 +142,75 @@ def test_a001_listing_argument_is_ignored() -> None:
     assert resolved["conflicts"] == []
 
 
+def test_f002_listing_fills_when_cover_and_body_missing() -> None:
+    """F002 표지·본문이 없으면 listing을 정규화해 고른다."""
+    resolved = resolve_auditor(
+        cover=_missing(),
+        a001=None,
+        body=_missing(),
+        listing="우리회계법인",
+        report_type="F002",
+    )
+    assert resolved["value"] == "우리회계법인"
+    assert resolved["source"] == "listing"
+    assert resolved["conflicts"] == []
+
+
+def test_f001_listing_fills_when_cover_and_body_missing() -> None:
+    """F001도 표지·본문이 없으면 listing을 고른다."""
+    resolved = resolve_auditor(
+        cover=_missing(),
+        a001=None,
+        body=_missing(),
+        listing="우리회계법인",
+        report_type="F001",
+    )
+    assert resolved["value"] == "우리회계법인"
+    assert resolved["source"] == "listing"
+    assert resolved["conflicts"] == []
+
+
+def test_f001_listing_is_normalized() -> None:
+    """listing 승자도 주식회사·공백을 뺀다."""
+    resolved = resolve_auditor(
+        cover=_missing(),
+        a001=None,
+        body=_missing(),
+        listing="우리 회계법인주식회사",
+        report_type="F001",
+    )
+    assert resolved["value"] == "우리회계법인"
+    assert resolved["source"] == "listing"
+
+
+def test_f001_empty_listing_stays_not_found() -> None:
+    """F001이어도 listing이 비면 resolved는 없다."""
+    resolved = resolve_auditor(
+        cover=_missing(),
+        a001=None,
+        body=_missing(),
+        listing="  ",
+        report_type="F001",
+    )
+    assert resolved["value"] is None
+    assert resolved["source"] is None
+    assert resolved["conflicts"] == []
+
+
+def test_f001_body_wins_over_listing_without_conflict() -> None:
+    """본문만 ok이면 listing이 달라도 본문이고 conflict가 없다."""
+    resolved = resolve_auditor(
+        cover=_missing(),
+        a001=None,
+        body=_ok("한영회계법인"),
+        listing="우리회계법인",
+        report_type="F001",
+    )
+    assert resolved["value"] == "한영회계법인"
+    assert resolved["source"] == "body"
+    assert resolved["conflicts"] == []
+
+
 def test_auditor_names_match_after_normalize() -> None:
     """정규화 후 같으면 conflict가 없다."""
     resolved = resolve_auditor(
