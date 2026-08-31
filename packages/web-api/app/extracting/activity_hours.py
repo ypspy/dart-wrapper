@@ -10,7 +10,7 @@ from app.extracting.text import compact
 _PERIOD_CURRENT = "당기"
 _PERIOD_PRIOR = "전기"
 _LABEL_TOKENS = {"", "#", "구분", _PERIOD_CURRENT, _PERIOD_PRIOR}
-_ROW_LABEL_TOKENS = {"", "#", "구분", "투입시간"}
+_ROW_LABEL_TOKENS = {"#", "구분", "투입시간"}
 _INTERIM_LABELS = ("분ㆍ반기검토", "분·반기검토", "분기검토", "반기검토")
 _AUDIT_EXCLUDES = ("감사참여자", "감사업무", "감사시간")
 
@@ -132,16 +132,27 @@ def _is_label_column(header_texts: list[str], col_index: int) -> bool:
     return all(token in {"구분", _PERIOD_CURRENT, _PERIOD_PRIOR} for token in meaningful)
 
 
-def _is_row_label_cell(text: str, col_index: int, metric_raw: str) -> bool:
+def _is_row_label_cell(text: str, col_index: int, metric_raw: str, row: list[str]) -> bool:
     """앞 두 열의 지표 라벨·빈 정렬 칸만 건너뛴다. 비숫자 값 칸은 남긴다."""
     if col_index >= 2:
         return False
     token = compact(text)
+    if token == "":
+        # 빈 칸은 오른쪽에 값 칸이 있을 때만 정렬 spacer로 건너뛴다.
+        return _has_value_cell_to_the_right(row, col_index, metric_raw)
     if token in _ROW_LABEL_TOKENS:
         return True
     if _metric_from_token(token) is not None:
         return True
     return bool(metric_raw) and text == metric_raw
+
+
+def _has_value_cell_to_the_right(row: list[str], col_index: int, metric_raw: str) -> bool:
+    """현재 칸 오른쪽에 방출될 값 칸이 있으면 True다."""
+    for index, cell in enumerate(row[col_index + 1 :], start=col_index + 1):
+        if not _is_row_label_cell(cell, index, metric_raw, row):
+            return True
+    return False
 
 
 def _column_headers(matrix: list[list[str]], header_end: int) -> list[list[str]]:
@@ -199,7 +210,7 @@ def _pivot(matrix: list[list[str]], headcount_row: int) -> list[dict[str, object
         values = [
             cell
             for index, cell in enumerate(row)
-            if not _is_row_label_cell(cell, index, metric_raw)
+            if not _is_row_label_cell(cell, index, metric_raw, row)
         ]
         for (role, role_raw, role_unmapped, header_texts), raw in zip(role_columns, values):
             period, period_raw = _match_period(header_texts, raw)

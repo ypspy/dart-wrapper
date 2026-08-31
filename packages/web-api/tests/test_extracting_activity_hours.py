@@ -125,3 +125,19 @@ def test_extract_hours_non_numeric_value_keeps_raw() -> None:
     assert status == "ok"
     none_cell = next(c for c in cells if c["raw"] == "해당없음")
     assert none_cell["value"] is None
+
+
+def test_extract_hours_blank_two_column_value_is_zero() -> None:
+    """2열 표의 빈 값 칸은 버리지 않고 공백→0으로 남긴다."""
+    html = """
+    <html><body>
+    <table>
+    <tr><td></td><td>기타</td></tr>
+    <tr><td>투입 인원수</td><td></td></tr>
+    </table>
+    </body></html>
+    """
+    cells, status = extract_hours(html)
+    assert status == "ok"
+    blank = next(c for c in cells if c["raw"] == "")
+    assert blank["value"] == 0
