@@ -132,8 +132,8 @@ def _is_label_column(header_texts: list[str], col_index: int) -> bool:
     return all(token in {"구분", _PERIOD_CURRENT, _PERIOD_PRIOR} for token in meaningful)
 
 
-def _is_row_label_cell(text: str, col_index: int) -> bool:
-    """지표 행의 앞 두 열에서 라벨·빈 칸을 건너뛴다."""
+def _is_row_label_cell(text: str, col_index: int, metric_raw: str) -> bool:
+    """앞 두 열의 지표 라벨·빈 정렬 칸만 건너뛴다. 비숫자 값 칸은 남긴다."""
     if col_index >= 2:
         return False
     token = compact(text)
@@ -141,7 +141,7 @@ def _is_row_label_cell(text: str, col_index: int) -> bool:
         return True
     if _metric_from_token(token) is not None:
         return True
-    return bool(token) and _parse_value(text) is None
+    return bool(metric_raw) and text == metric_raw
 
 
 def _column_headers(matrix: list[list[str]], header_end: int) -> list[list[str]]:
@@ -196,7 +196,11 @@ def _pivot(matrix: list[list[str]], headcount_row: int) -> list[dict[str, object
         col0 = row[0] if row else ""
         col1 = row[1] if len(row) > 1 else ""
         metric, metric_raw, metric_unmapped = _match_metric(col0, col1)
-        values = [cell for index, cell in enumerate(row) if not _is_row_label_cell(cell, index)]
+        values = [
+            cell
+            for index, cell in enumerate(row)
+            if not _is_row_label_cell(cell, index, metric_raw)
+        ]
         for (role, role_raw, role_unmapped, header_texts), raw in zip(role_columns, values):
             period, period_raw = _match_period(header_texts, raw)
             cells.append(

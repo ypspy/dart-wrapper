@@ -109,3 +109,19 @@ def test_extract_hours_unattached_value_is_unmapped() -> None:
     cells, status = extract_hours(html)
     assert status == "ok"
     assert any(c["value"] == 99 and c["unmapped"] is True and c["role"] == "other" for c in cells)
+
+
+def test_extract_hours_non_numeric_value_keeps_raw() -> None:
+    """2열 표의 비숫자 값 칸은 버리지 않고 value=None으로 남긴다."""
+    html = """
+    <html><body>
+    <table>
+    <tr><td></td><td>기타</td></tr>
+    <tr><td>투입 인원수</td><td>해당없음</td></tr>
+    </table>
+    </body></html>
+    """
+    cells, status = extract_hours(html)
+    assert status == "ok"
+    none_cell = next(c for c in cells if c["raw"] == "해당없음")
+    assert none_cell["value"] is None
