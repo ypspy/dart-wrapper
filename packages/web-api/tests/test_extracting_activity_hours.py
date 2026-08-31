@@ -96,6 +96,30 @@ def test_extract_hours_unknown_metric_is_unmapped() -> None:
     assert unknown["value"] == 9
 
 
+def test_extract_hours_unknown_metric_under_hours_label() -> None:
+    """투입시간 그룹 아래 알 수 없는 지표는 metric_raw가 지표이고 값은 역할에 붙는다."""
+    html = """
+    <html><body>
+    <table>
+    <tr>
+      <td rowspan="2">구분</td>
+      <td>담당이사</td>
+    </tr>
+    <tr><td>당기</td></tr>
+    <tr><td>투입 인원수</td><td>1</td></tr>
+    <tr><td>투입시간</td><td>알 수 없는 지표</td><td>9</td></tr>
+    </table>
+    </body></html>
+    """
+    cells, status = extract_hours(html)
+    assert status == "ok"
+    unknown = next(c for c in cells if c["metric"] == "other")
+    assert unknown["metric_raw"] == "알 수 없는 지표"
+    assert unknown["unmapped"] is True
+    assert unknown["value"] == 9
+    assert unknown["role"] == "engagement_partner"
+
+
 def test_extract_hours_unattached_value_is_unmapped() -> None:
     """헤더에 안 붙는 값 칸은 버리지 않고 unmapped=True로 남긴다."""
     html = """

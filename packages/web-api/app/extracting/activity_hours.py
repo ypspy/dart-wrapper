@@ -95,11 +95,14 @@ def _match_period(header_texts: list[str], cell: str) -> tuple[str, str]:
 
 
 def _match_metric(col0: str, col1: str) -> tuple[str, str, bool]:
-    """앞 두 열에서 알려진 지표를 고른다. 없으면 other이고 unmapped다."""
+    """앞 두 열에서 알려진 지표를 고른다. 없으면 other이고 unmapped다.
+
+    투입시간·구분·#·빈 칸은 그룹 라벨이므로 other_raw에 쓰지 않는다.
+    """
     other_raw = ""
     for text in (col0, col1):
         token = compact(text)
-        if not token or token == "#":
+        if not token or token in _ROW_LABEL_TOKENS:
             continue
         metric = _metric_from_token(token)
         if metric is not None:
