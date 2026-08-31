@@ -79,6 +79,9 @@ def _ok_fact(**overrides: object) -> AuditReportFact:
         "audit_report_date": "2020-02-20",
         "audit_report_date_source": "letter",
         "current_period_status": "ok",
+        "hours_status": "ok",
+        "activities_status": "ok",
+        "communications_status": "ok",
         "fetch_status": "ok",
         "conflicts": [],
         "audit_report_date_candidates": [],
@@ -339,6 +342,27 @@ async def test_completeness_requires_admin_token(client_factory) -> None:
         )
 
     assert response.status_code == 401
+
+
+async def test_completeness_fully_ok_row_is_not_field_partial(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """핵심 필드가 모두 ok이면 field_partial은 0이다."""
+    app, sessionmaker = memory_app
+    await _seed(sessionmaker, [_entry()], [_ok_fact()])
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["target"] == 1
+    assert body["ok"] == 1
+    assert body["field_partial"] == 0
 
 
 async def test_completeness_field_partial_includes_skipped(

@@ -16,6 +16,7 @@ def expand_table_matrix(table: Tag) -> list[list[str]]:
     """colspan/rowspan을 칸에 복제한 2차원 리스트를 반환한다.
 
     셀은 strip만 한다. 매칭용 compact는 호출측에서 한다.
+    마지막 행을 넘는 rowspan·빈 칸보다 많은 셀은 쓰지 않고 건너뛴다.
     """
     rows = table.find_all("tr")
     column_count = 0
@@ -34,7 +35,13 @@ def expand_table_matrix(table: Tag) -> list[list[str]]:
             row_span = _span(cell, "rowspan")
             col_span = _span(cell, "colspan")
             for down in range(row_span):
+                target_row = row_index + down
+                if target_row >= len(matrix):
+                    break
                 for right in range(col_span):
-                    matrix[row_index + down][locator[offset + right]] = text
+                    loc_index = offset + right
+                    if loc_index >= len(locator):
+                        break
+                    matrix[target_row][locator[loc_index]] = text
             offset += col_span
     return matrix

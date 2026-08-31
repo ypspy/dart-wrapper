@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 from bs4 import BeautifulSoup
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -61,11 +63,26 @@ from app.services.dart_job_lock import DART_EXTRACTOR_ID, assert_dart_idle
 logger = logging.getLogger(__name__)
 
 _SKIPPED = FieldResult(raw=None, code=None, status="skipped")
+_T = TypeVar("_T")
 
 
 def _empty_communications() -> dict[str, object]:
     """4절 JSON 기본 공값. 공유 가변 dict를 쓰지 않는다."""
     return {"has_audit_committee": False, "items": []}
+
+
+def _safe_activity_parse(
+    parser: Callable[[str], tuple[_T, str]],
+    html: str,
+    empty: _T,
+    label: str,
+) -> tuple[_T, str]:
+    """D-4 파서 예외는 해당 필드만 not_found로 낮춘다. 문서 전체는 실패시키지 않는다."""
+    try:
+        return parser(html)
+    except Exception:
+        logger.exception("실시내용 %s 파싱에 실패했습니다.", label)
+        return empty, "not_found"
 
 
 _NOT_FOUND_STATUSES = (
@@ -618,9 +635,16 @@ class ExtractionService:
         activity_html = html_by_role.get("activity_entry_id")
         if activity_html:
             activity_corp, activity_year = extract_activity_header(activity_html)
-            hours, hours_status = extract_hours(activity_html)
-            activities, activities_status = extract_activities(activity_html)
-            communications, communications_status = extract_communications(activity_html)
+            hours, hours_status = _safe_activity_parse(extract_hours, activity_html, [], "투입시간")
+            activities, activities_status = _safe_activity_parse(
+                extract_activities, activity_html, [], "주요감사실시내용"
+            )
+            communications, communications_status = _safe_activity_parse(
+                extract_communications,
+                activity_html,
+                _empty_communications(),
+                "커뮤니케이션",
+            )
         else:
             activity_corp, activity_year = None, None
             hours, hours_status = [], "skipped"

@@ -377,6 +377,53 @@ async def test_extract_activity_hours_ok_without_section_four(
     assert fact.communications_status == "not_found"
 
 
+async def test_hours_parser_exception_does_not_mark_fetch_failed(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2절 파서가 예외여도 문서는 fetch_failed가 아니고 의견 필드는 남는다."""
+
+    def boom(_html: str) -> tuple[list[dict[str, object]], str]:
+        raise RuntimeError("의도한 시간 파서 예외")
+
+    monkeypatch.setattr("app.services.extraction_service.extract_hours", boom)
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-activity",
+                section_name="외부감사 실시내용",
+                path=["외부감사 실시내용"],
+                viewer_url=ACTIVITY_URL,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            ACTIVITY_URL: (200, ACTIVITY_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.opinion_code == "unqualified"
+    assert fact.opinion_status == "ok"
+    assert fact.hours_status == "not_found"
+    assert fact.hours == []
+    assert job is not None
+    assert job.status == "succeeded"
+
+
 async def test_reparse_refetches_when_hours_status_is_not_found(
     sessionmaker_fixture,
 ) -> None:
