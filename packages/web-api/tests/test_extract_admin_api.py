@@ -278,9 +278,7 @@ async def test_extract_status_requires_admin_token(client_factory) -> None:
     app = create_app()
 
     async with client_factory(app) as client:
-        response = await client.get(
-            "/admin/extract/status", params={"job_id": "job-extract-1"}
-        )
+        response = await client.get("/admin/extract/status", params={"job_id": "job-extract-1"})
 
     assert response.status_code == 401
 
@@ -368,6 +366,37 @@ async def test_completeness_field_partial_includes_skipped(
     assert body["field_partial"] == 1
 
 
+async def test_completeness_field_partial_includes_communications_not_found(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """fetch·의견 필드가 ok여도 4절 not_found면 field_partial이다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [_entry()],
+        [
+            _ok_fact(
+                hours_status="ok",
+                activities_status="ok",
+                communications_status="not_found",
+            )
+        ],
+    )
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["target"] == 1
+    assert body["ok"] == 1
+    assert body["field_partial"] == 1
+
+
 async def test_completeness_counts_fetch_states_and_ambiguous_dates(
     client_factory, memory_app: tuple[FastAPI, object]
 ) -> None:
@@ -384,9 +413,7 @@ async def test_completeness_counts_fetch_states_and_ambiguous_dates(
         [
             _ok_fact(rcept_no="20200331000001", dcm_no="1", fetch_status="fetch_failed"),
             _ok_fact(rcept_no="20200331000002", dcm_no="2", fetch_status="blocked"),
-            _ok_fact(
-                rcept_no="20200331000003", dcm_no="3", fetch_status="section_missing"
-            ),
+            _ok_fact(rcept_no="20200331000003", dcm_no="3", fetch_status="section_missing"),
             _ok_fact(
                 rcept_no="20200331000004",
                 dcm_no="4",

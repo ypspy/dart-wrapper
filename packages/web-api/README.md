@@ -79,8 +79,9 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 ## 감사보고서 추출
 
 카탈로그에 있는 `viewer_url`로 감사 표지·의견 5필드(감사인, 의견, 보고일, GAAP, 당기)를
-뽑아 `audit_report_facts`에 저장합니다. 원문 HTML은 저장하지 않습니다.
-추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
+뽑아 `audit_report_facts`에 저장합니다. 같은 행에 외부감사 실시내용 1~4절 JSON
+(`hours`, `activities`, `communications`)도 붙입니다. 5절(중요성 금액)은 추출하지 않습니다.
+원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
 날짜 LLM 해소는 DART를 쓰지 않아 수집과 병행할 수 있습니다.
@@ -119,15 +120,16 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | `fetch_failed` / `blocked` / `section_missing` | 해당 fetch 상태 |
 | `unextracted` | 대상인데 facts 행이 없음 |
 | `ambiguous_dates` | `audit_report_date_status=ambiguous` |
-| `field_partial` | fetch는 됐지만 핵심 필드 중 `ok`가 아닌 것이 있음 |
+| `field_partial` | fetch는 됐지만 핵심 필드(의견 5필드·실시내용 3상태) 중 `ok`가 아닌 것이 있음 |
 
 같은 경로에 `status`와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 받습니다.
+4절이 없는 옛 공시는 의견 필드가 `ok`여도 `communications_status=not_found`라 `field_partial`입니다.
 
 ### Public 조회
 
 `GET /api/v1/disclosures/{rcp_no}/audit-facts`는 인증 없이 해당 접수의 추출 행을 반환합니다.
-행이 없으면 404가 아니라 빈 목록입니다. 회사명·접수일 등은 facts에 없고,
-아래 export가 `entries`/`disclosures`와 조인합니다.
+행이 없으면 404가 아니라 빈 목록입니다. 실시내용 JSON과 `hours_status` 등도 본문에 포함합니다.
+회사명·접수일 등은 facts에 없고, 아래 export가 `entries`/`disclosures`와 조인합니다.
 
 ### DATE_RESOLVER
 

@@ -31,6 +31,9 @@ _FIELD_STATUS_ATTRS = (
     "gaap_status",
     "audit_report_date_status",
     "current_period_status",
+    "hours_status",
+    "activities_status",
+    "communications_status",
 )
 DocKey = tuple[str, str]
 
@@ -129,9 +132,7 @@ class CompletenessService:
             )
 
         repo = EntryRepository(self._session)
-        rcept_nos = await repo.list_rcept_nos_for_extraction(
-            start_date, end_date, [report_type]
-        )
+        rcept_nos = await repo.list_rcept_nos_for_extraction(start_date, end_date, [report_type])
         keys: list[DocKey] = []
         for rcept_no in rcept_nos:
             filing = await repo.list_by_rcept_no(rcept_no)

@@ -38,6 +38,20 @@ def _fact(**overrides: object) -> AuditReportFact:
         "gaap_source": "letter",
         "current_period_resolved": "제51기",
         "current_period_source": "cover",
+        "hours": [
+            {
+                "role": "engagement_partner",
+                "role_raw": "담당이사 (업무수행이사)",
+                "metric": "audit",
+                "period": "current",
+                "value": 80,
+            }
+        ],
+        "hours_status": "ok",
+        "activities": [],
+        "activities_status": "ok",
+        "communications": {"has_audit_committee": False, "items": []},
+        "communications_status": "not_found",
         "fetch_status": "ok",
         "conflicts": [{"field": "auditor", "left": "표지", "right": "본문"}],
         "audit_report_date_candidates": [],
@@ -98,6 +112,21 @@ async def test_audit_facts_returns_resolved_source_conflicts_and_fetch_status(
     assert row["current_period_resolved"] == "제51기"
     assert row["current_period_source"] == "cover"
     assert row["fetch_status"] == "ok"
+    assert "hours" in row
+    assert row["hours"] == [
+        {
+            "role": "engagement_partner",
+            "role_raw": "담당이사 (업무수행이사)",
+            "metric": "audit",
+            "period": "current",
+            "value": 80,
+        }
+    ]
+    assert row["hours_status"] == "ok"
+    assert row["activities"] == []
+    assert row["activities_status"] == "ok"
+    assert row["communications"] == {"has_audit_committee": False, "items": []}
+    assert row["communications_status"] == "not_found"
     assert row["conflicts"] == [{"field": "auditor", "left": "표지", "right": "본문"}]
     assert "date_resolver_model" not in row
     assert "date_resolver_prompt_version" not in row
