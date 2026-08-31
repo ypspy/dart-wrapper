@@ -17,6 +17,11 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _empty_communications() -> dict[str, Any]:
+    """커뮤니케이션 JSON 기본값. 공유 가변 dict를 쓰지 않는다."""
+    return {"has_audit_committee": False, "items": []}
+
+
 class AuditReportFact(Base):
     """감사보고서 문서 하나(`rcept_no` + `dcm_no`)의 추출·해소 결과."""
 
@@ -66,6 +71,15 @@ class AuditReportFact(Base):
     current_period_status: Mapped[str | None] = mapped_column(String(32))
     current_period_resolved: Mapped[str | None] = mapped_column(String(255))
     current_period_source: Mapped[str | None] = mapped_column(String(32))
+
+    hours: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    activities: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    communications: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=_empty_communications, nullable=False
+    )
+    hours_status: Mapped[str | None] = mapped_column(String(32))
+    activities_status: Mapped[str | None] = mapped_column(String(32))
+    communications_status: Mapped[str | None] = mapped_column(String(32))
 
     fetch_status: Mapped[str] = mapped_column(String(32), nullable=False)
     conflicts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)

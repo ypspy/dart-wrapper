@@ -50,3 +50,34 @@ async def test_ensure_schema_adds_mode_to_legacy_catalog_jobs() -> None:
     assert loaded is not None
     assert loaded.mode == "collect"
     await engine.dispose()
+
+
+async def test_ensure_schema_adds_hours_to_legacy_audit_report_facts() -> None:
+    """예전 스키마(실시내용 컬럼 없음) DB를 열어두면 hours가 생긴다."""
+    engine = create_db_engine("sqlite+aiosqlite:///:memory:")
+
+    async with engine.begin() as connection:
+        await connection.execute(text("""
+                CREATE TABLE audit_report_facts (
+                    rcept_no VARCHAR(32) NOT NULL,
+                    dcm_no VARCHAR(32) NOT NULL,
+                    source_report_type VARCHAR(16) NOT NULL,
+                    fs_scope VARCHAR(16) NOT NULL,
+                    fetch_status VARCHAR(32) NOT NULL,
+                    conflicts TEXT NOT NULL DEFAULT '[]',
+                    extractor_version VARCHAR(32) NOT NULL,
+                    PRIMARY KEY (rcept_no, dcm_no)
+                )
+                """))
+
+    await ensure_schema(engine)
+
+    async with engine.begin() as connection:
+        columns = {
+            row[1]
+            for row in (
+                await connection.execute(text("PRAGMA table_info(audit_report_facts)"))
+            ).fetchall()
+        }
+    assert "hours" in columns
+    await engine.dispose()

@@ -8,6 +8,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+def _empty_communications() -> dict[str, Any]:
+    """커뮤니케이션 JSON 기본값. 공유 가변 dict를 쓰지 않는다."""
+    return {"has_audit_committee": False, "items": []}
+
+
 class AuditReportFactItem(BaseModel):
     """감사보고서 문서 한 행. LLM 내부 메타(date_resolver_*)는 공개하지 않는다."""
 
@@ -55,6 +60,13 @@ class AuditReportFactItem(BaseModel):
     current_period_status: str | None = None
     current_period_resolved: str | None = None
     current_period_source: str | None = None
+
+    hours: list[Any] = Field(default_factory=list)
+    activities: list[Any] = Field(default_factory=list)
+    communications: dict[str, Any] = Field(default_factory=_empty_communications)
+    hours_status: str | None = None
+    activities_status: str | None = None
+    communications_status: str | None = None
 
     fetch_status: str
     conflicts: list[Any] = Field(default_factory=list)
