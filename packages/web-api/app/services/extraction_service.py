@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.adapters.dart_http import DartHttpClient
 from app.errors import CatalogNotFound, SourceFetchError
 from app.extracting.a001_section import extract_a001_current_audit
+from app.extracting.activity_communication import extract_communications
 from app.extracting.activity_header import extract_activity_header
+from app.extracting.activity_hours import extract_hours
+from app.extracting.activity_items import extract_activities
 from app.extracting.auditor_body import extract_body_auditor
 from app.extracting.constants import EXTRACTOR_VERSION
 from app.extracting.cover import (
@@ -58,12 +61,22 @@ from app.services.dart_job_lock import DART_EXTRACTOR_ID, assert_dart_idle
 logger = logging.getLogger(__name__)
 
 _SKIPPED = FieldResult(raw=None, code=None, status="skipped")
+
+
+def _empty_communications() -> dict[str, object]:
+    """4절 JSON 기본 공값. 공유 가변 dict를 쓰지 않는다."""
+    return {"has_audit_committee": False, "items": []}
+
+
 _NOT_FOUND_STATUSES = (
     "auditor_status",
     "opinion_status",
     "gaap_status",
     "audit_report_date_status",
     "current_period_status",
+    "hours_status",
+    "activities_status",
+    "communications_status",
 )
 _DEDICATED_REPORTS = frozenset({"F001", "F002"})
 _BLOCK_MARKERS = (
@@ -603,9 +616,16 @@ class ExtractionService:
             a001_auditor = _SKIPPED
 
         activity_html = html_by_role.get("activity_entry_id")
-        activity_corp, activity_year = (
-            extract_activity_header(activity_html) if activity_html is not None else (None, None)
-        )
+        if activity_html:
+            activity_corp, activity_year = extract_activity_header(activity_html)
+            hours, hours_status = extract_hours(activity_html)
+            activities, activities_status = extract_activities(activity_html)
+            communications, communications_status = extract_communications(activity_html)
+        else:
+            activity_corp, activity_year = None, None
+            hours, hours_status = [], "skipped"
+            activities, activities_status = [], "skipped"
+            communications, communications_status = _empty_communications(), "skipped"
         a001_cover_html = html_by_role.get("a001_cover_entry_id")
         a001_cover_period = (
             extract_cover_period(a001_cover_html) if a001_cover_html is not None else _SKIPPED
@@ -697,6 +717,12 @@ class ExtractionService:
             current_period_status=current_status,
             current_period_resolved=current_resolved,
             current_period_source=current_source,
+            hours=hours,
+            activities=activities,
+            communications=communications,
+            hours_status=hours_status,
+            activities_status=activities_status,
+            communications_status=communications_status,
             fetch_status=fetch_status,
             conflicts=conflicts,
             extractor_version=EXTRACTOR_VERSION,

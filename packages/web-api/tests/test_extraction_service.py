@@ -19,6 +19,7 @@ from app.services.extraction_service import ExtractionService
 
 COVER_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=cover"
 OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=opinion"
+ACTIVITY_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=activity"
 A001_OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
 
 COVER_HTML = """
@@ -52,6 +53,23 @@ QUALIFIED_OPINION_HTML = """
 <p>한정의견근거단락에기술된사항이미치는영향을제외하고 적정합니다.</p>
 <p>한국채택국제회계기준에따라 작성되었습니다.</p>
 <p>2020년 2월 20일</p>
+</body></html>
+"""
+
+ACTIVITY_HTML = """
+<html><body>
+<table>
+<tr>
+  <td rowspan="2">구분</td>
+  <td colspan="2">담당이사<br/>(업무수행이사)</td>
+  <td colspan="2">합계</td>
+</tr>
+<tr><td>당기</td><td>전기</td><td>당기</td><td>전기</td></tr>
+<tr><td>투입 인원수</td><td></td><td>1</td><td>1</td><td>2</td><td>2</td></tr>
+<tr><td rowspan="3">투입시간</td><td>분·반기검토</td><td>10</td><td>-</td><td>10</td><td>-</td></tr>
+<tr><td>감사</td><td>100</td><td>80</td><td>100</td><td>80</td></tr>
+<tr><td>합계</td><td>110</td><td>80</td><td>110</td><td>80</td></tr>
+</table>
 </body></html>
 """
 
@@ -154,6 +172,12 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.opinion_code == "unqualified"
     assert fact.opinion_status == "ok"
     assert fact.extractor_version == "audit_opinion.v4"
+    assert fact.hours_status == "skipped"
+    assert fact.activities_status == "skipped"
+    assert fact.communications_status == "skipped"
+    assert fact.hours == []
+    assert fact.activities == []
+    assert fact.communications == {"has_audit_committee": False, "items": []}
 
 
 async def test_start_raises_when_catalog_running(sessionmaker_fixture) -> None:
@@ -310,6 +334,99 @@ async def test_missing_optional_leaf_url_does_not_fail_document(
     assert fact is not None
     assert fact.fetch_status == "ok"
     assert fact.opinion_code == "unqualified"
+    assert fact.hours_status == "skipped"
+    assert fact.activities_status == "skipped"
+    assert fact.communications_status == "skipped"
+
+
+async def test_extract_activity_hours_ok_without_section_four(
+    sessionmaker_fixture,
+) -> None:
+    """실시내용 2절 표는 hours를 채우고, 4절이 없으면 communications는 not_found다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-activity",
+                section_name="외부감사 실시내용",
+                path=["외부감사 실시내용"],
+                viewer_url=ACTIVITY_URL,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            ACTIVITY_URL: (200, ACTIVITY_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.hours_status == "ok"
+    assert fact.hours
+    assert fact.communications_status == "not_found"
+
+
+async def test_reparse_refetches_when_hours_status_is_not_found(
+    sessionmaker_fixture,
+) -> None:
+    """reparse는 hours_status가 not_found여도 실시내용 HTML을 다시 가져온다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-activity",
+                section_name="외부감사 실시내용",
+                path=["외부감사 실시내용"],
+                viewer_url=ACTIVITY_URL,
+            ),
+        ],
+    )
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F001",
+                fs_scope="separate",
+                fetch_status="ok",
+                hours_status="not_found",
+                extractor_version="audit_opinion.v4",
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            ACTIVITY_URL: (200, ACTIVITY_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "reparse")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.hours_status == "ok"
+    assert fact.hours
 
 
 async def test_section_missing_when_cover_and_opinion_leaves_absent(
