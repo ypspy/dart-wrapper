@@ -94,8 +94,8 @@ def _match_period(header_texts: list[str], cell: str) -> tuple[str, str]:
     return "unknown", ""
 
 
-def _match_metric(col0: str, col1: str) -> tuple[str, str]:
-    """앞 두 열에서 알려진 지표를 고른다. 없으면 other."""
+def _match_metric(col0: str, col1: str) -> tuple[str, str, bool]:
+    """앞 두 열에서 알려진 지표를 고른다. 없으면 other이고 unmapped다."""
     other_raw = ""
     for text in (col0, col1):
         token = compact(text)
@@ -103,10 +103,10 @@ def _match_metric(col0: str, col1: str) -> tuple[str, str]:
             continue
         metric = _metric_from_token(token)
         if metric is not None:
-            return metric, text
+            return metric, text, False
         if not other_raw:
             other_raw = text
-    return "other", other_raw
+    return "other", other_raw, True
 
 
 def _parse_value(raw: str) -> int | None:
@@ -120,12 +120,15 @@ def _parse_value(raw: str) -> int | None:
         return None
 
 
-def _is_label_column(header_texts: list[str]) -> bool:
-    """구분·기간만 있거나 비어 있는 열은 역할 열이 아니다."""
-    meaningful = [compact(text) for text in header_texts]
-    meaningful = [token for token in meaningful if token and token != "#"]
-    if not meaningful:
+def _is_label_column(header_texts: list[str], col_index: int) -> bool:
+    """# 패딩과 구분·기간 라벨 열만 건너뛴다. 빈 역할 헤더는 남긴다."""
+    tokens = [compact(text) for text in header_texts]
+    if tokens and all(token == "#" for token in tokens):
         return True
+    meaningful = [token for token in tokens if token and token != "#"]
+    if not meaningful:
+        # 맨 앞 빈 열은 구분 자리이고, 그 밖 빈 헤더는 역할 열로 둔다.
+        return col_index == 0
     return all(token in {"구분", _PERIOD_CURRENT, _PERIOD_PRIOR} for token in meaningful)
 
 
@@ -136,7 +139,9 @@ def _is_row_label_cell(text: str, col_index: int) -> bool:
     token = compact(text)
     if token in _ROW_LABEL_TOKENS:
         return True
-    return _metric_from_token(token) is not None
+    if _metric_from_token(token) is not None:
+        return True
+    return bool(token) and _parse_value(text) is None
 
 
 def _column_headers(matrix: list[list[str]], header_end: int) -> list[list[str]]:
@@ -151,12 +156,37 @@ def _column_headers(matrix: list[list[str]], header_end: int) -> list[list[str]]
     return columns
 
 
+def _hours_cell(
+    *,
+    role: str,
+    role_raw: str,
+    metric: str,
+    metric_raw: str,
+    period: str,
+    period_raw: str,
+    raw: str,
+    unmapped: bool,
+) -> dict[str, object]:
+    """hours 원소 하나를 만든다."""
+    return {
+        "role": role,
+        "role_raw": role_raw,
+        "metric": metric,
+        "metric_raw": metric_raw,
+        "period": period,
+        "period_raw": period_raw,
+        "raw": raw,
+        "value": _parse_value(raw),
+        "unmapped": unmapped,
+    }
+
+
 def _pivot(matrix: list[list[str]], headcount_row: int) -> list[dict[str, object]]:
     """헤더 역할 열과 지표 행을 교차해 hours 원소를 만든다."""
     headers = _column_headers(matrix, headcount_row)
     role_columns: list[tuple[str, str, bool, list[str]]] = []
-    for header_texts in headers:
-        if _is_label_column(header_texts):
+    for col_index, header_texts in enumerate(headers):
+        if _is_label_column(header_texts, col_index):
             continue
         role, role_raw, unmapped = _match_role(header_texts)
         role_columns.append((role, role_raw, unmapped, header_texts))
@@ -165,21 +195,36 @@ def _pivot(matrix: list[list[str]], headcount_row: int) -> list[dict[str, object
     for row in matrix[headcount_row:]:
         col0 = row[0] if row else ""
         col1 = row[1] if len(row) > 1 else ""
-        metric, metric_raw = _match_metric(col0, col1)
+        metric, metric_raw, metric_unmapped = _match_metric(col0, col1)
         values = [cell for index, cell in enumerate(row) if not _is_row_label_cell(cell, index)]
-        for (role, role_raw, unmapped, header_texts), raw in zip(role_columns, values):
+        for (role, role_raw, role_unmapped, header_texts), raw in zip(role_columns, values):
             period, period_raw = _match_period(header_texts, raw)
             cells.append(
-                {
-                    "role": role,
-                    "role_raw": role_raw,
-                    "metric": metric,
-                    "metric_raw": metric_raw,
-                    "period": period,
-                    "period_raw": period_raw,
-                    "raw": raw,
-                    "value": _parse_value(raw),
-                    "unmapped": unmapped,
-                }
+                _hours_cell(
+                    role=role,
+                    role_raw=role_raw,
+                    metric=metric,
+                    metric_raw=metric_raw,
+                    period=period,
+                    period_raw=period_raw,
+                    raw=raw,
+                    unmapped=role_unmapped or metric_unmapped,
+                )
+            )
+        for raw in values[len(role_columns) :]:
+            if compact(raw) == "#":
+                continue
+            period, period_raw = _match_period([], raw)
+            cells.append(
+                _hours_cell(
+                    role="other",
+                    role_raw="",
+                    metric=metric,
+                    metric_raw=metric_raw,
+                    period=period,
+                    period_raw=period_raw,
+                    raw=raw,
+                    unmapped=True,
+                )
             )
     return cells
