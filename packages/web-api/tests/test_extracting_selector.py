@@ -159,3 +159,29 @@ def test_select_leaves_ignores_other_dcm_statements() -> None:
     ]
     leaves = select_leaves(rows)
     assert leaves.bs_entry_id is None
+
+
+def test_select_leaves_excludes_bs_notes_section() -> None:
+    """'재무상태표에 대한 주석'은 BS가 아니며 부모 fallback을 살린다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry("p", "r", "d", "F001", "body", "감사보고서", "(첨부)재무제표"),
+        SelectorEntry(
+            "n", "r", "d", "F001", "body", "감사보고서", "재무상태표에 대한 주석"
+        ),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.bs_entry_id is None
+    assert leaves.is_entry_id is None
+    assert leaves.fs_parent_entry_id == "p"
+
+
+def test_select_leaves_ci_only_sets_is_entry_id() -> None:
+    """포괄손익계산서만 있어도 is_entry_id를 채운다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry("ci", "r", "d", "F001", "body", "감사보고서", "포괄손익계산서"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.is_entry_id == "ci"
+    assert leaves.bs_entry_id is None

@@ -166,3 +166,96 @@ def test_cut_notes_drops_after_notes_heading() -> None:
     html = "<p>재무상태표</p><table><tr><td>자산총계</td></tr></table>주석 1. 중요한"
     assert "자산총계" in cut_notes(html)
     assert "중요한" not in cut_notes(html)
+
+
+_MISALIGNED_SHORT_ROW = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위 : 원)</p>
+<table>
+<tr><td>과 목</td><td>주석</td><td>당기</td><td>전기</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+</table>
+</body></html>
+"""
+
+_TITLE_THEN_PERIOD_HEADER = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위 : 원)</p>
+<table>
+<tr><td colspan="3">제 12 기 2020년 12월 31일 현재</td></tr>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+</table>
+</body></html>
+"""
+
+_BLANK_HEADING_THEN_INVENTORY = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위 : 원)</p>
+<table>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>Ⅱ. 재고자산</td><td></td><td></td></tr>
+<tr><td>재고자산</td><td>100</td><td>90</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+</table>
+</body></html>
+"""
+
+_BLANK_INVENTORY_ONLY = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위 : 원)</p>
+<table>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>Ⅱ. 재고자산</td><td></td><td></td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+</table>
+</body></html>
+"""
+
+
+def test_extract_accounts_skips_misaligned_short_row() -> None:
+    """주석 칸이 빠진 짧은 행은 잘못된 당기 금액을 ok로 저장하지 않는다."""
+    accounts, status = extract_accounts(bs_html=_MISALIGNED_SHORT_ROW, is_html=None)
+    assert status == "ok"
+    total = _by_account_period(accounts, "total_asset", "current")
+    assert total["status"] == "not_found"
+    assert total["value"] is None
+    assert not any(
+        r["account"] == "total_asset" and r.get("value") == 900 for r in accounts
+    )
+
+
+def test_extract_accounts_skips_title_row_without_period_groups() -> None:
+    """제n기 제목 행만 있는 가짜 헤더는 건너뛰고 당기/전기 헤더를 쓴다."""
+    accounts, status = extract_accounts(bs_html=_TITLE_THEN_PERIOD_HEADER, is_html=None)
+    assert status == "ok"
+    total = _by_account_period(accounts, "total_asset", "current")
+    assert total["status"] == "ok"
+    assert total["value"] == 1000
+    prior = _by_account_period(accounts, "total_asset", "prior")
+    assert prior["value"] == 900
+
+
+def test_extract_accounts_blank_heading_does_not_block_later_amount() -> None:
+    """금액 없는 재고 제목 행이 이후 금액 행을 가로채지 않는다."""
+    accounts, status = extract_accounts(bs_html=_BLANK_HEADING_THEN_INVENTORY, is_html=None)
+    assert status == "ok"
+    inv = _by_account_period(accounts, "inventory", "current")
+    assert inv["status"] == "ok"
+    assert inv["value"] == 100
+    assert inv["account_raw"] == "재고자산"
+
+
+def test_extract_accounts_blank_only_label_emits_not_found() -> None:
+    """금액 없는 계정 라벨만 있어도 해당 계정×기간 not_found가 남는다."""
+    accounts, status = extract_accounts(bs_html=_BLANK_INVENTORY_ONLY, is_html=None)
+    assert status == "ok"
+    inv_cur = _by_account_period(accounts, "inventory", "current")
+    inv_pri = _by_account_period(accounts, "inventory", "prior")
+    assert inv_cur["status"] == "not_found"
+    assert inv_pri["status"] == "not_found"
+    assert inv_cur["value"] is None

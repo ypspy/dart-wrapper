@@ -82,7 +82,7 @@ def _safe_activity_parse(
     try:
         return parser(html)
     except Exception:
-        logger.exception("실시내용 %s 파싱에 실패했습니다.", label)
+        logger.exception("%s 파싱에 실패했습니다.", label)
         return empty, "not_found"
 
 

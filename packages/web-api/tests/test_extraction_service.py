@@ -395,6 +395,51 @@ async def test_extract_activity_hours_ok_without_section_four(
     assert fact.communications_status == "not_found"
 
 
+async def test_accounts_parser_exception_sets_not_found_without_failing_job(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """제표계정 파서 예외는 accounts_status=not_found이고 잡은 성공한다."""
+
+    def boom(*, bs_html: str | None, is_html: str | None) -> tuple[list[dict], str]:
+        raise RuntimeError("의도한 계정 파서 예외")
+
+    monkeypatch.setattr("app.services.extraction_service.extract_accounts", boom)
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-bs",
+                section_name="재무상태표",
+                path=["재무상태표"],
+                viewer_url=BS_URL,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            BS_URL: (200, _FS_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.accounts_status == "not_found"
+    assert fact.accounts == []
+    assert job is not None
+    assert job.status == "succeeded"
+
+
 async def test_hours_parser_exception_does_not_mark_fetch_failed(
     sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:

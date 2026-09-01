@@ -321,6 +321,17 @@ def _pick_amount(
     return detail_parsed if detail_parsed is not None else total_parsed
 
 
+def _row_is_aligned(row: list[str], header_width: int) -> bool:
+    """짧은 행이 왼쪽으로 밀려 헤더 열과 어긋났는지 본다.
+
+    expand_table_matrix는 채우지 못한 칸을 '#'로 남기므로, 그 칸이 있으면
+    열 수가 헤더보다 부족한 잘못 정렬된 행이다.
+    """
+    if len(row) != header_width:
+        return False
+    return "#" not in row
+
+
 def _extract_from_table(
     table: Tag,
     *,
@@ -336,14 +347,24 @@ def _extract_from_table(
     if not matrix:
         return
 
-    header_index = next((i for i, row in enumerate(matrix) if _is_header_row(row)), None)
+    header_index: int | None = None
+    groups: list[_PeriodGroup] = []
+    label_cols: list[int] = []
+    for index, candidate in enumerate(matrix):
+        if not _is_header_row(candidate):
+            continue
+        candidate_groups, candidate_labels = _period_groups(candidate)
+        if not candidate_groups:
+            continue
+        header_index = index
+        groups = candidate_groups
+        label_cols = candidate_labels
+        break
     if header_index is None:
         return
 
     header = matrix[header_index]
-    groups, label_cols = _period_groups(header)
-    if not groups:
-        return
+    header_width = len(header)
 
     for group in groups:
         if group.period not in periods_ordered:
@@ -351,11 +372,13 @@ def _extract_from_table(
             period_raws[group.period] = group.period_raw
 
     for row in matrix[header_index + 1 :]:
+        if not _row_is_aligned(row, header_width):
+            continue
         label_compact, label_raw = _row_label(row, label_cols)
         account = _account_of(label_compact)
         if account is None or account in found_accounts:
             continue
-        found_accounts.add(account)
+        picked_any = False
         for group in groups:
             key = (account, group.period)
             if key in records:
@@ -363,6 +386,7 @@ def _extract_from_table(
             parsed = _pick_amount(row, group, account)
             if parsed is None:
                 continue
+            picked_any = True
             raw, value = parsed
             value_won = value * unit_scale if unit_scale is not None else None
             records[key] = {
@@ -377,6 +401,8 @@ def _extract_from_table(
                 "value_won": value_won,
                 "status": "ok",
             }
+        if picked_any:
+            found_accounts.add(account)
 
 
 def _finalize_records(

@@ -134,7 +134,7 @@ def _is_notes_section(entry: SelectorEntry) -> bool:
 
 def _is_bs_section(entry: SelectorEntry) -> bool:
     token = compact(entry.section_name)
-    if _is_notes_section(entry):
+    if "주석" in token:
         return False
     return "연결재무상태표" in token or "재무상태표" in token
 
