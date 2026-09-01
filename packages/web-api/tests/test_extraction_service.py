@@ -20,7 +20,21 @@ from app.services.extraction_service import ExtractionService
 COVER_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=cover"
 OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=opinion"
 ACTIVITY_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=activity"
+BS_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=bs"
+FS_PARENT_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=fsparent"
 A001_OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
+
+_FS_HTML = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위 : 원)</p>
+<table>
+<tr><td>과 목</td><td>주석</td><td>당기</td><td>전기</td></tr>
+<tr><td>자 산 총 계</td><td></td><td>1000</td><td>900</td></tr>
+<tr><td>자 본 총 계</td><td></td><td>400</td><td>350</td></tr>
+</table>
+</body></html>
+"""
 
 COVER_HTML = """
 <html><body>
@@ -478,6 +492,153 @@ async def test_reparse_refetches_when_hours_status_is_not_found(
     assert fact is not None
     assert fact.hours_status == "ok"
     assert fact.hours
+
+
+async def test_extract_job_parses_statement_accounts(sessionmaker_fixture) -> None:
+    """재무상태표 leaf HTML을 가져와 accounts에 자산총계를 저장한다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-bs",
+                section_name="재무상태표",
+                path=["재무상태표"],
+                viewer_url=BS_URL,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            BS_URL: (200, _FS_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.accounts_status == "ok"
+    assert fact.bs_entry_id == "e-bs"
+    assert fact.fs_parent_entry_id is None
+    total = next(
+        a
+        for a in fact.accounts
+        if a.get("account") == "total_asset" and a.get("period") == "current"
+    )
+    assert total["value"] == 1000
+
+
+async def test_extract_job_uses_parent_when_no_statement_leaves(
+    sessionmaker_fixture,
+) -> None:
+    """본표 leaf가 없으면 부모 제표 HTML을 주석 앞에서 잘라 계정을 읽는다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-fs-parent",
+                section_name="(첨부)재무제표",
+                path=["(첨부)재무제표"],
+                viewer_url=FS_PARENT_URL,
+            ),
+            _entry(
+                entry_id="e-notes",
+                section_name="주석",
+                path=["(첨부)재무제표", "주석"],
+                viewer_url=None,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            FS_PARENT_URL: (200, _FS_HTML + "주석 1. 자세한"),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.accounts_status == "ok"
+    assert fact.fs_parent_entry_id == "e-fs-parent"
+    assert fact.bs_entry_id is None
+    total = next(
+        a
+        for a in fact.accounts
+        if a.get("account") == "total_asset" and a.get("period") == "current"
+    )
+    assert total["value"] == 1000
+
+
+async def test_reparse_refetches_when_accounts_status_is_not_found(
+    sessionmaker_fixture,
+) -> None:
+    """reparse는 accounts_status가 not_found여도 제표 HTML을 다시 가져온다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-bs",
+                section_name="재무상태표",
+                path=["재무상태표"],
+                viewer_url=BS_URL,
+            ),
+        ],
+    )
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F001",
+                fs_scope="separate",
+                fetch_status="ok",
+                accounts_status="not_found",
+                extractor_version="audit_opinion.v11",
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            BS_URL: (200, _FS_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "reparse")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.accounts_status == "ok"
+    total = next(
+        a
+        for a in fact.accounts
+        if a.get("account") == "total_asset" and a.get("period") == "current"
+    )
+    assert total["value"] == 1000
 
 
 async def test_section_missing_when_cover_and_opinion_leaves_absent(

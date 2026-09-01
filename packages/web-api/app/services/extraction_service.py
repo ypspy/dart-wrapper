@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.adapters.dart_http import DartHttpClient
 from app.errors import CatalogNotFound, SourceFetchError
 from app.extracting.a001_section import extract_a001_current_audit
+from app.extracting.accounts import cut_notes, extract_accounts
 from app.extracting.activity_communication import extract_communications
 from app.extracting.activity_header import extract_activity_header
 from app.extracting.activity_hours import extract_hours
@@ -94,6 +95,7 @@ _NOT_FOUND_STATUSES = (
     "hours_status",
     "activities_status",
     "communications_status",
+    "accounts_status",
 )
 _DEDICATED_REPORTS = frozenset({"F001", "F002"})
 _BLOCK_MARKERS = (
@@ -119,6 +121,8 @@ _LEAF_ROLES = (
     "activity_entry_id",
     "a001_opinion_entry_id",
     "a001_cover_entry_id",
+    "bs_entry_id",
+    "is_entry_id",
 )
 _BLOCK_HTTP_STATUSES = frozenset({403, 429})
 _AUDITOR_NAMES_PATH = (
@@ -573,6 +577,25 @@ class ExtractionService:
                 continue
             html_by_role[role] = html
 
+        # BS·IS leaf가 둘 다 없을 때만 부모 제표를 가져온다 (_LEAF_ROLES에 넣지 않음).
+        if (
+            not leaves.bs_entry_id
+            and not leaves.is_entry_id
+            and leaves.fs_parent_entry_id
+        ):
+            parent = by_id.get(leaves.fs_parent_entry_id)
+            if parent is not None and parent.viewer_url:
+                try:
+                    html = await self._http.fetch_html(parent.viewer_url)
+                except SourceFetchError as exc:
+                    if exc.status_code in _BLOCK_HTTP_STATUSES:
+                        blocked = True
+                else:
+                    if html_looks_blocked(html):
+                        blocked = True
+                    else:
+                        html_by_role["fs_parent_entry_id"] = html
+
         if blocked:
             fetch_status = "blocked"
         elif failed:
@@ -658,6 +681,23 @@ class ExtractionService:
             extract_cover_company_name(a001_cover_html) if a001_cover_html is not None else None
         )
 
+        bs_html = html_by_role.get("bs_entry_id")
+        is_html = html_by_role.get("is_entry_id")
+        parent_html = html_by_role.get("fs_parent_entry_id")
+        if bs_html is None and is_html is None and parent_html:
+            cut = cut_notes(parent_html)
+            bs_html = is_html = cut
+        if bs_html is None and is_html is None:
+            accounts, accounts_status = [], "skipped"
+        else:
+
+            def _parse_accounts(_html: str) -> tuple[list[dict[str, object]], str]:
+                return extract_accounts(bs_html=bs_html, is_html=is_html)
+
+            accounts, accounts_status = _safe_activity_parse(
+                _parse_accounts, "unused", [], "제표계정"
+            )
+
         listing = sample.submitter if sample.report_type in _DEDICATED_REPORTS else None
         auditor = resolve_auditor(
             cover=None if cover_auditor.status == "skipped" else cover_auditor,
@@ -711,6 +751,9 @@ class ExtractionService:
             activity_entry_id=leaves.activity_entry_id,
             a001_opinion_entry_id=leaves.a001_opinion_entry_id,
             a001_cover_entry_id=leaves.a001_cover_entry_id,
+            bs_entry_id=leaves.bs_entry_id,
+            is_entry_id=leaves.is_entry_id,
+            fs_parent_entry_id=leaves.fs_parent_entry_id,
             auditor=cover_auditor.raw if cover_auditor.status != "skipped" else None,
             auditor_body=body_auditor.raw if body_auditor.status != "skipped" else None,
             auditor_a001=a001_auditor.raw if a001_auditor.status != "skipped" else None,
@@ -747,9 +790,8 @@ class ExtractionService:
             hours_status=hours_status,
             activities_status=activities_status,
             communications_status=communications_status,
-            # 계정(제표) fetch는 Task 5. 지금은 기본 skipped만 둔다.
-            accounts=[],
-            accounts_status="skipped",
+            accounts=accounts,
+            accounts_status=accounts_status,
             fetch_status=fetch_status,
             conflicts=conflicts,
             extractor_version=EXTRACTOR_VERSION,
