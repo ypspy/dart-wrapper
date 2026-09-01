@@ -98,3 +98,64 @@ def test_group_by_dcm() -> None:
     e3 = SelectorEntry("c", "r", "d2", "F002", "body", "연결감사보고서", "감사보고서")
     grouped = group_by_dcm([e1, e2, e3])
     assert grouped == {"d1": [e1, e2], "d2": [e3]}
+
+
+def test_select_leaves_prefers_bs_is_leaves() -> None:
+    """재무상태표·손익계산서 leaf가 있으면 부모를 쓰지 않는다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry("p", "r", "d", "F001", "body", "감사보고서", "(첨부)재무제표"),
+        SelectorEntry("bs", "r", "d", "F001", "body", "감사보고서", "재무상태표"),
+        SelectorEntry("is_", "r", "d", "F001", "body", "감사보고서", "손익계산서"),
+        SelectorEntry("n", "r", "d", "F001", "body", "감사보고서", "주석"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.bs_entry_id == "bs"
+    assert leaves.is_entry_id == "is_"
+    assert leaves.fs_parent_entry_id is None
+
+
+def test_select_leaves_consolidated_statement_names() -> None:
+    """연결 제표 섹션명을 BS/IS로 고른다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F002", "body", "연결감사보고서", "감사보고서"),
+        SelectorEntry("bs", "r", "d", "F002", "body", "연결감사보고서", "연결재무상태표"),
+        SelectorEntry("is_", "r", "d", "F002", "body", "연결감사보고서", "연결손익계산서"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.bs_entry_id == "bs"
+    assert leaves.is_entry_id == "is_"
+
+
+def test_select_leaves_falls_back_to_fs_parent_when_only_notes() -> None:
+    """본표 leaf가 없고 주석만 있으면 부모 (첨부)연결재무제표를 쓴다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F002", "body", "연결감사보고서", "감사보고서"),
+        SelectorEntry("p", "r", "d", "F002", "body", "연결감사보고서", "(첨부)연결재무제표"),
+        SelectorEntry("n", "r", "d", "F002", "body", "연결감사보고서", "주석"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.bs_entry_id is None
+    assert leaves.is_entry_id is None
+    assert leaves.fs_parent_entry_id == "p"
+
+
+def test_select_leaves_prefers_income_over_comprehensive() -> None:
+    """손익계산서가 있으면 포괄손익계산서를 IS로 쓰지 않는다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry("is_", "r", "d", "F001", "body", "감사보고서", "손익계산서"),
+        SelectorEntry("ci", "r", "d", "F001", "body", "감사보고서", "포괄손익계산서"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.is_entry_id == "is_"
+
+
+def test_select_leaves_ignores_other_dcm_statements() -> None:
+    """다른 dcm의 제표는 고르지 않는다."""
+    rows = [
+        SelectorEntry("c", "r", "d1", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry("bs", "r", "d2", "F001", "body", "감사보고서", "재무상태표"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.bs_entry_id is None

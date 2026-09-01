@@ -38,6 +38,9 @@ class LeafIds:
     activity_entry_id: str | None
     a001_opinion_entry_id: str | None
     a001_cover_entry_id: str | None
+    bs_entry_id: str | None
+    is_entry_id: str | None
+    fs_parent_entry_id: str | None
 
 
 def is_audit_document(
@@ -125,6 +128,38 @@ def _is_a001_cover_leaf(entry: SelectorEntry) -> bool:
     )
 
 
+def _is_notes_section(entry: SelectorEntry) -> bool:
+    return compact(entry.section_name) == "주석"
+
+
+def _is_bs_section(entry: SelectorEntry) -> bool:
+    token = compact(entry.section_name)
+    if _is_notes_section(entry):
+        return False
+    return "연결재무상태표" in token or "재무상태표" in token
+
+
+def _is_is_section(entry: SelectorEntry) -> bool:
+    token = compact(entry.section_name)
+    if _is_notes_section(entry) or "자본변동" in token or "현금흐름" in token:
+        return False
+    if "연결손익계산서" in token or (
+        "손익계산서" in token and "포괄" not in token
+    ):
+        return True
+    return False
+
+
+def _is_ci_section(entry: SelectorEntry) -> bool:
+    token = compact(entry.section_name)
+    return "포괄손익계산서" in token
+
+
+def _is_fs_parent(entry: SelectorEntry) -> bool:
+    token = compact(entry.section_name)
+    return "첨부" in token and "재무제표" in token and "주석" not in token
+
+
 def _first_audit_dcm_no(entries: list[SelectorEntry]) -> str | None:
     for entry in entries:
         if is_audit_document(entry.report_type, entry.source, entry.document_name):
@@ -168,10 +203,33 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
         None,
     )
 
+    bs_entry_id = next(
+        (entry.entry_id for entry in audit_entries if _is_bs_section(entry)),
+        None,
+    )
+    is_entry_id = next(
+        (entry.entry_id for entry in audit_entries if _is_is_section(entry)),
+        None,
+    )
+    if is_entry_id is None:
+        is_entry_id = next(
+            (entry.entry_id for entry in audit_entries if _is_ci_section(entry)),
+            None,
+        )
+    fs_parent_entry_id = None
+    if bs_entry_id is None and is_entry_id is None:
+        fs_parent_entry_id = next(
+            (entry.entry_id for entry in audit_entries if _is_fs_parent(entry)),
+            None,
+        )
+
     return LeafIds(
         cover_entry_id=cover_entry_id,
         opinion_entry_id=opinion_entry_id,
         activity_entry_id=activity_entry_id,
         a001_opinion_entry_id=a001_opinion_entry_id,
         a001_cover_entry_id=a001_cover_entry_id,
+        bs_entry_id=bs_entry_id,
+        is_entry_id=is_entry_id,
+        fs_parent_entry_id=fs_parent_entry_id,
     )
