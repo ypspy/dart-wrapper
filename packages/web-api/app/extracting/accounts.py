@@ -10,6 +10,12 @@ from bs4 import BeautifulSoup, Tag
 from app.extracting.table_matrix import expand_table_matrix
 from app.extracting.text import compact
 
+
+def cut_notes(html: str) -> str:
+    """부모 제표 HTML에서 '주석 ' 이후를 잘라 본표만 남긴다."""
+    return html.split("주석 ", 1)[0]
+
+
 _EIGHT_ACCOUNTS: tuple[str, ...] = (
     "total_asset",
     "total_equity",
