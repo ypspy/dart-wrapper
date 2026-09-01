@@ -121,10 +121,12 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | `fetch_failed` / `blocked` / `section_missing` | 해당 fetch 상태 |
 | `unextracted` | 대상인데 facts 행이 없음 |
 | `ambiguous_dates` | `audit_report_date_status=ambiguous` |
-| `field_partial` | fetch는 됐지만 핵심 필드(의견 5필드·실시내용 3상태) 중 `ok`가 아닌 것이 있음 |
+| `field_partial` | fetch는 됐지만 핵심 필드(의견 5필드·실시내용 3상태·`accounts_status`) 중 `ok`가 아닌 것이 있음 |
 
 같은 경로에 `status`와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 받습니다.
 4절이 없는 옛 공시는 의견 필드가 `ok`여도 `communications_status=not_found`라 `field_partial`입니다.
+첨부 제표에서는 E-4 연구 계정 8개(자산총계·자본총계·당기순손익·재고·매출채권·장기매출채권·계약자산·미청구공사)의
+당기·전기 금액을 읽으며, 표는 4/5/6칸 레이아웃을 지원하고 `value_won`(`value * unit_scale`)을 함께 둡니다.
 
 ### Public 조회
 

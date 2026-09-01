@@ -34,6 +34,7 @@ _FIELD_STATUS_ATTRS = (
     "hours_status",
     "activities_status",
     "communications_status",
+    "accounts_status",
 )
 DocKey = tuple[str, str]
 

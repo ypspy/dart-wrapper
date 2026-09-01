@@ -82,6 +82,8 @@ def _ok_fact(**overrides: object) -> AuditReportFact:
         "hours_status": "ok",
         "activities_status": "ok",
         "communications_status": "ok",
+        "accounts": [],
+        "accounts_status": "ok",
         "fetch_status": "ok",
         "conflicts": [],
         "audit_report_date_candidates": [],
