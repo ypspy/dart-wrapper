@@ -55,7 +55,7 @@ def extract_accounts(
 ) -> tuple[list[dict[str, object]], str]:
     """재무상태표·손익계산서 HTML에서 여덟 계정×기간 레코드를 만든다.
 
-    둘 다 없으면 skipped, 표가 없으면 not_found, 하나라도 읽으면 ok.
+    둘 다 없으면 skipped, 쓸 수 있는 기간 헤더를 못 읽으면 not_found, 읽으면 ok.
     """
     if not bs_html and not is_html:
         return [], "skipped"
@@ -66,7 +66,6 @@ def extract_accounts(
     period_raws: dict[str, str] = {}
     unit_raw: str | None = None
     unit_scale: int | None = None
-    parsed_any = False
 
     for kind, html in (("bs", bs_html), ("is", is_html)):
         if not html:
@@ -75,7 +74,6 @@ def extract_accounts(
         table = _find_bs_table(soup) if kind == "bs" else _find_is_table(soup)
         if table is None:
             continue
-        parsed_any = True
         stmt_unit_raw, stmt_unit_scale = _unit_before(table)
         if unit_raw is None and stmt_unit_raw is not None:
             unit_raw, unit_scale = stmt_unit_raw, stmt_unit_scale
@@ -89,7 +87,7 @@ def extract_accounts(
             unit_scale=stmt_unit_scale,
         )
 
-    if not parsed_any:
+    if not periods_ordered:
         return [], "not_found"
 
     return (
@@ -266,6 +264,7 @@ def _row_label(row: list[str], label_cols: list[int]) -> tuple[str, str]:
             parts.append(text)
     raw = " ".join(parts)
     return compact(raw), raw
+
 
 def _parse_amount(cell: str) -> tuple[str, int] | None:
     """금액 칸을 (raw, value)로 읽는다. 공란은 None, 대시만 있으면 0."""

@@ -27,6 +27,17 @@ def _by_account_period(rows: list[dict], account: str, period: str) -> dict:
     return next(r for r in rows if r["account"] == account and r["period"] == period)
 
 
+_UNREADABLE_BS = """
+<html><body>
+<p>재무상태표</p>
+<table>
+<tr><td>과 목</td><td>비고A</td><td>비고B</td></tr>
+<tr><td>자 산 총 계</td><td>100</td><td>200</td></tr>
+</table>
+</body></html>
+"""
+
+
 def test_extract_accounts_five_col_uses_pair_not_blank() -> None:
     """5칸 표에서 총계는 합계 칸, 공란 내역은 0이 아니다."""
     accounts, status = extract_accounts(bs_html=_FIVE_COL_BS, is_html=None)
@@ -43,3 +54,10 @@ def test_extract_accounts_five_col_uses_pair_not_blank() -> None:
     assert not any(
         r["account"] == "total_equity" and "부채" in (r["account_raw"] or "") for r in accounts
     )
+
+
+def test_extract_accounts_unreadable_table_is_not_found() -> None:
+    """제목·표는 있어도 당기/전기 헤더가 없으면 not_found다."""
+    accounts, status = extract_accounts(bs_html=_UNREADABLE_BS, is_html=None)
+    assert status == "not_found"
+    assert accounts == []
