@@ -74,6 +74,37 @@ _COLUMN_PATCHES: tuple[tuple[str, str, str, str], ...] = (
         "VARCHAR(32)",
         "VARCHAR(32)",
     ),
+    (
+        "audit_report_facts",
+        "accounts",
+        "TEXT NOT NULL DEFAULT '[]'",
+        # text()가 :jsonb 를 바인드로 오인하지 않도록 콜론을 이스케이프한다.
+        "JSONB NOT NULL DEFAULT '[]'\\:\\:jsonb",
+    ),
+    (
+        "audit_report_facts",
+        "accounts_status",
+        "VARCHAR(32)",
+        "VARCHAR(32)",
+    ),
+    (
+        "audit_report_facts",
+        "bs_entry_id",
+        "VARCHAR(128)",
+        "VARCHAR(128)",
+    ),
+    (
+        "audit_report_facts",
+        "is_entry_id",
+        "VARCHAR(128)",
+        "VARCHAR(128)",
+    ),
+    (
+        "audit_report_facts",
+        "fs_parent_entry_id",
+        "VARCHAR(128)",
+        "VARCHAR(128)",
+    ),
 )
 
 

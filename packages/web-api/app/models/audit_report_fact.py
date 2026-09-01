@@ -81,6 +81,12 @@ class AuditReportFact(Base):
     activities_status: Mapped[str | None] = mapped_column(String(32))
     communications_status: Mapped[str | None] = mapped_column(String(32))
 
+    bs_entry_id: Mapped[str | None] = mapped_column(String(128))
+    is_entry_id: Mapped[str | None] = mapped_column(String(128))
+    fs_parent_entry_id: Mapped[str | None] = mapped_column(String(128))
+    accounts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    accounts_status: Mapped[str | None] = mapped_column(String(32))
+
     fetch_status: Mapped[str] = mapped_column(String(32), nullable=False)
     conflicts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

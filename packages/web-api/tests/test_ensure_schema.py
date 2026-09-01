@@ -80,4 +80,9 @@ async def test_ensure_schema_adds_hours_to_legacy_audit_report_facts() -> None:
             ).fetchall()
         }
     assert "hours" in columns
+    assert "accounts" in columns
+    assert "accounts_status" in columns
+    assert "bs_entry_id" in columns
+    assert "is_entry_id" in columns
+    assert "fs_parent_entry_id" in columns
     await engine.dispose()

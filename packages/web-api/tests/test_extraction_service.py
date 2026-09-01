@@ -171,13 +171,15 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.fetch_status == "ok"
     assert fact.opinion_code == "unqualified"
     assert fact.opinion_status == "ok"
-    assert fact.extractor_version == "audit_opinion.v4"
+    assert fact.extractor_version == "audit_opinion.v11"
     assert fact.hours_status == "skipped"
     assert fact.activities_status == "skipped"
     assert fact.communications_status == "skipped"
     assert fact.hours == []
     assert fact.activities == []
     assert fact.communications == {"has_audit_committee": False, "items": []}
+    assert fact.accounts_status == "skipped"
+    assert fact.accounts == []
 
 
 async def test_start_raises_when_catalog_running(sessionmaker_fixture) -> None:
@@ -337,6 +339,8 @@ async def test_missing_optional_leaf_url_does_not_fail_document(
     assert fact.hours_status == "skipped"
     assert fact.activities_status == "skipped"
     assert fact.communications_status == "skipped"
+    assert fact.accounts_status == "skipped"
+    assert fact.accounts == []
 
 
 async def test_extract_activity_hours_ok_without_section_four(
@@ -449,7 +453,7 @@ async def test_reparse_refetches_when_hours_status_is_not_found(
                 fs_scope="separate",
                 fetch_status="ok",
                 hours_status="not_found",
-                extractor_version="audit_opinion.v4",
+                extractor_version="audit_opinion.v11",
                 conflicts=[],
                 audit_report_date_candidates=[],
             )
@@ -574,7 +578,7 @@ async def test_extract_refetches_when_extractor_version_differs(
 
     assert fact is not None
     assert fact.opinion_code == "unqualified"
-    assert fact.extractor_version == "audit_opinion.v4"
+    assert fact.extractor_version == "audit_opinion.v11"
 
 
 async def test_reparse_refetches_when_field_is_not_found(

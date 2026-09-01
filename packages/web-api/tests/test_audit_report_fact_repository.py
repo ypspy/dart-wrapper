@@ -63,6 +63,11 @@ SPEC_FACT_COLUMNS = (
     "hours_status",
     "activities_status",
     "communications_status",
+    "bs_entry_id",
+    "is_entry_id",
+    "fs_parent_entry_id",
+    "accounts",
+    "accounts_status",
 )
 
 
@@ -121,6 +126,11 @@ def _make_fact(**overrides: object) -> AuditReportFact:
         "date_resolver_model": None,
         "date_resolver_prompt_version": None,
         "date_resolver_raw_response": None,
+        "bs_entry_id": None,
+        "is_entry_id": None,
+        "fs_parent_entry_id": None,
+        "accounts": [],
+        "accounts_status": "skipped",
     }
     values.update(overrides)
     return AuditReportFact(**values)
@@ -128,7 +138,7 @@ def _make_fact(**overrides: object) -> AuditReportFact:
 
 def test_extractor_version_constant() -> None:
     """추출기 버전 상수는 계획에 적힌 값을 쓴다."""
-    assert EXTRACTOR_VERSION == "audit_opinion.v4"
+    assert EXTRACTOR_VERSION == "audit_opinion.v11"
 
 
 def test_audit_report_fact_has_all_spec_columns() -> None:
@@ -170,7 +180,7 @@ async def test_upsert_and_get_roundtrip(sessionmaker_fixture) -> None:
         {"date": "2026-03-20", "snippet": "감사보고서일은 2026년 3월 20일입니다."},
     ]
     assert loaded.conflicts == [{"field": "auditor", "left": "표지", "right": "본문"}]
-    assert loaded.extractor_version == "audit_opinion.v4"
+    assert loaded.extractor_version == "audit_opinion.v11"
     assert loaded.extracted_at is not None
     assert loaded.fetch_status == "ok"
 

@@ -68,6 +68,12 @@ class AuditReportFactItem(BaseModel):
     activities_status: str | None = None
     communications_status: str | None = None
 
+    bs_entry_id: str | None = None
+    is_entry_id: str | None = None
+    fs_parent_entry_id: str | None = None
+    accounts: list[Any] = Field(default_factory=list)
+    accounts_status: str | None = None
+
     fetch_status: str
     conflicts: list[Any] = Field(default_factory=list)
     extracted_at: datetime

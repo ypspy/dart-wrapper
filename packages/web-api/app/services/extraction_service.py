@@ -747,6 +747,9 @@ class ExtractionService:
             hours_status=hours_status,
             activities_status=activities_status,
             communications_status=communications_status,
+            # 계정(제표) fetch는 Task 5. 지금은 기본 skipped만 둔다.
+            accounts=[],
+            accounts_status="skipped",
             fetch_status=fetch_status,
             conflicts=conflicts,
             extractor_version=EXTRACTOR_VERSION,
