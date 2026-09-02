@@ -1,6 +1,7 @@
 """첨부 제표 계정 추출 테스트."""
 
 from app.extracting.accounts import cut_notes, extract_accounts
+from app.extracting.text import compact
 
 
 _FIVE_COL_BS = """
@@ -79,12 +80,51 @@ def _by_account_period(rows: list[dict], account: str, period: str) -> dict:
     return next(r for r in rows if r["account"] == account and r["period"] == period)
 
 
-_UNREADABLE_BS = """
+_JEN_GI_BS = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위: 원)</p>
+<table>
+<tr><td>과 목</td><td>주석</td><td>제49기 기말</td><td>제48기 기말</td></tr>
+<tr><td>자 산 총 계</td><td></td><td>1,179,628,362,898</td><td>1,084,097,944,847</td></tr>
+<tr><td>자 본 총 계</td><td></td><td>910,667,791,486</td><td>854,085,976,617</td></tr>
+</table>
+<p>연결포괄손익계산서</p>
+<table>
+<tr><td>과 목</td><td>주석</td><td>제49기</td><td>제48기</td></tr>
+<tr><td>당기순이익</td><td></td><td>166,912,885,242</td><td>170,246,170,594</td></tr>
+<tr><td>당기총포괄이익</td><td></td><td>1</td><td>2</td></tr>
+</table>
+</body></html>
+"""
+
+_SAME_GI = """
+<html><body>
+<p>재무상태표</p>
+<table>
+<tr><td>과 목</td><td>제49기</td><td>제49기</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+</table>
+</body></html>
+"""
+
+_NO_GI_TWO_AMOUNTS = """
 <html><body>
 <p>재무상태표</p>
 <table>
 <tr><td>과 목</td><td>비고A</td><td>비고B</td></tr>
 <tr><td>자 산 총 계</td><td>100</td><td>200</td></tr>
+</table>
+</body></html>
+"""
+
+_FAKE_NI_HEADER = """
+<html><body>
+<p>재무상태표</p>
+<table>
+<tr><td>과 목</td></tr>
+<tr><td>당기순이익</td></tr>
+<tr><td>자 산 총 계</td></tr>
 </table>
 </body></html>
 """
@@ -108,9 +148,41 @@ def test_extract_accounts_five_col_uses_pair_not_blank() -> None:
     )
 
 
-def test_extract_accounts_unreadable_table_is_not_found() -> None:
-    """제목·표는 있어도 당기/전기 헤더가 없으면 not_found다."""
-    accounts, status = extract_accounts(bs_html=_UNREADABLE_BS, is_html=None)
+def test_extract_accounts_jen_gi_larger_is_current() -> None:
+    """제N기 기수가 있으면 큰 기가 당기이고 당기순 행은 헤더가 아니다."""
+    accounts, status = extract_accounts(bs_html=_JEN_GI_BS, is_html=_JEN_GI_BS)
+    assert status == "ok"
+    total = _by_account_period(accounts, "total_asset", "current")
+    assert total["value"] == 1179628362898
+    assert "49" in compact(total["period_raw"])
+    prior = _by_account_period(accounts, "total_asset", "prior")
+    assert prior["value"] == 1084097944847
+    ni = _by_account_period(accounts, "net_income", "current")
+    assert ni["value"] == 166912885242
+    assert not any(
+        r["account"] == "net_income" and r["value"] == 1 for r in accounts
+    )
+
+
+def test_extract_accounts_same_gi_falls_back_left_right() -> None:
+    """기수가 같으면 왼쪽이 당기다."""
+    accounts, status = extract_accounts(bs_html=_SAME_GI, is_html=None)
+    assert status == "ok"
+    assert _by_account_period(accounts, "total_asset", "current")["value"] == 1000
+    assert _by_account_period(accounts, "total_asset", "prior")["value"] == 900
+
+
+def test_extract_accounts_no_gi_two_amount_cols_left_is_current() -> None:
+    """제N기 없이 금액 열 두 개면 왼쪽이 당기다."""
+    accounts, status = extract_accounts(bs_html=_NO_GI_TWO_AMOUNTS, is_html=None)
+    assert status == "ok"
+    assert _by_account_period(accounts, "total_asset", "current")["value"] == 100
+    assert _by_account_period(accounts, "total_asset", "prior")["value"] == 200
+
+
+def test_extract_accounts_danggisun_row_is_not_period_header() -> None:
+    """과목만 있는 표의 당기순이익 행으로 ok를 내면 안 된다."""
+    accounts, status = extract_accounts(bs_html=_FAKE_NI_HEADER, is_html=None)
     assert status == "not_found"
     assert accounts == []
 
@@ -216,6 +288,28 @@ _BLANK_INVENTORY_ONLY = """
 </body></html>
 """
 
+_CAPTION_SPLIT_THEN_DANGGI = """
+<html><body>
+<p>재무상태표</p>
+<table>
+<tr><td>제 12 기</td><td>2020년 12월 31일 현재</td><td></td></tr>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+</table>
+</body></html>
+"""
+
+_CAPTION_COLSPAN_GIMAL_THEN_DANGGI = """
+<html><body>
+<p>재무상태표</p>
+<table>
+<tr><td colspan="3">제 49 기말</td></tr>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+</table>
+</body></html>
+"""
+
 
 def test_extract_accounts_skips_misaligned_short_row() -> None:
     """주석 칸이 빠진 짧은 행은 잘못된 당기 금액을 ok로 저장하지 않는다."""
@@ -259,3 +353,27 @@ def test_extract_accounts_blank_only_label_emits_not_found() -> None:
     assert inv_cur["status"] == "not_found"
     assert inv_pri["status"] == "not_found"
     assert inv_cur["value"] is None
+
+
+def test_extract_accounts_caption_gi_row_then_danggi_jeonki() -> None:
+    """제N기 캡션 행 뒤 당기/전기 헤더가 있으면 당기/전기를 쓴다."""
+    accounts, status = extract_accounts(bs_html=_CAPTION_SPLIT_THEN_DANGGI, is_html=None)
+    assert status == "ok"
+    total = _by_account_period(accounts, "total_asset", "current")
+    assert total["status"] == "ok"
+    assert total["value"] == 1000
+    prior = _by_account_period(accounts, "total_asset", "prior")
+    assert prior["value"] == 900
+
+
+def test_extract_accounts_colspan_gimal_caption_then_danggi_jeonki() -> None:
+    """colspan 제N기말 캡션 뒤 당기/전기 헤더가 있으면 당기/전기를 쓴다."""
+    accounts, status = extract_accounts(
+        bs_html=_CAPTION_COLSPAN_GIMAL_THEN_DANGGI, is_html=None
+    )
+    assert status == "ok"
+    total = _by_account_period(accounts, "total_asset", "current")
+    assert total["status"] == "ok"
+    assert total["value"] == 1000
+    prior = _by_account_period(accounts, "total_asset", "prior")
+    assert prior["value"] == 900

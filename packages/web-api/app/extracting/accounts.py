@@ -10,6 +10,9 @@ from bs4 import BeautifulSoup, Tag
 from app.extracting.table_matrix import expand_table_matrix
 from app.extracting.text import compact
 
+_GI_RE = re.compile(r"제(\d+)기")
+_PERIOD_SUFFIXES = frozenset({"기말", "기초", "말"})
+
 
 def cut_notes(html: str) -> str:
     """부모 제표 HTML에서 '주석 ' 이후를 잘라 본표만 남긴다."""
@@ -207,17 +210,35 @@ def _unit_before(table: Tag) -> tuple[str | None, int | None]:
     return None, None
 
 
+def _is_excluded_period_cell(token: str) -> bool:
+    """과목·당기순 칸은 기간 열로 보지 않는다."""
+    return "과목" in token or "당기순" in token
+
+
+def _is_gi_period_column_label(token: str) -> bool:
+    """제N기 토큰이 기간 열 라벨인지 본다. 제목 문장(제N기 뒤에 추가 텍스트)은 제외."""
+    match = _GI_RE.search(token)
+    if not match:
+        return False
+    remainder = token[match.end() :]
+    if not remainder:
+        return True
+    return remainder in _PERIOD_SUFFIXES
+
+
 def _is_header_row(row: list[str]) -> bool:
     """과목·당기/전기·제n기 헤더 행인지 판별한다."""
     tokens = [compact(cell) for cell in row]
     if any("과목" in token for token in tokens):
         return True
     for token in tokens:
+        if _is_excluded_period_cell(token):
+            continue
         if "당기" in token or "(당)기" in token:
             return True
         if "전기" in token or "(전)기" in token:
             return True
-        if "제" in token and "기" in token:
+        if _is_gi_period_column_label(token):
             return True
     return False
 
@@ -227,6 +248,8 @@ def _col_role(header_text: str) -> str | None:
     token = compact(header_text)
     if "주석" in token or "주기" in token:
         return "note"
+    if _is_excluded_period_cell(token):
+        return None
     if "당기" in token or "(당)기" in token:
         return "current"
     if "전기" in token or "(전)기" in token:
@@ -234,9 +257,9 @@ def _col_role(header_text: str) -> str | None:
     return None
 
 
-def _period_groups(header: list[str]) -> tuple[list[_PeriodGroup], list[int]]:
-    """기간 그룹과 라벨 열 인덱스를 만든다."""
-    roles = [_col_role(cell) for cell in header]
+def _groups_from_roles(
+    header: list[str], roles: list[str | None]
+) -> list[_PeriodGroup]:
     groups: list[_PeriodGroup] = []
     index = 0
     while index < len(roles):
@@ -254,9 +277,58 @@ def _period_groups(header: list[str]) -> tuple[list[_PeriodGroup], list[int]]:
         else:
             groups.append(_PeriodGroup(role, period_raw, cols[0], cols[1]))
         index = end
+    return groups
 
+
+def _period_groups(header: list[str]) -> tuple[list[_PeriodGroup], list[int]]:
+    """기간 그룹과 라벨 열 인덱스를 만든다."""
+    roles = [_col_role(cell) for cell in header]
+    groups = _groups_from_roles(header, roles)
+    if not groups:
+        roles = _roles_from_gi_or_position(header, roles)
+        groups = _groups_from_roles(header, roles)
     label_cols = [i for i, role in enumerate(roles) if role is None]
     return groups, label_cols
+
+
+def _roles_from_gi_or_position(
+    header: list[str], base_roles: list[str | None]
+) -> list[str | None]:
+    """당기/전기 그룹이 없을 때 기수 또는 왼쪽·오른쪽으로 채운다."""
+    roles = list(base_roles)
+    amount_cols = [
+        i
+        for i, role in enumerate(roles)
+        if role != "note" and not _is_excluded_period_cell(compact(header[i]))
+    ]
+    gi_cols: list[tuple[int, int]] = []
+    for index, cell in enumerate(header):
+        if roles[index] == "note":
+            continue
+        token = compact(cell)
+        if _is_excluded_period_cell(token):
+            continue
+        match = _GI_RE.search(token)
+        if match:
+            gi_cols.append((index, int(match.group(1))))
+    numbers = {n for _i, n in gi_cols}
+    if len(gi_cols) == 1:
+        roles[gi_cols[0][0]] = "current"
+        return roles
+    if len(gi_cols) >= 2 and len(numbers) >= 2:
+        lo, hi = min(numbers), max(numbers)
+        for index, number in gi_cols:
+            if number == hi:
+                roles[index] = "current"
+            elif number == lo:
+                roles[index] = "prior"
+        return roles
+    if not amount_cols:
+        return roles
+    roles[amount_cols[0]] = "current"
+    if len(amount_cols) >= 2:
+        roles[amount_cols[1]] = "prior"
+    return roles
 
 
 def _row_label(row: list[str], label_cols: list[int]) -> tuple[str, str]:
@@ -350,16 +422,34 @@ def _extract_from_table(
     header_index: int | None = None
     groups: list[_PeriodGroup] = []
     label_cols: list[int] = []
+
     for index, candidate in enumerate(matrix):
         if not _is_header_row(candidate):
             continue
-        candidate_groups, candidate_labels = _period_groups(candidate)
+        roles = [_col_role(cell) for cell in candidate]
+        candidate_groups = _groups_from_roles(candidate, roles)
         if not candidate_groups:
+            continue
+        periods = {group.period for group in candidate_groups}
+        if periods != {"current", "prior"}:
             continue
         header_index = index
         groups = candidate_groups
-        label_cols = candidate_labels
+        label_cols = [i for i, role in enumerate(roles) if role is None]
         break
+
+    if header_index is None:
+        for index, candidate in enumerate(matrix):
+            if not _is_header_row(candidate):
+                continue
+            candidate_groups, candidate_labels = _period_groups(candidate)
+            if not candidate_groups:
+                continue
+            header_index = index
+            groups = candidate_groups
+            label_cols = candidate_labels
+            break
+
     if header_index is None:
         return
 
