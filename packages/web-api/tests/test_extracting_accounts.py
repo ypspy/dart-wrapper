@@ -377,3 +377,46 @@ def test_extract_accounts_colspan_gimal_caption_then_danggi_jeonki() -> None:
     assert total["value"] == 1000
     prior = _by_account_period(accounts, "total_asset", "prior")
     assert prior["value"] == 900
+
+
+_NI_PROFIT_LOSS_MIXED = """
+<html><body>
+<p>포괄손익계산서</p>
+<p>(단위: 원)</p>
+<table>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>당기순이익(손실)</td><td>1,000</td><td>(500)</td></tr>
+<tr><td>당기총포괄이익</td><td>9</td><td>8</td></tr>
+</table>
+</body></html>
+"""
+
+_NI_LOSS_LABEL = """
+<html><body>
+<p>손익계산서</p>
+<p>(단위: 원)</p>
+<table>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>당기순손실</td><td>1,000</td><td>(200)</td></tr>
+</table>
+</body></html>
+"""
+
+
+def test_extract_accounts_net_income_paren_loss_is_per_cell() -> None:
+    """당기순이익(손실)은 칸마다 괄호만 음수이고 총포괄은 당기순이 아니다."""
+    accounts, status = extract_accounts(bs_html=None, is_html=_NI_PROFIT_LOSS_MIXED)
+    assert status == "ok"
+    assert _by_account_period(accounts, "net_income", "current")["value"] == 1000
+    assert _by_account_period(accounts, "net_income", "prior")["value"] == -500
+    assert not any(
+        r["account"] == "net_income" and r["value"] == 9 for r in accounts
+    )
+
+
+def test_extract_accounts_net_loss_label_is_always_negative() -> None:
+    """당기순손실은 괄호 없는 칸도 음수이고, 이미 괄호인 칸은 한 번만 음수다."""
+    accounts, status = extract_accounts(bs_html=None, is_html=_NI_LOSS_LABEL)
+    assert status == "ok"
+    assert _by_account_period(accounts, "net_income", "current")["value"] == -1000
+    assert _by_account_period(accounts, "net_income", "prior")["value"] == -200

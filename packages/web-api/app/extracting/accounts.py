@@ -112,6 +112,11 @@ def extract_accounts(
     )
 
 
+def _is_net_loss_label(token: str) -> bool:
+    """순이익이 없는 순손실 과목인지 본다."""
+    return "순손실" in token and "순이익" not in token
+
+
 def _account_of(label: str) -> str | None:
     """compact 라벨을 E-4 계정 키로 바꾼다. 앞 규칙이 이긴다."""
     token = compact(label)
@@ -478,6 +483,8 @@ def _extract_from_table(
                 continue
             picked_any = True
             raw, value = parsed
+            if account == "net_income" and _is_net_loss_label(label_compact):
+                value = -abs(value)
             value_won = value * unit_scale if unit_scale is not None else None
             records[key] = {
                 "account": account,

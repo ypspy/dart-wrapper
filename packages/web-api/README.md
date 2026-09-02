@@ -81,7 +81,7 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 카탈로그에 있는 `viewer_url`로 감사 표지·의견 5필드(감사인, 의견, 보고일, GAAP, 당기)를
 뽑아 `audit_report_facts`에 저장합니다. 같은 행에 외부감사 실시내용 1~4절 JSON
 (`hours`, `activities`, `communications`)과 첨부 제표 계정 JSON(`accounts`)도 붙입니다.
-5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v12`입니다.
+5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v13`입니다.
 원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
@@ -127,6 +127,7 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 4절이 없는 옛 공시는 의견 필드가 `ok`여도 `communications_status=not_found`라 `field_partial`입니다.
 첨부 제표에서는 E-4 연구 계정 8개(자산총계·자본총계·당기순손익·재고·매출채권·장기매출채권·계약자산·미청구공사)의
 당기·전기 금액을 읽으며, `제N기` 비교열 헤더는 큰 기수를 당기·작은 기수를 전기로 해석합니다.
+`당기순손실` 과목은 칸 괄호가 없어도 음수로 읽습니다.
 표는 4/5/6칸 레이아웃을 지원하고 `value_won`(`value * unit_scale`)을 함께 둡니다.
 
 ### Public 조회
