@@ -6,6 +6,7 @@ from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.extracting.constants import EXTRACTOR_VERSION
 from app.main import create_app
 from app.models.audit_report_fact import AuditReportFact
+from app.models.disclosure import Disclosure
 from app.repositories.fact_repository import FactRepository
 
 FACTS_PATH = "/api/v1/disclosures/{rcp_no}/audit-facts"
@@ -196,3 +197,70 @@ async def test_audit_facts_lists_documents_in_dcm_no_order(client_factory) -> No
     assert [row["dcm_no"] for row in body] == ["11111", "22222"]
     assert body[1]["fs_scope"] == "consolidated"
     assert body[1]["source_report_type"] == "F002"
+
+
+LIST_PATH = "/api/v1/facts"
+
+
+async def test_list_facts_empty_is_not_404(client_factory) -> None:
+    app, _sessionmaker, engine = await _memory_app()
+    try:
+        async with client_factory(app) as client:
+            response = await client.get(LIST_PATH)
+    finally:
+        await engine.dispose()
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "next_cursor": None}
+
+
+async def test_list_facts_pages_and_rejects_bad_cursor(client_factory) -> None:
+    app, sessionmaker, engine = await _memory_app()
+    try:
+        async with sessionmaker() as session:
+            session.add(
+                Disclosure(
+                    rcept_no="20200331000001",
+                    rcept_dt="2020.03.31",
+                    corp_name="갑",
+                    correction_type="최초공시",
+                    year_end="(2019.12)",
+                    entry_count=1,
+                )
+            )
+            session.add(
+                Disclosure(
+                    rcept_no="20200331000002",
+                    rcept_dt="2020.03.31",
+                    corp_name="을",
+                    correction_type="최초공시",
+                    year_end="(2019.12)",
+                    entry_count=1,
+                )
+            )
+            await session.commit()
+        await _seed(
+            sessionmaker,
+            [
+                _fact(rcept_no="20200331000002", dcm_no="2"),
+                _fact(rcept_no="20200331000001", dcm_no="1"),
+            ],
+        )
+        async with client_factory(app) as client:
+            first = await client.get(LIST_PATH, params={"limit": 1})
+            assert first.status_code == 200
+            body = first.json()
+            assert len(body["items"]) == 1
+            assert body["items"][0]["rcept_no"] == "20200331000002"
+            assert body["items"][0]["corp_name"] == "을"
+            assert "date_resolver_model" not in body["items"][0]
+            assert body["next_cursor"]
+            second = await client.get(
+                LIST_PATH, params={"limit": 1, "cursor": body["next_cursor"]}
+            )
+            assert [row["rcept_no"] for row in second.json()["items"]] == [
+                "20200331000001"
+            ]
+            bad = await client.get(LIST_PATH, params={"cursor": "!!!"})
+            assert bad.status_code == 400
+    finally:
+        await engine.dispose()

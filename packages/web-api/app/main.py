@@ -94,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(catalog_query.router)
     app.include_router(viewer.router)
     app.include_router(audit_facts.router)
+    app.include_router(audit_facts.list_router)
 
     @app.get("/health", tags=["시스템"])
     async def health() -> dict[str, str]:

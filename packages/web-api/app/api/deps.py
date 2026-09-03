@@ -16,6 +16,7 @@ from app.repositories.entry_repository import EntryRepository
 from app.repositories.fact_repository import FactRepository
 from app.repositories.slice_repository import SliceRepository
 from app.services.catalog_query_service import CatalogQueryService
+from app.services.fact_query_service import FactQueryService
 from app.services.catalog_service import CatalogService
 from app.services.completeness_service import CompletenessService
 from app.services.date_resolver_service import DateResolverService
@@ -118,6 +119,13 @@ def get_catalog_query_service(
         DisclosureRepository(session),
         EntryRepository(session),
     )
+
+
+def get_fact_query_service(
+    session: AsyncSession = Depends(get_session),
+) -> FactQueryService:
+    """Public 추출 목록 조회 서비스를 제공한다."""
+    return FactQueryService(FactRepository(session))
 
 
 def get_extraction_service(
