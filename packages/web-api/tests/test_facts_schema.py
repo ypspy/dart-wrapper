@@ -11,6 +11,7 @@ from app.schemas.facts import (
     FACT_PUBLIC_COLUMNS,
     JOIN_COLUMNS,
     LIST_COLUMNS,
+    FactListItem,
     FactListResponse,
     fact_list_item_from,
 )
@@ -106,3 +107,12 @@ def test_model_dump_exclude_none_does_not_keyerror() -> None:
     assert dumped["rcept_no"] == "20200331000001"
     assert "cover_entry_id" not in dumped
     assert list(dumped)[:4] == ["corp_name", "year_end", "rcept_dt", "correction_type"]
+
+
+def test_fact_list_item_json_schema_exposes_fields() -> None:
+    """직렬화 JSON Schema(OpenAPI)에 필드가 남아 있다."""
+    properties = FactListItem.model_json_schema(mode="serialization").get("properties") or {}
+    assert "corp_name" in properties
+    assert "rcept_no" in properties
+    assert "source_report_type" in properties
+    assert list(properties)[:4] == ["corp_name", "year_end", "rcept_dt", "correction_type"]

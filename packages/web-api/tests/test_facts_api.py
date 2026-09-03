@@ -250,6 +250,12 @@ async def test_list_facts_pages_and_rejects_bad_cursor(client_factory) -> None:
             assert first.status_code == 200
             body = first.json()
             assert len(body["items"]) == 1
+            assert list(body["items"][0])[:4] == [
+                "corp_name",
+                "year_end",
+                "rcept_dt",
+                "correction_type",
+            ]
             assert body["items"][0]["rcept_no"] == "20200331000002"
             assert body["items"][0]["corp_name"] == "을"
             assert "date_resolver_model" not in body["items"][0]

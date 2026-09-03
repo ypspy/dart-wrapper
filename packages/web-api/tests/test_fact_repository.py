@@ -127,7 +127,7 @@ async def test_list_page_report_type_uses_source_report_type(
     async with sessionmaker_fixture() as session:
         session.add_all(
             [
-                _disc(rcept_no="a", report_type="A001"),
+                _disc(rcept_no="a", report_type="F001"),
                 _fact(rcept_no="a", source_report_type="A001"),
             ]
         )

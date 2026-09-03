@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.audit_report_fact import AuditReportFact
 from app.models.disclosure import Disclosure
@@ -117,17 +117,8 @@ class FactJoinFields(BaseModel):
     correction_type: str | None = None
 
 
-class FactListItem(FactJoinFields, AuditReportFactItem):
+class FactListItem(AuditReportFactItem, FactJoinFields):
     """목록 한 행. 조인 4칸 + 공개 facts (`date_resolver_*` 없음)."""
-
-    @model_serializer(mode="wrap")
-    def _serialize_join_first(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> dict[str, Any]:
-        """모든 dump/JSON 경로에서 조인 4칸을 LIST_COLUMNS 순으로 앞에 둔다."""
-        data = handler(self)
-        # exclude_none 등으로 빠진 키는 건너뛴다(KeyError 방지).
-        return {key: data[key] for key in LIST_COLUMNS if key in data}
 
 
 class FactListResponse(BaseModel):
