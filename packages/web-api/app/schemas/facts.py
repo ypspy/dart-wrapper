@@ -7,6 +7,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.audit_report_fact import AuditReportFact
+from app.models.disclosure import Disclosure
+
 
 def _empty_communications() -> dict[str, Any]:
     """커뮤니케이션 JSON 기본값. 공유 가변 dict를 쓰지 않는다."""
@@ -84,3 +87,65 @@ class AuditReportFactItem(BaseModel):
     conflicts: list[Any] = Field(default_factory=list)
     extracted_at: datetime
     extractor_version: str
+
+
+JOIN_COLUMNS: tuple[str, ...] = (
+    "corp_name",
+    "year_end",
+    "rcept_dt",
+    "correction_type",
+)
+DATE_RESOLVER_COLUMNS: tuple[str, ...] = (
+    "date_resolver_model",
+    "date_resolver_prompt_version",
+    "date_resolver_raw_response",
+)
+FACT_PUBLIC_COLUMNS: tuple[str, ...] = tuple(
+    column.name
+    for column in AuditReportFact.__table__.columns
+    if column.name not in DATE_RESOLVER_COLUMNS
+)
+LIST_COLUMNS: tuple[str, ...] = JOIN_COLUMNS + FACT_PUBLIC_COLUMNS
+
+
+class FactJoinFields(BaseModel):
+    """목록 JSON에서 앞에 둘 카탈로그 조인 칸."""
+
+    corp_name: str | None = None
+    year_end: str | None = None
+    rcept_dt: str | None = None
+    correction_type: str | None = None
+
+
+class FactListItem(FactJoinFields, AuditReportFactItem):
+    """목록 한 행. 조인 4칸 + 공개 facts (`date_resolver_*` 없음)."""
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        """조인 4칸이 JSON 앞에 오도록 LIST_COLUMNS 순서로 직렬화한다."""
+        data = super().model_dump(**kwargs)
+        return {key: data[key] for key in LIST_COLUMNS}
+
+
+class FactListResponse(BaseModel):
+    """추출 결과 목록과 다음 페이지 cursor."""
+
+    items: list[FactListItem] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+def fact_list_item_from(fact: AuditReportFact, disclosure: Disclosure) -> FactListItem:
+    """facts 행과 공시 메타를 목록 아이템으로 합친다."""
+    payload = {
+        column.name: getattr(fact, column.name)
+        for column in AuditReportFact.__table__.columns
+        if column.name not in DATE_RESOLVER_COLUMNS
+        and getattr(fact, column.name) is not None
+    }
+    base = AuditReportFactItem.model_validate(payload)
+    return FactListItem(
+        **base.model_dump(),
+        corp_name=disclosure.corp_name,
+        year_end=disclosure.year_end,
+        rcept_dt=disclosure.rcept_dt,
+        correction_type=disclosure.correction_type,
+    )
