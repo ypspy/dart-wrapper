@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
 
 from app.models.audit_report_fact import AuditReportFact
 from app.models.disclosure import Disclosure
@@ -120,10 +120,14 @@ class FactJoinFields(BaseModel):
 class FactListItem(FactJoinFields, AuditReportFactItem):
     """목록 한 행. 조인 4칸 + 공개 facts (`date_resolver_*` 없음)."""
 
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """조인 4칸이 JSON 앞에 오도록 LIST_COLUMNS 순서로 직렬화한다."""
-        data = super().model_dump(**kwargs)
-        return {key: data[key] for key in LIST_COLUMNS}
+    @model_serializer(mode="wrap")
+    def _serialize_join_first(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """모든 dump/JSON 경로에서 조인 4칸을 LIST_COLUMNS 순으로 앞에 둔다."""
+        data = handler(self)
+        # exclude_none 등으로 빠진 키는 건너뛴다(KeyError 방지).
+        return {key: data[key] for key in LIST_COLUMNS if key in data}
 
 
 class FactListResponse(BaseModel):
@@ -135,12 +139,15 @@ class FactListResponse(BaseModel):
 
 def fact_list_item_from(fact: AuditReportFact, disclosure: Disclosure) -> FactListItem:
     """facts 행과 공시 메타를 목록 아이템으로 합친다."""
-    payload = {
-        column.name: getattr(fact, column.name)
-        for column in AuditReportFact.__table__.columns
-        if column.name not in DATE_RESOLVER_COLUMNS
-        and getattr(fact, column.name) is not None
-    }
+    # in-memory ORM은 JSON list/dict 컬럼이 None일 수 있다(DB default 미적용).
+    # None은 빼고 Pydantic default_factory가 빈 컬렉션을 채우게 한다.
+    payload: dict[str, Any] = {}
+    for column in AuditReportFact.__table__.columns:
+        if column.name in DATE_RESOLVER_COLUMNS:
+            continue
+        value = getattr(fact, column.name)
+        if value is not None:
+            payload[column.name] = value
     base = AuditReportFactItem.model_validate(payload)
     return FactListItem(
         **base.model_dump(),
