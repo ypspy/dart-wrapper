@@ -8,7 +8,7 @@ DART 공시 소스를 **재가공해 제공**하기 위한 모노레포입니다
 
 1. **수집** — Admin이 기간/유형으로 entry를 카탈로그에 저장  
    (목록은 정정 전·후 접수 모두, 첨부는 현재 접수 `rcpNo`만—타 접수는 해당 행에서 입수, TOC 중간 노드 포함)
-2. **탐색** — Catalog HTML(`/catalog`) 또는 Public API로 공시·entry 표/JSON 조회
+2. **탐색** — Catalog HTML(/catalog)·Facts HTML(/facts) 또는 Public API로 공시·entry 표/JSON 조회
 3. **열람** — Viewer API가 `viewer_url`로 원문을 Lazy Retrieval·정제 (JSON)
 
 ## 구조
@@ -64,12 +64,15 @@ venv는 루트가 아니라 `packages/web-api/.venv`에 있습니다.
   (처음 열면 `ADMIN_TOKEN` 입력 → 수집 시작·이어하기·슬라이스 완전성 확인)
 - Catalog 탐색: http://127.0.0.1:8000/catalog  
   (공시 목록 → entry 전 컬럼 표·`is_leaf` 구분, 인증 없음)
+- Facts 탐색: http://127.0.0.1:8000/facts  
+  (추출된 감사 문서 1행 표, 인증 없음)
 
 주요 Public 경로:
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor) |
+| GET | `/api/v1/facts` | 감사 추출 결과 목록 (cursor) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | entry 목록 (전 feature, `all_entries`) |
 | GET | `/api/v1/viewer/{rcp_no}` | 공시 전체 원문 정제 |
 | GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 섹션 단건 원문 정제 |

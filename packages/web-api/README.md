@@ -58,9 +58,11 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}` | 공시 단건 요약 |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | entry 목록 (전 feature, `all_entries`) |
+| GET | `/api/v1/facts` | 감사 추출 결과 목록 (인증 없음, cursor) |
 | GET | `/api/v1/disclosures/{rcp_no}/audit-facts` | 공시별 감사 추출 결과 (인증 없음) |
 | GET | `/api/v1/viewer/{rcp_no}` | 접수번호의 모든 entry 섹션 원문 (종합 분석용) |
 | GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 특정 entry 섹션 원문 (단건 조회) |
+| GET | `/facts` | 추출 문서 납작 표 (조인 메타 + facts 공개 컬럼). `rcept_no`는 Catalog 링크 |
 | GET | `/catalog` | 공시 목록 표 (`DisclosureSummary` 전 컬럼). `disclosure_url`은 「원문」 링크(새 탭) |
 | GET | `/catalog/{rcp_no}` | 공시 메타 + entry 표. `disclosure_url`「원문」·`viewer_url`「viewer」 링크. attachment는 `rcpNo`+`dcm_no`로 해당 문서 main.do에 연결 |
 

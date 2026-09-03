@@ -1,7 +1,7 @@
 # 감사 추출 결과 HTML 탐색 (문서 단위 납작 표) 설계
 
 날짜: 2026-09-04  
-상태: 승인 (브레인스토밍)  
+상태: 승인 (구현)  
 범위: `packages/web-api` — Public HTML `/facts`와 JSON 목록 `GET /api/v1/facts`  
 선행: [Catalog HTML 탐색](2026-07-27-catalog-html-explore-design.md), [감사보고서 표지·의견 추출](2026-08-28-audit-opinion-extraction-design.md)
 
