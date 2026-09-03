@@ -142,6 +142,7 @@ async def test_catalog_list_shows_all_disclosure_columns(client_factory) -> None
     for header in DISCLOSURE_HEADERS:
         assert f"<th>{header}</th>" in response.text
     assert 'href="/catalog/20260724000650"' in response.text
+    assert 'href="/facts"' in response.text
     assert "다음" in response.text
     assert "cursor-token" in response.text
     assert ">원문</a>" in response.text

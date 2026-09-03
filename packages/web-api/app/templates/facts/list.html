@@ -1,0 +1,41 @@
+{% extends "catalog/base.html" %}
+{% block title %}Facts · 추출 결과{% endblock %}
+{% block header %}
+  <h1>Facts · 추출 결과</h1>
+{% endblock %}
+{% block content %}
+  {% if cursor_error %}
+  <p class="error">{{ cursor_error }}</p>
+  {% endif %}
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          {% for col in columns %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          {% for col in columns %}
+          <td>
+            {% if col == "rcept_no" %}
+            <a href="/catalog/{{ item.rcept_no }}">{{ item.rcept_no }}</a>
+            {% else %}
+            {{ fact_cell(attr(item, col)) }}
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ columns|length }}">표시할 추출 결과가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if next_href %}
+  <p class="pager"><a href="{{ next_href }}">다음</a></p>
+  {% endif %}
+{% endblock %}

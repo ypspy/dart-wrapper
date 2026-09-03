@@ -14,6 +14,7 @@ from app.api.admin import catalog
 from app.api.admin import extract as admin_extract
 from app.api.admin import ui as admin_ui
 from app.api.catalog import ui as catalog_ui
+from app.api.facts import ui as facts_ui
 from app.api.v1 import catalog as catalog_query
 from app.api.v1 import facts as audit_facts
 from app.api.v1 import viewer
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_extract.router)
     app.include_router(admin_ui.router)
     app.include_router(catalog_ui.router)
+    app.include_router(facts_ui.router)
     app.include_router(catalog_query.router)
     app.include_router(viewer.router)
     app.include_router(audit_facts.router)
