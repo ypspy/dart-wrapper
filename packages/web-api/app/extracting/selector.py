@@ -41,6 +41,7 @@ class LeafIds:
     bs_entry_id: str | None
     is_entry_id: str | None
     fs_parent_entry_id: str | None
+    icfr_entry_id: str | None
 
 
 def is_audit_document(
@@ -160,6 +161,18 @@ def _is_fs_parent(entry: SelectorEntry) -> bool:
     return "첨부" in token and "재무제표" in token and "주석" not in token
 
 
+def _is_icfr_section(entry: SelectorEntry, fs_scope: str) -> bool:
+    """같은 dcm의 내부회계 leaf인지 본다. 주석은 제외한다."""
+    token = compact(entry.section_name)
+    if not token or "주석" in token:
+        return False
+    if "내부회계관리제도" not in token:
+        return False
+    if fs_scope == "consolidated":
+        return "연결내부회계관리제도" in token
+    return "연결" not in token
+
+
 def _first_audit_dcm_no(entries: list[SelectorEntry]) -> str | None:
     for entry in entries:
         if is_audit_document(entry.report_type, entry.source, entry.document_name):
@@ -174,6 +187,19 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
         [entry for entry in entries if entry.dcm_no == audit_dcm_no]
         if audit_dcm_no is not None
         else []
+    )
+    sample = next(
+        (
+            entry
+            for entry in audit_entries
+            if is_audit_document(entry.report_type, entry.source, entry.document_name)
+        ),
+        None,
+    )
+    icfr_scope = (
+        fs_scope_for(sample.report_type, sample.document_name)
+        if sample is not None
+        else "unknown"
     )
 
     cover_entry_id = next(
@@ -223,6 +249,15 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
             None,
         )
 
+    icfr_entry_id = next(
+        (
+            entry.entry_id
+            for entry in audit_entries
+            if _is_icfr_section(entry, icfr_scope)
+        ),
+        None,
+    )
+
     return LeafIds(
         cover_entry_id=cover_entry_id,
         opinion_entry_id=opinion_entry_id,
@@ -232,4 +267,5 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
         bs_entry_id=bs_entry_id,
         is_entry_id=is_entry_id,
         fs_parent_entry_id=fs_parent_entry_id,
+        icfr_entry_id=icfr_entry_id,
     )

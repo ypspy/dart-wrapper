@@ -43,7 +43,58 @@ def test_select_leaves_f001() -> None:
     assert leaves.cover_entry_id == "c"
     assert leaves.opinion_entry_id == "o"
     assert leaves.activity_entry_id == "a"
+    assert leaves.icfr_entry_id == "x"
     assert leaves.a001_opinion_entry_id is None
+
+
+def test_select_leaves_separate_ignores_consolidated_icfr() -> None:
+    """별도 문서는 연결내부회계 leaf를 고르지 않는다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry(
+            "con", "r", "d", "F001", "body", "감사보고서",
+            "연결 내부회계관리제도 감사 또는 검토의견",
+        ),
+        SelectorEntry(
+            "sep", "r", "d", "F001", "body", "감사보고서",
+            "내부회계관리제도 감사 또는 검토의견",
+        ),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.icfr_entry_id == "sep"
+
+
+def test_select_leaves_consolidated_prefers_consolidated_icfr() -> None:
+    """연결 문서는 연결내부회계 leaf만 고른다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F002", "body", "연결감사보고서", "감사보고서"),
+        SelectorEntry(
+            "sep", "r", "d", "F002", "body", "연결감사보고서",
+            "내부회계관리제도 검토의견",
+        ),
+        SelectorEntry(
+            "con", "r", "d", "F002", "body", "연결감사보고서",
+            "연결 내부회계관리제도 감사 또는 검토의견",
+        ),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.icfr_entry_id == "con"
+
+
+def test_select_leaves_icfr_ignores_notes_and_other_dcm() -> None:
+    """주석·다른 dcm의 내부회계는 고르지 않는다."""
+    rows = [
+        SelectorEntry("c", "r", "d1", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry(
+            "n", "r", "d1", "F001", "body", "감사보고서", "내부회계관리제도 주석"
+        ),
+        SelectorEntry(
+            "other", "r", "d2", "F001", "body", "감사보고서",
+            "내부회계관리제도 검토의견",
+        ),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.icfr_entry_id is None
 
 
 def test_f001_body_does_not_fill_a001_leaves() -> None:

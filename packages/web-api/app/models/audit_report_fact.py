@@ -86,6 +86,11 @@ class AuditReportFact(Base):
     fs_parent_entry_id: Mapped[str | None] = mapped_column(String(128))
     accounts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
     accounts_status: Mapped[str | None] = mapped_column(String(32))
+    icfr_entry_id: Mapped[str | None] = mapped_column(String(128))
+    icfr_engagement: Mapped[str | None] = mapped_column(String(16))
+    icfr_opinion_raw: Mapped[str | None] = mapped_column(Text)
+    icfr_opinion_code: Mapped[str | None] = mapped_column(String(32))
+    icfr_status: Mapped[str | None] = mapped_column(String(32))
 
     fetch_status: Mapped[str] = mapped_column(String(32), nullable=False)
     conflicts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)

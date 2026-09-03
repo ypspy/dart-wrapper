@@ -34,6 +34,7 @@ from app.extracting.dates import (
     pick_audit_report_date,
 )
 from app.extracting.gaap import classify_gaap
+from app.extracting.icfr import extract_icfr
 from app.extracting.opinion import classify_opinion
 from app.extracting.resolve import (
     corp_name_conflicts,
@@ -96,6 +97,7 @@ _NOT_FOUND_STATUSES = (
     "activities_status",
     "communications_status",
     "accounts_status",
+    "icfr_status",
 )
 _DEDICATED_REPORTS = frozenset({"F001", "F002"})
 _BLOCK_MARKERS = (
@@ -123,6 +125,7 @@ _LEAF_ROLES = (
     "a001_cover_entry_id",
     "bs_entry_id",
     "is_entry_id",
+    "icfr_entry_id",
 )
 _BLOCK_HTTP_STATUSES = frozenset({403, 429})
 _AUDITOR_NAMES_PATH = (
@@ -740,12 +743,34 @@ class ExtractionService:
             cover_entry = by_id.get(leaves.cover_entry_id or "")
             if cover_entry is not None:
                 document_name = cover_entry.document_name or document_name
+        fs_scope = fs_scope_for(sample.report_type or "", document_name)
+
+        icfr_html = html_by_role.get("icfr_entry_id")
+        opinion_html_for_icfr = html_by_role.get("opinion_entry_id")
+        if not leaves.icfr_entry_id:
+            icfr = None
+            icfr_status = "skipped"
+        elif icfr_html is None:
+            icfr = None
+            icfr_status = "not_found"
+        else:
+            try:
+                icfr = extract_icfr(
+                    opinion_html=opinion_html_for_icfr,
+                    icfr_html=icfr_html,
+                    fs_scope=fs_scope,
+                )
+                icfr_status = icfr.status
+            except Exception:
+                logger.exception("내부회계 의견 파싱에 실패했습니다.")
+                icfr = None
+                icfr_status = "not_found"
 
         return AuditReportFact(
             rcept_no=sample.rcept_no,
             dcm_no=sample.dcm_no or "",
             source_report_type=sample.report_type or "",
-            fs_scope=fs_scope_for(sample.report_type or "", document_name),
+            fs_scope=fs_scope,
             cover_entry_id=leaves.cover_entry_id,
             opinion_entry_id=leaves.opinion_entry_id,
             activity_entry_id=leaves.activity_entry_id,
@@ -792,6 +817,11 @@ class ExtractionService:
             communications_status=communications_status,
             accounts=accounts,
             accounts_status=accounts_status,
+            icfr_entry_id=leaves.icfr_entry_id,
+            icfr_engagement=None if icfr is None else icfr.engagement,
+            icfr_opinion_raw=None if icfr is None else icfr.opinion_raw,
+            icfr_opinion_code=None if icfr is None else icfr.opinion_code,
+            icfr_status=icfr_status,
             fetch_status=fetch_status,
             conflicts=conflicts,
             extractor_version=EXTRACTOR_VERSION,

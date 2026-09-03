@@ -22,6 +22,7 @@ OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=opinion"
 ACTIVITY_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=activity"
 BS_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=bs"
 FS_PARENT_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=fsparent"
+ICFR_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=icfr"
 A001_OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
 
 _FS_HTML = """
@@ -87,6 +88,14 @@ ACTIVITY_HTML = """
 </body></html>
 """
 
+ICFR_REVIEW_HTML = """
+<html><body>
+<p>외부감사인의 내부회계관리제도 검토보고서</p>
+<p>우리는 내부회계관리제도 검토기준에 따라 검토를 실시하였습니다.</p>
+<p>중요한 취약점이 발견되지 아니하였습니다.</p>
+</body></html>
+"""
+
 
 @pytest.fixture
 async def sessionmaker_fixture():
@@ -127,6 +136,15 @@ def _f001_leaves() -> list[EntryRecord]:
             viewer_url=OPINION_URL,
         ),
     ]
+
+
+def _icfr_leaf() -> EntryRecord:
+    return _entry(
+        entry_id="e-icfr",
+        section_name="내부회계관리제도 검토의견",
+        path=["내부회계관리제도 검토의견"],
+        viewer_url=ICFR_URL,
+    )
 
 
 def _html_handler(
@@ -185,7 +203,7 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.fetch_status == "ok"
     assert fact.opinion_code == "unqualified"
     assert fact.opinion_status == "ok"
-    assert fact.extractor_version == "audit_opinion.v13"
+    assert fact.extractor_version == "audit_opinion.v14"
     assert fact.hours_status == "skipped"
     assert fact.activities_status == "skipped"
     assert fact.communications_status == "skipped"
@@ -194,6 +212,9 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.communications == {"has_audit_committee": False, "items": []}
     assert fact.accounts_status == "skipped"
     assert fact.accounts == []
+    assert fact.icfr_status == "skipped"
+    assert fact.icfr_entry_id is None
+    assert fact.icfr_engagement is None
 
 
 async def test_start_raises_when_catalog_running(sessionmaker_fixture) -> None:
@@ -512,7 +533,7 @@ async def test_reparse_refetches_when_hours_status_is_not_found(
                 fs_scope="separate",
                 fetch_status="ok",
                 hours_status="not_found",
-                extractor_version="audit_opinion.v13",
+                extractor_version="audit_opinion.v14",
                 conflicts=[],
                 audit_report_date_candidates=[],
             )
@@ -654,7 +675,7 @@ async def test_reparse_refetches_when_accounts_status_is_not_found(
                 fs_scope="separate",
                 fetch_status="ok",
                 accounts_status="not_found",
-                extractor_version="audit_opinion.v13",
+                extractor_version="audit_opinion.v14",
                 conflicts=[],
                 audit_report_date_candidates=[],
             )
@@ -684,6 +705,145 @@ async def test_reparse_refetches_when_accounts_status_is_not_found(
         if a.get("account") == "total_asset" and a.get("period") == "current"
     )
     assert total["value"] == 1000
+
+
+async def test_extract_job_parses_icfr_review_opinion(sessionmaker_fixture) -> None:
+    """내부회계 검토의견 leaf HTML을 가져와 검토·적정을 저장한다."""
+    await _seed_entries(sessionmaker_fixture, [*_f001_leaves(), _icfr_leaf()])
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            ICFR_URL: (200, ICFR_REVIEW_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.icfr_status == "ok"
+    assert fact.icfr_entry_id == "e-icfr"
+    assert fact.icfr_engagement == "review"
+    assert fact.icfr_opinion_code == "unqualified"
+
+
+async def test_icfr_fetch_failure_sets_not_found_without_failing_job(
+    sessionmaker_fixture,
+) -> None:
+    """내부회계 leaf는 있으나 HTML fetch가 실패하면 icfr_status=not_found이고 잡은 성공한다."""
+    await _seed_entries(sessionmaker_fixture, [*_f001_leaves(), _icfr_leaf()])
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            ICFR_URL: (500, "error"),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.icfr_entry_id == "e-icfr"
+    assert fact.icfr_status == "not_found"
+    assert fact.icfr_engagement is None
+    assert fact.icfr_opinion_code is None
+    assert fact.icfr_opinion_raw is None
+    assert job is not None
+    assert job.status == "succeeded"
+
+
+async def test_icfr_parser_exception_sets_not_found_without_failing_job(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """내부회계 파서 예외는 icfr_status=not_found이고 잡은 성공한다."""
+
+    def boom(
+        *,
+        opinion_html: str | None,
+        icfr_html: str | None,
+        fs_scope: str,
+    ) -> object:
+        raise RuntimeError("의도한 내부회계 파서 예외")
+
+    monkeypatch.setattr("app.services.extraction_service.extract_icfr", boom)
+    await _seed_entries(sessionmaker_fixture, [*_f001_leaves(), _icfr_leaf()])
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            ICFR_URL: (200, ICFR_REVIEW_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.icfr_status == "not_found"
+    assert fact.icfr_engagement is None
+    assert fact.icfr_opinion_code is None
+    assert job is not None
+    assert job.status == "succeeded"
+
+
+async def test_reparse_refetches_when_icfr_status_is_not_found(
+    sessionmaker_fixture,
+) -> None:
+    """reparse는 icfr_status가 not_found여도 내부회계 HTML을 다시 가져온다."""
+    await _seed_entries(sessionmaker_fixture, [*_f001_leaves(), _icfr_leaf()])
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F001",
+                fs_scope="separate",
+                fetch_status="ok",
+                icfr_status="not_found",
+                extractor_version="audit_opinion.v14",
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            ICFR_URL: (200, ICFR_REVIEW_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "reparse")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.icfr_status == "ok"
+    assert fact.icfr_engagement == "review"
+    assert fact.icfr_opinion_code == "unqualified"
 
 
 async def test_section_missing_when_cover_and_opinion_leaves_absent(
@@ -784,7 +944,7 @@ async def test_extract_refetches_when_extractor_version_differs(
 
     assert fact is not None
     assert fact.opinion_code == "unqualified"
-    assert fact.extractor_version == "audit_opinion.v13"
+    assert fact.extractor_version == "audit_opinion.v14"
 
 
 async def test_reparse_refetches_when_field_is_not_found(

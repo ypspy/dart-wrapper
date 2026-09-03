@@ -61,6 +61,9 @@ def _fact(**overrides: object) -> AuditReportFact:
             }
         ],
         "accounts_status": "ok",
+        "icfr_engagement": "review",
+        "icfr_opinion_code": "unqualified",
+        "icfr_status": "ok",
         "fetch_status": "ok",
         "conflicts": [{"field": "auditor", "left": "표지", "right": "본문"}],
         "audit_report_date_candidates": [],
@@ -146,6 +149,9 @@ async def test_audit_facts_returns_resolved_source_conflicts_and_fetch_status(
         }
     ]
     assert row["accounts_status"] == "ok"
+    assert row["icfr_status"] == "ok"
+    assert row["icfr_engagement"] == "review"
+    assert row["icfr_opinion_code"] == "unqualified"
     assert row["conflicts"] == [{"field": "auditor", "left": "표지", "right": "본문"}]
     assert "date_resolver_model" not in row
     assert "date_resolver_prompt_version" not in row

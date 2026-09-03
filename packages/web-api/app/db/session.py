@@ -105,6 +105,36 @@ _COLUMN_PATCHES: tuple[tuple[str, str, str, str], ...] = (
         "VARCHAR(128)",
         "VARCHAR(128)",
     ),
+    (
+        "audit_report_facts",
+        "icfr_entry_id",
+        "VARCHAR(128)",
+        "VARCHAR(128)",
+    ),
+    (
+        "audit_report_facts",
+        "icfr_engagement",
+        "VARCHAR(16)",
+        "VARCHAR(16)",
+    ),
+    (
+        "audit_report_facts",
+        "icfr_opinion_raw",
+        "TEXT",
+        "TEXT",
+    ),
+    (
+        "audit_report_facts",
+        "icfr_opinion_code",
+        "VARCHAR(32)",
+        "VARCHAR(32)",
+    ),
+    (
+        "audit_report_facts",
+        "icfr_status",
+        "VARCHAR(32)",
+        "VARCHAR(32)",
+    ),
 )
 
 

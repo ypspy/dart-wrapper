@@ -74,6 +74,12 @@ class AuditReportFactItem(BaseModel):
     accounts: list[Any] = Field(default_factory=list)
     accounts_status: str | None = None
 
+    icfr_entry_id: str | None = None
+    icfr_engagement: str | None = None
+    icfr_opinion_raw: str | None = None
+    icfr_opinion_code: str | None = None
+    icfr_status: str | None = None
+
     fetch_status: str
     conflicts: list[Any] = Field(default_factory=list)
     extracted_at: datetime

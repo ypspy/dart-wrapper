@@ -85,4 +85,9 @@ async def test_ensure_schema_adds_hours_to_legacy_audit_report_facts() -> None:
     assert "bs_entry_id" in columns
     assert "is_entry_id" in columns
     assert "fs_parent_entry_id" in columns
+    assert "icfr_entry_id" in columns
+    assert "icfr_engagement" in columns
+    assert "icfr_opinion_raw" in columns
+    assert "icfr_opinion_code" in columns
+    assert "icfr_status" in columns
     await engine.dispose()

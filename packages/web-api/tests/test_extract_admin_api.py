@@ -84,6 +84,7 @@ def _ok_fact(**overrides: object) -> AuditReportFact:
         "communications_status": "ok",
         "accounts": [],
         "accounts_status": "ok",
+        "icfr_status": "ok",
         "fetch_status": "ok",
         "conflicts": [],
         "audit_report_date_candidates": [],
@@ -401,6 +402,31 @@ async def test_completeness_field_partial_includes_accounts_skipped(
         sessionmaker,
         [_entry()],
         [_ok_fact(accounts_status="skipped")],
+    )
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["target"] == 1
+    assert body["ok"] == 1
+    assert body["field_partial"] == 1
+
+
+async def test_completeness_field_partial_includes_icfr_skipped(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """다른 필드가 ok여도 icfr_status=skipped면 field_partial이다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [_entry()],
+        [_ok_fact(icfr_status="skipped")],
     )
 
     async with client_factory(app) as client:
