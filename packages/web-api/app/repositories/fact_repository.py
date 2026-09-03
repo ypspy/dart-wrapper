@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_report_fact import AuditReportFact
+from app.models.disclosure import Disclosure
 from app.models.entry import Entry
 
 
@@ -47,6 +48,63 @@ class FactRepository:
             result = await self._session.execute(statement)
             rows.extend(result.scalars().all())
         return rows
+
+    async def list_page(
+        self,
+        *,
+        corp_code: str | None = None,
+        corp_name: str | None = None,
+        report_nm: str | None = None,
+        report_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int,
+        cursor_rcept_dt: str | None = None,
+        cursor_rcept_no: str | None = None,
+        cursor_dcm_no: str | None = None,
+    ) -> list[tuple[AuditReportFact, Disclosure]]:
+        """공시와 조인한 추출 행을 keyset으로 돌려준다."""
+        statement = select(AuditReportFact, Disclosure).join(
+            Disclosure, AuditReportFact.rcept_no == Disclosure.rcept_no
+        )
+        if corp_code:
+            statement = statement.where(Disclosure.corp_code == corp_code)
+        if corp_name:
+            statement = statement.where(Disclosure.corp_name.contains(corp_name))
+        if report_nm:
+            statement = statement.where(Disclosure.report_nm.contains(report_nm))
+        if report_type:
+            statement = statement.where(AuditReportFact.source_report_type == report_type)
+        if start_date:
+            statement = statement.where(Disclosure.rcept_dt >= start_date)
+        if end_date:
+            statement = statement.where(Disclosure.rcept_dt <= end_date)
+        if (
+            cursor_rcept_dt is not None
+            and cursor_rcept_no is not None
+            and cursor_dcm_no is not None
+        ):
+            statement = statement.where(
+                or_(
+                    Disclosure.rcept_dt < cursor_rcept_dt,
+                    and_(
+                        Disclosure.rcept_dt == cursor_rcept_dt,
+                        AuditReportFact.rcept_no < cursor_rcept_no,
+                    ),
+                    and_(
+                        Disclosure.rcept_dt == cursor_rcept_dt,
+                        AuditReportFact.rcept_no == cursor_rcept_no,
+                        AuditReportFact.dcm_no > cursor_dcm_no,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            Disclosure.rcept_dt.desc(),
+            AuditReportFact.rcept_no.desc(),
+            AuditReportFact.dcm_no.asc(),
+        ).limit(limit)
+        result = await self._session.execute(statement)
+        return [(fact, disc) for fact, disc in result.all()]
 
     async def list_ambiguous_dates(self) -> list[AuditReportFact]:
         """감사보고서일이 ambiguous인 행을 반환한다."""
