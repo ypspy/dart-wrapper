@@ -19,7 +19,7 @@ def cut_notes(html: str) -> str:
     return html.split("주석 ", 1)[0]
 
 
-_EIGHT_ACCOUNTS: tuple[str, ...] = (
+_ACCOUNTS: tuple[str, ...] = (
     "total_asset",
     "total_equity",
     "net_income",
@@ -28,9 +28,19 @@ _EIGHT_ACCOUNTS: tuple[str, ...] = (
     "long_term_receivable",
     "contract_asset",
     "unbilled",
+    "current_asset",
+    "current_liability",
 )
 
-_TOTAL_ACCOUNTS = frozenset({"total_asset", "total_equity", "net_income"})
+_TOTAL_ACCOUNTS = frozenset(
+    {
+        "total_asset",
+        "total_equity",
+        "net_income",
+        "current_asset",
+        "current_liability",
+    }
+)
 
 _NET_INCOME_EXCLUDES: tuple[str, ...] = (
     "계속",
@@ -62,7 +72,7 @@ class _PeriodGroup:
 def extract_accounts(
     *, bs_html: str | None, is_html: str | None
 ) -> tuple[list[dict[str, object]], str]:
-    """재무상태표·손익계산서 HTML에서 여덟 계정×기간 레코드를 만든다.
+    """재무상태표·손익계산서 HTML에서 계정×기간 레코드를 만든다.
 
     둘 다 없으면 skipped, 쓸 수 있는 기간 헤더를 못 읽으면 not_found, 읽으면 ok.
     """
@@ -128,6 +138,10 @@ def _account_of(label: str) -> str | None:
         if "부채와자본총계" in token or "부채및자본총계" in token:
             return None
         return "total_equity"
+    if "유동자산" in token and "비유동" not in token and "기타" not in token:
+        return "current_asset"
+    if "유동부채" in token and "비유동" not in token and "기타" not in token:
+        return "current_liability"
     if "당기순" in token and not any(ex in token for ex in _NET_INCOME_EXCLUDES):
         return "net_income"
     if "재고" in token and "충당" not in token:
@@ -511,9 +525,9 @@ def _finalize_records(
     unit_raw: str | None,
     unit_scale: int | None,
 ) -> list[dict[str, object]]:
-    """여덟 계정×기간 순으로 정렬하고 미발견 계정은 not_found를 채운다."""
+    """계정×기간 순으로 정렬하고 미발견 계정은 not_found를 채운다."""
     result: list[dict[str, object]] = []
-    for account in _EIGHT_ACCOUNTS:
+    for account in _ACCOUNTS:
         for period in periods_ordered:
             key = (account, period)
             if key in records:

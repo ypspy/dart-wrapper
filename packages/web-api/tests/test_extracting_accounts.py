@@ -16,6 +16,7 @@ _FIVE_COL_BS = """
 <tr><td>Ⅰ. 유동자산</td><td></td><td>665,809,879</td><td></td><td>622,084,856</td></tr>
 <tr><td>1. 현금및현금성자산(주석 3)</td><td>173,181,742</td><td></td><td>198,404,558</td><td></td></tr>
 <tr><td>자 산 총 계</td><td></td><td>30,665,809,879</td><td></td><td>30,322,084,856</td></tr>
+<tr><td>Ⅰ. 유동부채</td><td></td><td>12,345,678</td><td></td><td>11,111,111</td></tr>
 <tr><td>Ⅰ. 자본금</td><td></td><td>100</td><td></td><td>100</td></tr>
 <tr><td>자 본 총 계</td><td></td><td>100</td><td></td><td>100</td></tr>
 <tr><td>부채와자본총계</td><td></td><td>30,665,809,879</td><td></td><td>30,322,084,856</td></tr>
@@ -420,3 +421,118 @@ def test_extract_accounts_net_loss_label_is_always_negative() -> None:
     assert status == "ok"
     assert _by_account_period(accounts, "net_income", "current")["value"] == -1000
     assert _by_account_period(accounts, "net_income", "prior")["value"] == -200
+
+
+_NONCURRENT_ONLY_BS = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위: 원)</p>
+<table>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>비유동자산</td><td>800</td><td>700</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+<tr><td>비유동부채</td><td>200</td><td>150</td></tr>
+<tr><td>자 본 총 계</td><td>800</td><td>750</td></tr>
+</table>
+</body></html>
+"""
+
+_OTHER_CURRENT_ONLY_BS = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위: 원)</p>
+<table>
+<tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+<tr><td>기타유동자산</td><td>50</td><td>40</td></tr>
+<tr><td>자 산 총 계</td><td>1000</td><td>900</td></tr>
+<tr><td>기타유동부채</td><td>30</td><td>20</td></tr>
+<tr><td>자 본 총 계</td><td>800</td><td>750</td></tr>
+</table>
+</body></html>
+"""
+
+_SPC_BS = """
+<html><body>
+<p>재무상태표</p>
+<p>(단위: 원)</p>
+<table>
+<tr>
+  <td>과 목</td><td>제 3(당) 기</td><td>제 3(당) 기</td>
+  <td>제 2(전) 기</td><td>제 2(전) 기</td>
+</tr>
+<tr><td>Ⅰ. 유동자산</td><td></td><td>588,065,798</td><td></td><td>644,317,902</td></tr>
+<tr><td>Ⅱ. 유동화자산(주석4)</td><td></td><td>30,000,000,000</td><td></td><td>29,700,000,000</td></tr>
+<tr><td>자 산 총 계</td><td></td><td>30,588,065,798</td><td></td><td>30,344,317,902</td></tr>
+<tr><td>Ⅱ. 유동화부채(주석2,5)</td><td></td><td>30,000,000,000</td><td></td><td>29,700,000,000</td></tr>
+<tr><td>자 본 총 계</td><td></td><td>100</td><td></td><td>100</td></tr>
+</table>
+</body></html>
+"""
+
+
+def test_extract_accounts_current_totals_use_pair_not_blank() -> None:
+    """5칸 유동자산·유동부채 소계는 합계 칸이고 내역 공란은 0이 아니다."""
+    accounts, status = extract_accounts(bs_html=_FIVE_COL_BS, is_html=None)
+    assert status == "ok"
+    asset = _by_account_period(accounts, "current_asset", "current")
+    assert asset["status"] == "ok"
+    assert asset["value"] == 665809879
+    assert asset["value_won"] == 665809879
+    prior_asset = _by_account_period(accounts, "current_asset", "prior")
+    assert prior_asset["value"] == 622084856
+    liab = _by_account_period(accounts, "current_liability", "current")
+    assert liab["status"] == "ok"
+    assert liab["value"] == 12345678
+    prior_liab = _by_account_period(accounts, "current_liability", "prior")
+    assert prior_liab["value"] == 11111111
+    assert not any(
+        r["account"] == "current_asset" and r.get("value") == 0 for r in accounts
+    )
+
+
+def test_extract_accounts_noncurrent_is_not_current() -> None:
+    """비유동자산·비유동부채는 유동 소계가 아니다."""
+    accounts, status = extract_accounts(bs_html=_NONCURRENT_ONLY_BS, is_html=None)
+    assert status == "ok"
+    asset = _by_account_period(accounts, "current_asset", "current")
+    assert asset["status"] == "not_found"
+    assert asset["value"] is None
+    liab = _by_account_period(accounts, "current_liability", "current")
+    assert liab["status"] == "not_found"
+    assert liab["value"] is None
+    assert not any(
+        r["account"] in {"current_asset", "current_liability"} and r.get("value")
+        for r in accounts
+    )
+
+
+def test_extract_accounts_other_current_is_not_subtotal() -> None:
+    """기타유동자산·기타유동부채는 소계가 아니다."""
+    accounts, status = extract_accounts(bs_html=_OTHER_CURRENT_ONLY_BS, is_html=None)
+    assert status == "ok"
+    asset = _by_account_period(accounts, "current_asset", "current")
+    assert asset["status"] == "not_found"
+    liab = _by_account_period(accounts, "current_liability", "current")
+    assert liab["status"] == "not_found"
+    assert not any(
+        r["account"] in {"current_asset", "current_liability"}
+        and "기타" in (r["account_raw"] or "")
+        for r in accounts
+    )
+
+
+def test_extract_accounts_securitized_liability_is_not_current() -> None:
+    """유동화자산은 유동자산이 아니고, 유동화부채만 있으면 유동부채는 not_found다."""
+    accounts, status = extract_accounts(bs_html=_SPC_BS, is_html=None)
+    assert status == "ok"
+    asset = _by_account_period(accounts, "current_asset", "current")
+    assert asset["status"] == "ok"
+    assert asset["value"] == 588065798
+    assert "유동화" not in (asset["account_raw"] or "")
+    liab = _by_account_period(accounts, "current_liability", "current")
+    assert liab["status"] == "not_found"
+    assert liab["value"] is None
+    assert not any(
+        r["account"] == "current_liability" and r.get("value") == 30000000000
+        for r in accounts
+    )
