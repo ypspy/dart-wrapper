@@ -7,7 +7,8 @@ DART 공시 파이프라인의 FastAPI 서비스입니다. Admin 카탈로그 �
 | 레이어 | 위치 | 역할 |
 |--------|------|------|
 | API | `app/api` | 라우터·의존성 |
-| Service | `app/services` | 수집 오케스트레이션, Viewer 파이프라인 |
+| Service | `app/services` | 수집 오케스트레이션, Viewer 파이프라인, 감사 추출 잡 |
+| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계 순수 추출·해소 (`audit_opinion.v15`) |
 | Port/Adapter | `app/ports`, `app/adapters` | 엔트리 수집기, DART HTTP |
 | Parsing | `app/parsing` | 본문 정제, 표 → JSON |
 | DB | `app/models`, `app/repositories`, `app/db` | 엔트리·작업 메타데이터 |
@@ -83,7 +84,7 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 (`hours`, `activities`, `communications`)과 첨부 제표 계정 JSON(`accounts`)도 붙입니다.
 같은 행에 내부회계관리제도 감사·검토 의견(`icfr_engagement`, `icfr_opinion_code`, `icfr_status`)을
 붙입니다. 감사는 적정·부적정·거절, 검토는 거기에 한정·중요한취약점입니다. 회사 운영보고서는 읽지 않습니다.
-5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v14`입니다.
+5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v15`입니다.
 원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
@@ -127,10 +128,10 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 
 같은 경로에 `status`와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 받습니다.
 4절이 없는 옛 공시는 의견 필드가 `ok`여도 `communications_status=not_found`라 `field_partial`입니다.
-첨부 제표에서는 E-4 연구 계정 8개(자산총계·자본총계·당기순손익·재고·매출채권·장기매출채권·계약자산·미청구공사)의
-당기·전기 금액을 읽으며, `제N기` 비교열 헤더는 큰 기수를 당기·작은 기수를 전기로 해석합니다.
+첨부 제표에서는 E-4 연구 계정 8개(자산총계·자본총계·당기순손익·재고·매출채권·장기매출채권·계약자산·미청구공사)와
+유동자산·유동부채 소계의 당기·전기 금액을 읽으며, `제N기` 비교열 헤더는 큰 기수를 당기·작은 기수를 전기로 해석합니다.
 `당기순손실` 과목은 칸 괄호가 없어도 음수로 읽습니다.
-표는 4/5/6칸 레이아웃을 지원하고 `value_won`(`value * unit_scale`)을 함께 둡니다.
+`비유동`·`기타` 과목과 `유동화부채`는 유동 소계로 쓰지 않습니다.
 
 ### Public 조회
 
