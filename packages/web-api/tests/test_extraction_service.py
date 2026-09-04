@@ -947,6 +947,36 @@ async def test_notes_fetch_failure_sets_not_found_without_failing_job(
     assert job.status == "succeeded"
 
 
+async def test_notes_403_sets_not_found_without_blocking_document(
+    sessionmaker_fixture,
+) -> None:
+    """연결 주석 URL이 403이어도 문서를 blocked로 만들지 않고 필드만 not_found다."""
+    await _seed_entries(sessionmaker_fixture, [*_f002_leaves(), _notes_leaf()])
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            NOTES_URL: (403, "forbidden"),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.notes_entry_id == "e-notes"
+    assert fact.subsidiary_status == "not_found"
+    assert fact.subsidiary_count is None
+    assert job is not None
+    assert job.status == "succeeded"
+
+
 async def test_going_concern_parser_exception_sets_not_found_without_failing_job(
     sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -994,6 +1024,33 @@ async def test_subsidiary_parser_exception_sets_not_found_without_failing_job(
     )
     async with client:
         job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.subsidiary_status == "not_found"
+    assert fact.subsidiary_count is None
+    assert job is not None
+    assert job.status == "succeeded"
+
+
+async def test_separate_subsidiary_parser_exception_sets_not_found_without_failing_job(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """별도 경로의 종속기업 파서 예외도 subsidiary_status=not_found이고 잡은 성공한다."""
+
+    def boom(*, fs_scope: str, notes_html: str | None, a001_html: str | None) -> object:
+        raise RuntimeError("의도한 별도 종속기업 파서 예외")
+
+    monkeypatch.setattr("app.services.extraction_service.extract_subsidiaries", boom)
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
         await service.run_job(job_id)
 
     async with sessionmaker_fixture() as session:

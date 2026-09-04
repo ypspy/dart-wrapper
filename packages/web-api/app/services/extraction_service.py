@@ -130,7 +130,6 @@ _LEAF_ROLES = (
     "bs_entry_id",
     "is_entry_id",
     "icfr_entry_id",
-    "notes_entry_id",
 )
 _BLOCK_HTTP_STATUSES = frozenset({403, 429})
 _AUDITOR_NAMES_PATH = (
@@ -600,6 +599,18 @@ class ExtractionService:
                     else:
                         html_by_role["fs_parent_entry_id"] = html
 
+        # 주석 leaf는 403/429·캡차여도 문서 전체를 blocked로 만들지 않는다.
+        if leaves.notes_entry_id:
+            notes_entry = by_id.get(leaves.notes_entry_id)
+            if notes_entry is not None and notes_entry.viewer_url:
+                try:
+                    html = await self._http.fetch_html(notes_entry.viewer_url)
+                except SourceFetchError:
+                    pass
+                else:
+                    if not html_looks_blocked(html):
+                        html_by_role["notes_entry_id"] = html
+
         fs_scope_guess = fs_scope_for(sample.report_type or "", sample.document_name)
         if (
             fs_scope_guess == "consolidated"
@@ -642,13 +653,10 @@ class ExtractionService:
             if aff is not None and aff.viewer_url:
                 try:
                     html = await self._http.fetch_html(aff.viewer_url)
-                except SourceFetchError as exc:
-                    if exc.status_code in _BLOCK_HTTP_STATUSES:
-                        blocked = True
+                except SourceFetchError:
+                    pass
                 else:
-                    if html_looks_blocked(html):
-                        blocked = True
-                    else:
+                    if not html_looks_blocked(html):
                         html_by_role["a001_affiliate_entry_id"] = html
 
         if blocked:
@@ -839,27 +847,29 @@ class ExtractionService:
             tail = notes_tail(html_by_role["fs_parent_entry_id"])
             notes_html = tail or None
         a001_aff_html = html_by_role.get("a001_affiliate_entry_id")
-        if fs_scope != "consolidated":
-            sub = extract_subsidiaries(fs_scope=fs_scope, notes_html=None, a001_html=None)
-        elif notes_html is None and a001_aff_html is None:
-            has_source = bool(
-                leaves.notes_entry_id or leaves.a001_affiliate_entry_id or leaves.fs_parent_entry_id
-            )
-            sub = (
-                SubsidiaryResult(None, "not_found", None)
-                if has_source
-                else SubsidiaryResult(None, "skipped", None)
-            )
-        else:
-            try:
+        try:
+            if fs_scope != "consolidated":
+                sub = extract_subsidiaries(fs_scope=fs_scope, notes_html=None, a001_html=None)
+            elif notes_html is None and a001_aff_html is None:
+                has_source = bool(
+                    leaves.notes_entry_id
+                    or leaves.a001_affiliate_entry_id
+                    or leaves.fs_parent_entry_id
+                )
+                sub = (
+                    SubsidiaryResult(None, "not_found", None)
+                    if has_source
+                    else SubsidiaryResult(None, "skipped", None)
+                )
+            else:
                 sub = extract_subsidiaries(
                     fs_scope=fs_scope,
                     notes_html=notes_html,
                     a001_html=a001_aff_html,
                 )
-            except Exception:
-                logger.exception("종속기업 수 파싱에 실패했습니다.")
-                sub = SubsidiaryResult(None, "not_found", None)
+        except Exception:
+            logger.exception("종속기업 수 파싱에 실패했습니다.")
+            sub = SubsidiaryResult(None, "not_found", None)
 
         return AuditReportFact(
             rcept_no=sample.rcept_no,
