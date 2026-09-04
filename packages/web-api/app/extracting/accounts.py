@@ -29,6 +29,7 @@ _ACCOUNTS: tuple[str, ...] = (
     "contract_asset",
     "unbilled",
     "current_asset",
+    "total_liability",
     "current_liability",
 )
 
@@ -38,6 +39,7 @@ _TOTAL_ACCOUNTS = frozenset(
         "total_equity",
         "net_income",
         "current_asset",
+        "total_liability",
         "current_liability",
     }
 )
@@ -138,6 +140,10 @@ def _account_of(label: str) -> str | None:
         if "부채와자본총계" in token or "부채및자본총계" in token:
             return None
         return "total_equity"
+    if "부채총계" in token:
+        if "부채와자본총계" in token or "부채및자본총계" in token:
+            return None
+        return "total_liability"
     if "유동자산" in token and "비유동" not in token and "기타" not in token:
         return "current_asset"
     if "유동부채" in token and "비유동" not in token and "기타" not in token:

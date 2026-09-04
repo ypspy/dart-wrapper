@@ -17,6 +17,7 @@ _FIVE_COL_BS = """
 <tr><td>1. 현금및현금성자산(주석 3)</td><td>173,181,742</td><td></td><td>198,404,558</td><td></td></tr>
 <tr><td>자 산 총 계</td><td></td><td>30,665,809,879</td><td></td><td>30,322,084,856</td></tr>
 <tr><td>Ⅰ. 유동부채</td><td></td><td>12,345,678</td><td></td><td>11,111,111</td></tr>
+<tr><td>부 채 총 계</td><td></td><td>20,000,000</td><td></td><td>19,000,000</td></tr>
 <tr><td>Ⅰ. 자본금</td><td></td><td>100</td><td></td><td>100</td></tr>
 <tr><td>자 본 총 계</td><td></td><td>100</td><td></td><td>100</td></tr>
 <tr><td>부채와자본총계</td><td></td><td>30,665,809,879</td><td></td><td>30,322,084,856</td></tr>
@@ -536,3 +537,34 @@ def test_extract_accounts_securitized_liability_is_not_current() -> None:
         r["account"] == "current_liability" and r.get("value") == 30000000000
         for r in accounts
     )
+
+
+def test_total_liability_five_col_uses_total_cell() -> None:
+    """부채총계는 합계 칸이고, 부채와자본총계·유동부채와 키가 갈린다."""
+    rows, status = extract_accounts(bs_html=_FIVE_COL_BS, is_html=None)
+    assert status == "ok"
+    current = _by_account_period(rows, "total_liability", "current")
+    assert current["status"] == "ok"
+    assert current["value"] == 20000000
+    prior = _by_account_period(rows, "total_liability", "prior")
+    assert prior["value"] == 19000000
+    assert _by_account_period(rows, "current_liability", "current")["value"] == 12345678
+
+
+def test_liability_and_equity_total_is_not_total_liability() -> None:
+    """부채와자본총계만 있는 표는 total_liability가 not_found다."""
+    html = """
+    <html><body>
+    <p>재무상태표</p>
+    <table>
+    <tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+    <tr><td>자 산 총 계</td><td>100</td><td>90</td></tr>
+    <tr><td>부채와자본총계</td><td>100</td><td>90</td></tr>
+    </table>
+    </body></html>
+    """
+    rows, status = extract_accounts(bs_html=html, is_html=None)
+    assert status == "ok"
+    item = _by_account_period(rows, "total_liability", "current")
+    assert item["status"] == "not_found"
+    assert item["value"] is None
