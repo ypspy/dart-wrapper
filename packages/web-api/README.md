@@ -8,7 +8,7 @@ DART 공시 파이프라인의 FastAPI 서비스입니다. Admin 카탈로그 �
 |--------|------|------|
 | API | `app/api` | 라우터·의존성 |
 | Service | `app/services` | 수집 오케스트레이션, Viewer 파이프라인, 감사 추출 잡 |
-| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계 순수 추출·해소 (`audit_opinion.v15`) |
+| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계·계속기업·종속기업 순수 추출·해소 (`audit_opinion.v16`) |
 | Port/Adapter | `app/ports`, `app/adapters` | 엔트리 수집기, DART HTTP |
 | Parsing | `app/parsing` | 본문 정제, 표 → JSON |
 | DB | `app/models`, `app/repositories`, `app/db` | 엔트리·작업 메타데이터 |
@@ -84,9 +84,13 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 카탈로그에 있는 `viewer_url`로 감사 표지·의견 5필드(감사인, 의견, 보고일, GAAP, 당기)를
 뽑아 `audit_report_facts`에 저장합니다. 같은 행에 외부감사 실시내용 1~4절 JSON
 (`hours`, `activities`, `communications`)과 첨부 제표 계정 JSON(`accounts`)도 붙입니다.
-같은 행에 내부회계관리제도 감사·검토 의견(`icfr_engagement`, `icfr_opinion_code`, `icfr_status`)을
-붙입니다. 감사는 적정·부적정·거절, 검토는 거기에 한정·중요한취약점입니다. 회사 운영보고서는 읽지 않습니다.
-5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v15`입니다.
+같은 행에 내부회계관리제도 감사·검토 의견(`icfr_engagement`, `icfr_opinion_code`, `icfr_status`)과
+당기 계속기업 중요한 불확실성(`going_concern`)·연결 종속기업 수(`subsidiary_count`)도 붙입니다.
+`accounts`에는 부채총계(`total_liability`) 당기·전기 금액도 포함합니다.
+별도 문서(`fs_scope=separate`)의 종속기업 수는 `subsidiary_status=not_applicable`이며 카운트는 null입니다.
+연결 문서는 주석 표를 1차로 세고, 같은 접수 A001 계열회사 표에서 종속 구분 칸을 읽을 수 있을 때만 2차로
+보강합니다. 감사는 적정·부적정·거절, 검토는 거기에 한정·중요한취약점입니다. 회사 운영보고서는 읽지 않습니다.
+5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v16`입니다.
 원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
@@ -126,21 +130,24 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | `fetch_failed` / `blocked` / `section_missing` | 해당 fetch 상태 |
 | `unextracted` | 대상인데 facts 행이 없음 |
 | `ambiguous_dates` | `audit_report_date_status=ambiguous` |
-| `field_partial` | fetch는 됐지만 핵심 필드(의견 5필드·실시내용 3상태·`accounts_status`·`icfr_status`) 중 `ok`가 아닌 것이 있음 |
+| `field_partial` | fetch는 됐지만 핵심 필드(의견 5필드·실시내용 3상태·`accounts_status`·`icfr_status`·`going_concern_status`) 중 `ok`가 아닌 것이 있음. 연결 문서의 `subsidiary_status`는 `skipped`/`not_found`만 부분실패이며 `not_applicable`은 아님 |
 
 같은 경로에 `status`와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 받습니다.
 4절이 없는 옛 공시는 의견 필드가 `ok`여도 `communications_status=not_found`라 `field_partial`입니다.
 첨부 제표에서는 E-4 연구 계정 8개(자산총계·자본총계·당기순손익·재고·매출채권·장기매출채권·계약자산·미청구공사)와
-유동자산·유동부채 소계의 당기·전기 금액을 읽으며, `제N기` 비교열 헤더는 큰 기수를 당기·작은 기수를 전기로 해석합니다.
+유동자산·유동부채·부채총계(`total_liability`)의 당기·전기 금액을 읽으며, `제N기` 비교열 헤더는 큰 기수를 당기·작은 기수를 전기로 해석합니다.
 `당기순손실` 과목은 칸 괄호가 없어도 음수로 읽습니다.
-`비유동`·`기타` 과목과 `유동화부채`는 유동 소계로 쓰지 않습니다.
+`비유동`·`기타` 과목과 `유동화부채`는 유동 소계로 쓰지 않습니다. `부채와자본총계`는 부채총계로 쓰지 않습니다.
 
 ### Public 조회
 
 `GET /api/v1/disclosures/{rcp_no}/audit-facts`는 인증 없이 해당 접수의 추출 행을 반환합니다.
 행이 없으면 404가 아니라 빈 목록입니다. 실시내용·계정 JSON과 `hours_status`·`accounts_status`
-·`icfr_engagement`·`icfr_opinion_code`·`icfr_status` 등도 본문에 포함합니다.
+·`icfr_engagement`·`icfr_opinion_code`·`icfr_status`·`going_concern`·`subsidiary_count`·
+`subsidiary_status` 등도 본문에 포함합니다.
 회사명·접수일 등은 facts에 없고, 아래 export가 `entries`/`disclosures`와 조인합니다.
+
+`GET /api/v1/facts` 목록에도 같은 공개 컬럼(`going_concern`, `subsidiary_count` 등)이 포함됩니다.
 
 ### DATE_RESOLVER
 
