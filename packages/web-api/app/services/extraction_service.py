@@ -34,6 +34,7 @@ from app.extracting.dates import (
     pick_audit_report_date,
 )
 from app.extracting.gaap import classify_gaap
+from app.extracting.going_concern import extract_going_concern
 from app.extracting.icfr import extract_icfr
 from app.extracting.opinion import classify_opinion
 from app.extracting.resolve import (
@@ -51,6 +52,7 @@ from app.extracting.selector import (
     is_audit_document,
     select_leaves,
 )
+from app.extracting.subsidiaries import SubsidiaryResult, extract_subsidiaries, notes_tail
 from app.extracting.text import compact
 from app.models.audit_report_fact import AuditReportFact
 from app.models.entry import Entry
@@ -98,6 +100,8 @@ _NOT_FOUND_STATUSES = (
     "communications_status",
     "accounts_status",
     "icfr_status",
+    "going_concern_status",
+    "subsidiary_status",
 )
 _DEDICATED_REPORTS = frozenset({"F001", "F002"})
 _BLOCK_MARKERS = (
@@ -126,6 +130,7 @@ _LEAF_ROLES = (
     "bs_entry_id",
     "is_entry_id",
     "icfr_entry_id",
+    "notes_entry_id",
 )
 _BLOCK_HTTP_STATUSES = frozenset({403, 429})
 _AUDITOR_NAMES_PATH = (
@@ -581,10 +586,26 @@ class ExtractionService:
             html_by_role[role] = html
 
         # BS·IS leaf가 둘 다 없을 때만 부모 제표를 가져온다 (_LEAF_ROLES에 넣지 않음).
+        if not leaves.bs_entry_id and not leaves.is_entry_id and leaves.fs_parent_entry_id:
+            parent = by_id.get(leaves.fs_parent_entry_id)
+            if parent is not None and parent.viewer_url:
+                try:
+                    html = await self._http.fetch_html(parent.viewer_url)
+                except SourceFetchError as exc:
+                    if exc.status_code in _BLOCK_HTTP_STATUSES:
+                        blocked = True
+                else:
+                    if html_looks_blocked(html):
+                        blocked = True
+                    else:
+                        html_by_role["fs_parent_entry_id"] = html
+
+        fs_scope_guess = fs_scope_for(sample.report_type or "", sample.document_name)
         if (
-            not leaves.bs_entry_id
-            and not leaves.is_entry_id
+            fs_scope_guess == "consolidated"
+            and not leaves.notes_entry_id
             and leaves.fs_parent_entry_id
+            and "fs_parent_entry_id" not in html_by_role
         ):
             parent = by_id.get(leaves.fs_parent_entry_id)
             if parent is not None and parent.viewer_url:
@@ -598,6 +619,37 @@ class ExtractionService:
                         blocked = True
                     else:
                         html_by_role["fs_parent_entry_id"] = html
+
+        notes_html = html_by_role.get("notes_entry_id")
+        if notes_html is None and html_by_role.get("fs_parent_entry_id"):
+            tail = notes_tail(html_by_role["fs_parent_entry_id"])
+            if tail:
+                notes_html = tail
+        need_a001 = False
+        if fs_scope_guess == "consolidated":
+            try:
+                preview = extract_subsidiaries(
+                    fs_scope=fs_scope_guess,
+                    notes_html=notes_html,
+                    a001_html=None,
+                )
+                need_a001 = preview.status != "ok" and bool(leaves.a001_affiliate_entry_id)
+            except Exception:
+                logger.exception("종속기업 수 미리보기에 실패했습니다.")
+                need_a001 = bool(leaves.a001_affiliate_entry_id)
+        if need_a001:
+            aff = by_id.get(leaves.a001_affiliate_entry_id or "")
+            if aff is not None and aff.viewer_url:
+                try:
+                    html = await self._http.fetch_html(aff.viewer_url)
+                except SourceFetchError as exc:
+                    if exc.status_code in _BLOCK_HTTP_STATUSES:
+                        blocked = True
+                else:
+                    if html_looks_blocked(html):
+                        blocked = True
+                    else:
+                        html_by_role["a001_affiliate_entry_id"] = html
 
         if blocked:
             fetch_status = "blocked"
@@ -766,6 +818,49 @@ class ExtractionService:
                 icfr = None
                 icfr_status = "not_found"
 
+        try:
+            gc = extract_going_concern(html_by_role.get("opinion_entry_id"))
+        except Exception:
+            logger.exception("계속기업 판정에 실패했습니다.")
+            gc = None
+        if gc is None:
+            going_concern = None
+            going_concern_status = "not_found"
+            going_concern_raw = None
+            going_concern_source = None
+        else:
+            going_concern = gc.going_concern
+            going_concern_status = gc.status
+            going_concern_raw = gc.raw
+            going_concern_source = gc.source
+
+        notes_html = html_by_role.get("notes_entry_id")
+        if notes_html is None and html_by_role.get("fs_parent_entry_id"):
+            tail = notes_tail(html_by_role["fs_parent_entry_id"])
+            notes_html = tail or None
+        a001_aff_html = html_by_role.get("a001_affiliate_entry_id")
+        if fs_scope != "consolidated":
+            sub = extract_subsidiaries(fs_scope=fs_scope, notes_html=None, a001_html=None)
+        elif notes_html is None and a001_aff_html is None:
+            has_source = bool(
+                leaves.notes_entry_id or leaves.a001_affiliate_entry_id or leaves.fs_parent_entry_id
+            )
+            sub = (
+                SubsidiaryResult(None, "not_found", None)
+                if has_source
+                else SubsidiaryResult(None, "skipped", None)
+            )
+        else:
+            try:
+                sub = extract_subsidiaries(
+                    fs_scope=fs_scope,
+                    notes_html=notes_html,
+                    a001_html=a001_aff_html,
+                )
+            except Exception:
+                logger.exception("종속기업 수 파싱에 실패했습니다.")
+                sub = SubsidiaryResult(None, "not_found", None)
+
         return AuditReportFact(
             rcept_no=sample.rcept_no,
             dcm_no=sample.dcm_no or "",
@@ -822,6 +917,15 @@ class ExtractionService:
             icfr_opinion_raw=None if icfr is None else icfr.opinion_raw,
             icfr_opinion_code=None if icfr is None else icfr.opinion_code,
             icfr_status=icfr_status,
+            going_concern=going_concern,
+            going_concern_status=going_concern_status,
+            going_concern_raw=going_concern_raw,
+            going_concern_source=going_concern_source,
+            subsidiary_count=sub.count,
+            subsidiary_status=sub.status,
+            subsidiary_source=sub.source,
+            notes_entry_id=leaves.notes_entry_id,
+            a001_affiliate_entry_id=leaves.a001_affiliate_entry_id,
             fetch_status=fetch_status,
             conflicts=conflicts,
             extractor_version=EXTRACTOR_VERSION,

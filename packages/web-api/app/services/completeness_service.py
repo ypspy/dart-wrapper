@@ -36,6 +36,7 @@ _FIELD_STATUS_ATTRS = (
     "communications_status",
     "accounts_status",
     "icfr_status",
+    "going_concern_status",
 )
 DocKey = tuple[str, str]
 
@@ -69,10 +70,13 @@ def _is_field_partial(fact: AuditReportFact) -> bool:
     """fetch는 성공했지만 핵심 필드 중 하나라도 ok가 아닌지 본다.
 
     skipped·not_found·ambiguous·None은 모두 부분실패로 센다.
+    별도 문서의 subsidiary_status=not_applicable은 부분실패가 아니다.
     """
     if fact.fetch_status != "ok":
         return False
-    return any(getattr(fact, name) != "ok" for name in _FIELD_STATUS_ATTRS)
+    if any(getattr(fact, name) != "ok" for name in _FIELD_STATUS_ATTRS):
+        return True
+    return fact.subsidiary_status in {"skipped", "not_found"}
 
 
 def _document_keys(entries: Sequence[Entry]) -> list[DocKey]:

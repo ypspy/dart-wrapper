@@ -85,6 +85,9 @@ def _ok_fact(**overrides: object) -> AuditReportFact:
         "accounts": [],
         "accounts_status": "ok",
         "icfr_status": "ok",
+        "going_concern": 0,
+        "going_concern_status": "ok",
+        "subsidiary_status": "not_applicable",
         "fetch_status": "ok",
         "conflicts": [],
         "audit_report_date_candidates": [],
@@ -427,6 +430,77 @@ async def test_completeness_field_partial_includes_icfr_skipped(
         sessionmaker,
         [_entry()],
         [_ok_fact(icfr_status="skipped")],
+    )
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["target"] == 1
+    assert body["ok"] == 1
+    assert body["field_partial"] == 1
+
+
+async def test_completeness_field_partial_includes_going_concern_skipped(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """다른 필드가 ok여도 going_concern_status=skipped면 field_partial이다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [_entry()],
+        [_ok_fact(going_concern_status="skipped")],
+    )
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["target"] == 1
+    assert body["ok"] == 1
+    assert body["field_partial"] == 1
+
+
+async def test_completeness_separate_not_applicable_is_not_field_partial(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """별도 문서의 subsidiary_status=not_applicable은 field_partial이 아니다."""
+    app, sessionmaker = memory_app
+    await _seed(sessionmaker, [_entry()], [_ok_fact()])
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["target"] == 1
+    assert body["ok"] == 1
+    assert body["field_partial"] == 0
+
+
+async def test_completeness_subsidiary_not_found_is_field_partial(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """연결 문서의 subsidiary_status=not_found는 field_partial이다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [_entry()],
+        [_ok_fact(fs_scope="consolidated", subsidiary_status="not_found")],
     )
 
     async with client_factory(app) as client:

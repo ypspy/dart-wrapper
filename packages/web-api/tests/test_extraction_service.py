@@ -23,6 +23,7 @@ ACTIVITY_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=activity"
 BS_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=bs"
 FS_PARENT_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=fsparent"
 ICFR_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=icfr"
+NOTES_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=notes"
 A001_OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
 
 _FS_HTML = """
@@ -96,6 +97,18 @@ ICFR_REVIEW_HTML = """
 </body></html>
 """
 
+NOTES_HTML = """
+<html><body>
+<p>3. 종속기업</p>
+<table>
+<tr><td>회사명</td><td>소재지</td><td>지분율</td></tr>
+<tr><td>갑주식회사</td><td>한국</td><td>100%</td></tr>
+<tr><td>을주식회사</td><td>한국</td><td>80%</td></tr>
+<tr><td>합계</td><td></td><td></td></tr>
+</table>
+</body></html>
+"""
+
 
 @pytest.fixture
 async def sessionmaker_fixture():
@@ -144,6 +157,34 @@ def _icfr_leaf() -> EntryRecord:
         section_name="내부회계관리제도 검토의견",
         path=["내부회계관리제도 검토의견"],
         viewer_url=ICFR_URL,
+    )
+
+
+def _f002_leaves() -> list[EntryRecord]:
+    return [
+        _entry(
+            report_type="F002",
+            document_name="연결감사보고서",
+        ),
+        _entry(
+            entry_id="e-opinion",
+            report_type="F002",
+            document_name="연결감사보고서",
+            section_name="독립된 감사인의 감사보고서",
+            path=["독립된 감사인의 감사보고서"],
+            viewer_url=OPINION_URL,
+        ),
+    ]
+
+
+def _notes_leaf() -> EntryRecord:
+    return _entry(
+        entry_id="e-notes",
+        report_type="F002",
+        document_name="연결감사보고서",
+        section_name="주석",
+        path=["주석"],
+        viewer_url=NOTES_URL,
     )
 
 
@@ -215,6 +256,10 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.icfr_status == "skipped"
     assert fact.icfr_entry_id is None
     assert fact.icfr_engagement is None
+    assert fact.going_concern_status == "ok"
+    assert fact.going_concern == 0  # fixture 의견서에 MU 없음
+    assert fact.subsidiary_status == "not_applicable"
+    assert fact.subsidiary_count is None
 
 
 async def test_start_raises_when_catalog_running(sessionmaker_fixture) -> None:
@@ -844,6 +889,165 @@ async def test_reparse_refetches_when_icfr_status_is_not_found(
     assert fact.icfr_status == "ok"
     assert fact.icfr_engagement == "review"
     assert fact.icfr_opinion_code == "unqualified"
+
+
+async def test_extract_job_counts_notes_subsidiaries(sessionmaker_fixture) -> None:
+    """연결 주석 표를 세어 subsidiary_count를 넣는다."""
+    await _seed_entries(sessionmaker_fixture, [*_f002_leaves(), _notes_leaf()])
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            NOTES_URL: (200, NOTES_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.fs_scope == "consolidated"
+    assert fact.subsidiary_status == "ok"
+    assert fact.subsidiary_count == 2
+    assert fact.subsidiary_source == "notes"
+    assert fact.notes_entry_id == "e-notes"
+
+
+async def test_notes_fetch_failure_sets_not_found_without_failing_job(
+    sessionmaker_fixture,
+) -> None:
+    """주석 leaf는 있으나 HTML fetch가 실패하면 subsidiary_status=not_found이고 잡은 성공한다."""
+    await _seed_entries(sessionmaker_fixture, [*_f002_leaves(), _notes_leaf()])
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            NOTES_URL: (500, "error"),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.notes_entry_id == "e-notes"
+    assert fact.subsidiary_status == "not_found"
+    assert fact.subsidiary_count is None
+    assert job is not None
+    assert job.status == "succeeded"
+
+
+async def test_going_concern_parser_exception_sets_not_found_without_failing_job(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """계속기업 파서 예외는 going_concern_status=not_found이고 잡은 성공한다."""
+
+    def boom(opinion_html: str | None) -> object:
+        raise RuntimeError("의도한 계속기업 파서 예외")
+
+    monkeypatch.setattr("app.services.extraction_service.extract_going_concern", boom)
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.going_concern_status == "not_found"
+    assert fact.going_concern is None
+    assert job is not None
+    assert job.status == "succeeded"
+
+
+async def test_subsidiary_parser_exception_sets_not_found_without_failing_job(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """종속기업 파서 예외는 subsidiary_status=not_found이고 잡은 성공한다."""
+
+    def boom(*, fs_scope: str, notes_html: str | None, a001_html: str | None) -> object:
+        raise RuntimeError("의도한 종속기업 파서 예외")
+
+    monkeypatch.setattr("app.services.extraction_service.extract_subsidiaries", boom)
+    await _seed_entries(sessionmaker_fixture, [*_f002_leaves(), _notes_leaf()])
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            NOTES_URL: (200, NOTES_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.subsidiary_status == "not_found"
+    assert fact.subsidiary_count is None
+    assert job is not None
+    assert job.status == "succeeded"
+
+
+async def test_reparse_refetches_when_subsidiary_status_is_not_found(
+    sessionmaker_fixture,
+) -> None:
+    """reparse는 subsidiary_status가 not_found여도 주석 HTML을 다시 가져온다."""
+    await _seed_entries(sessionmaker_fixture, [*_f002_leaves(), _notes_leaf()])
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F002",
+                fs_scope="consolidated",
+                fetch_status="ok",
+                subsidiary_status="not_found",
+                extractor_version="audit_opinion.v15",
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            NOTES_URL: (200, NOTES_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F002"], "reparse")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.subsidiary_status == "ok"
+    assert fact.subsidiary_count == 2
+    assert fact.subsidiary_source == "notes"
 
 
 async def test_section_missing_when_cover_and_opinion_leaves_absent(
