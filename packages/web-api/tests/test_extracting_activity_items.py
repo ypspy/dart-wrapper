@@ -145,6 +145,116 @@ _TWO_INVENTORY = """
 """
 
 
+_SPLIT_HEADCOUNT = """
+<html><body>
+<p>3. 주요 감사실시내용</p>
+<table>
+<tr><td>구분</td><td colspan="8">내역</td></tr>
+<tr>
+  <td rowspan="3">현장감사</td>
+  <td colspan="3" rowspan="2">수행시기</td>
+  <td colspan="4">투입인원</td>
+  <td rowspan="2">주요 감사업무 수행내용</td>
+</tr>
+<tr>
+  <td colspan="2">상주</td>
+  <td colspan="2">비상주</td>
+</tr>
+<tr>
+  <td>2024.09.25~27</td>
+  <td>3</td>
+  <td>일</td>
+  <td>5</td>
+  <td>명</td>
+  <td>2</td>
+  <td>명</td>
+  <td>내부통제제도검토</td>
+</tr>
+</table>
+</body></html>
+"""
+
+
+_BLANK_FORM_UNITS = """
+<html><body>
+<p>3. 주요 감사실시내용</p>
+<table>
+<tr><td>구분</td><td colspan="8">내역</td></tr>
+<tr>
+  <td rowspan="4">현장감사</td>
+  <td colspan="3" rowspan="2">수행시기</td>
+  <td colspan="4">투입인원</td>
+  <td rowspan="2">주요 감사업무 수행내용</td>
+</tr>
+<tr>
+  <td colspan="2">상주</td>
+  <td colspan="2">비상주</td>
+</tr>
+<tr>
+  <td>2018.12.19~20</td>
+  <td>2</td>
+  <td>일</td>
+  <td>1</td>
+  <td>명</td>
+  <td>1</td>
+  <td>명</td>
+  <td>자산의 회수가능성</td>
+</tr>
+<tr>
+  <td>-</td>
+  <td>-</td>
+  <td>일</td>
+  <td>-</td>
+  <td>명</td>
+  <td>-</td>
+  <td>명</td>
+  <td>-</td>
+</tr>
+</table>
+</body></html>
+"""
+
+
+_BLOCK_COLSPAN = """
+<html><body>
+<p>3. 주요 감사실시내용</p>
+<table>
+<tr><td>구분</td><td colspan="12">내역</td></tr>
+<tr>
+  <td>전반감사계획 (감사착수단계)</td>
+  <td>수행시기</td>
+  <td colspan="4">2024.06.29</td>
+  <td>1</td>
+  <td>일</td>
+  <td>일</td>
+  <td>주요내용</td>
+  <td colspan="3">감사계획 수립</td>
+</tr>
+<tr>
+  <td>외부조회</td>
+  <td>금융거래조회</td>
+  <td colspan="2">O</td>
+  <td>채권채무조회</td>
+  <td>O</td>
+  <td>변호사조회</td>
+  <td>-</td>
+  <td>기타조회</td>
+  <td colspan="4">-</td>
+</tr>
+<tr>
+  <td>지배기구와의 커뮤니케이션</td>
+  <td>커뮤니케이션 횟수</td>
+  <td colspan="2">2</td>
+  <td>회</td>
+  <td>회</td>
+  <td>수행시기</td>
+  <td colspan="5">중간감사 및 기말감사</td>
+</tr>
+</table>
+</body></html>
+"""
+
+
 def _rows(activities: list[dict[str, object]], **filters: object) -> list[dict[str, object]]:
     """필터와 모두 일치하는 실시내용 행을 반환한다."""
     found: list[dict[str, object]] = []
@@ -177,6 +287,93 @@ def test_extract_activities_fieldwork_headers_and_visit() -> None:
     resident = visits[0]["fields"]["투입인원"]["상주"]
     assert isinstance(resident["count"], int)
     assert "명" in resident["raw"]
+
+
+def test_extract_activities_joins_split_headcount_number_and_unit() -> None:
+    """상주·비상주가 '5'와 '명'으로 나뉜 칸이면 숫자를 잃지 않는다."""
+    activities, status = extract_activities(_SPLIT_HEADCOUNT)
+    assert status == "ok"
+    visit = _rows(activities, section="fieldwork", row_type="visit")[0]
+    resident = visit["fields"]["투입인원"]["상주"]
+    nonresident = visit["fields"]["투입인원"]["비상주"]
+    assert resident["count"] == 5
+    assert "5" in resident["raw"]
+    assert "명" in resident["raw"]
+    assert nonresident["count"] == 2
+    assert "2" in nonresident["raw"]
+    schedule = visit["fields"]["수행시기"]
+    assert schedule["start_date"] == "2024.09.25"
+    assert schedule["end_date"] == "2024.09.27"
+    assert schedule["days"] == 3
+
+
+def test_extract_activities_blank_form_row_does_not_overwrite_headcount() -> None:
+    """날짜 없는 빈 서식 줄의 일·명 칸은 회차 투입인원을 덮지 않는다."""
+    activities, status = extract_activities(_BLANK_FORM_UNITS)
+    assert status == "ok"
+    visits = _rows(activities, section="fieldwork", row_type="visit")
+    assert len(visits) == 1
+    head = visits[0]["fields"]["투입인원"]
+    assert head["상주"]["count"] == 1
+    assert head["비상주"]["count"] == 1
+
+
+def _unmapped_values(fields: dict[str, object]) -> list[object]:
+    """unmapped_N 값만 모은다."""
+    return [value for key, value in fields.items() if str(key).startswith("unmapped_")]
+
+
+def test_extract_activities_block_does_not_repeat_colspan_cells() -> None:
+    """블록은 다음 라벨 전까지 칸을 이어 붙이고 colspan 복제는 unmapped로 남기지 않는다."""
+    activities, status = extract_activities(_BLOCK_COLSPAN)
+    assert status == "ok"
+    planning = _rows(activities, section="planning", row_type="block")[0]["fields"]
+    schedule = planning["수행시기"]
+    assert schedule["raw"] == "2024.06.29 1 일"
+    assert schedule["start_date"] == "2024.06.29"
+    assert schedule["end_date"] == "2024.06.29"
+    assert schedule["days"] == 1
+    assert planning["주요내용"] == "감사계획 수립"
+    assert _unmapped_values(planning) == []
+    confirmations = _rows(activities, section="external_confirmations", row_type="block")[0][
+        "fields"
+    ]
+    assert confirmations["금융거래조회"] == "O"
+    assert confirmations["기타조회"] == "-"
+    assert _unmapped_values(confirmations) == []
+    tcwg = _rows(activities, section="tcwg_communication", row_type="block")[0]["fields"]
+    assert tcwg["커뮤니케이션 횟수"] == "2 회"
+    assert tcwg["수행시기"] == "중간감사 및 기말감사"
+    assert _unmapped_values(tcwg) == []
+
+
+def test_extract_activities_planning_schedule_splits_range_and_days() -> None:
+    """전반감사계획 수행시기는 현장감사와 같이 start·end·days로 나눈다."""
+    html = """
+    <html><body>
+    <p>3. 주요 감사실시내용</p>
+    <table>
+    <tr><td>구분</td><td colspan="6">내역</td></tr>
+    <tr>
+      <td>전반감사계획</td>
+      <td>수행시기</td>
+      <td>2024.07.22~2024.09.06</td>
+      <td>3</td>
+      <td>일</td>
+      <td>주요내용</td>
+      <td>감사계획 수립</td>
+    </tr>
+    </table>
+    </body></html>
+    """
+    activities, status = extract_activities(html)
+    assert status == "ok"
+    schedule = _rows(activities, section="planning", row_type="block")[0]["fields"]["수행시기"]
+    assert schedule["raw"] == "2024.07.22~2024.09.06 3 일"
+    assert schedule["start_date"] == "2024.07.22"
+    assert schedule["end_date"] == "2024.09.06"
+    assert schedule["days"] == 3
+
 
 
 def test_extract_activities_inventory_visit_keeps_schedule_place_target() -> None:

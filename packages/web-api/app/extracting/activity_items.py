@@ -13,6 +13,7 @@ from app.extracting.text import compact
 _HEADING_TAGS = ("p", "h1", "h2", "h3", "h4", "h5", "h6")
 _DATE = re.compile(r"\d{2,4}\.\d{1,2}\.\d{1,2}")
 _PADDING = {"", "#"}
+_FORM_UNITS = {"일", "명"}
 _SECTION_RULES: tuple[tuple[str, str], ...] = (
     ("전반감사계획", "planning"),
     ("현장감사", "fieldwork"),
@@ -283,8 +284,8 @@ def _fieldwork_visit(
     """수행시기·투입인원·수행내용을 한 회차 fields로 묶는다."""
     schedule_parts: list[str] = []
     work_parts: list[str] = []
-    resident: str | None = None
-    nonresident: str | None = None
+    resident_parts: list[str] = []
+    nonresident_parts: list[str] = []
     for index, cell in enumerate(row):
         if index == 0:
             continue
@@ -292,9 +293,9 @@ def _fieldwork_visit(
         kind = fw_kinds[index] if index < len(fw_kinds) else ""
         sub = fw_subs[index] if index < len(fw_subs) else ""
         if sub == "상주" and token not in _PADDING:
-            resident = cell.strip()
+            resident_parts.append(cell.strip())
         elif sub == "비상주" and token not in _PADDING:
-            nonresident = cell.strip()
+            nonresident_parts.append(cell.strip())
         elif kind == "수행시기" and token not in _PADDING:
             schedule_parts.append(cell.strip())
         elif kind == "수행내용" and token not in _PADDING:
@@ -304,10 +305,12 @@ def _fieldwork_visit(
     if schedule_raw:
         fields["수행시기"] = parse_schedule(schedule_raw)
     headcount: dict[str, object] = {}
-    if resident is not None:
-        headcount["상주"] = parse_headcount(resident)
-    if nonresident is not None:
-        headcount["비상주"] = parse_headcount(nonresident)
+    resident_raw = _join_unique(resident_parts)
+    if resident_raw:
+        headcount["상주"] = parse_headcount(resident_raw)
+    nonresident_raw = _join_unique(nonresident_parts)
+    if nonresident_raw:
+        headcount["비상주"] = parse_headcount(nonresident_raw)
     if headcount:
         fields["투입인원"] = headcount
     work_raw = _join_unique(work_parts)
@@ -460,11 +463,21 @@ def _consume_block_row(
     fields = current_block["fields"]
     assert isinstance(fields, dict)
     fields.update(_block_fields(row, start_unmapped=_next_unmapped_index(fields)))
+    if section == "planning":
+        _parse_planning_schedule(fields)
     return current_block
 
 
+def _parse_planning_schedule(fields: dict[str, object]) -> None:
+    """전반감사계획 수행시기는 현장감사와 같이 start·end·days로 나눈다."""
+    for key, value in list(fields.items()):
+        if "수행시기" not in compact(key) or not isinstance(value, str):
+            continue
+        fields[key] = parse_schedule(value)
+
+
 def _block_fields(row: list[str], start_unmapped: int) -> dict[str, object]:
-    """알려진 라벨은 다음 칸, 남은 칸은 unmapped_N이다."""
+    """알려진 라벨은 다음 라벨 전까지를 값으로 쓰고, 남은 칸은 unmapped_N이다."""
     fields: dict[str, object] = {}
     consumed: set[int] = set()
     index = 1
@@ -477,36 +490,41 @@ def _block_fields(row: list[str], start_unmapped: int) -> dict[str, object]:
             index += 1
             continue
         key = row[index].strip()
-        value, next_index, value_at = _next_block_value(row, index + 1)
+        value, next_index, value_indices = _take_block_value(row, index + 1)
         consumed.add(index)
-        if value_at is not None:
-            consumed.add(value_at)
+        consumed.update(value_indices)
         fields[key] = value
         index = next_index
     unmapped_n = start_unmapped
+    seen = {compact(str(value)) for value in fields.values()} | {
+        compact(key) for key in fields
+    }
     for index, cell in enumerate(row):
         if index == 0 or index in consumed:
             continue
         token = compact(cell)
-        if token in _PADDING:
+        if token in _PADDING or token in seen:
             continue
         fields[f"unmapped_{unmapped_n}"] = cell.strip()
+        seen.add(token)
         unmapped_n += 1
     return fields
 
 
-def _next_block_value(row: list[str], start: int) -> tuple[str, int, int | None]:
-    """다음 비어 있지 않은 칸을 값으로 쓴다. 다음 라벨은 소비하지 않는다."""
+def _take_block_value(row: list[str], start: int) -> tuple[str, int, set[int]]:
+    """다음 알려진 라벨 전까지 값 칸을 이어 붙인다. colspan 복제는 한 번만 쓴다."""
+    parts: list[str] = []
+    consumed: set[int] = set()
     index = start
     while index < len(row):
         token = compact(row[index])
-        if token in _PADDING:
-            index += 1
-            continue
         if _known_label(token) is not None:
-            return "", index, None
-        return row[index].strip(), index + 1, index
-    return "", index, None
+            break
+        if token not in _PADDING:
+            parts.append(row[index].strip())
+            consumed.add(index)
+        index += 1
+    return _join_unique(parts), index, consumed
 
 
 def _known_label(token: str) -> str | None:
@@ -546,9 +564,10 @@ def _row_has_date(row: list[str]) -> bool:
 
 
 def _row_is_dash_only(row: list[str]) -> bool:
-    """날짜 없이 '-'만 있는 빈 서식 줄이면 True다."""
+    """날짜 없이 '-'와 일·명 단위만 있는 빈 서식 줄이면 True다."""
     tokens = [compact(cell) for cell in row[1:] if compact(cell) not in _PADDING]
-    return bool(tokens) and all(token == "-" for token in tokens)
+    content = [token for token in tokens if token not in _FORM_UNITS]
+    return bool(tokens) and all(token == "-" for token in content)
 
 
 def _join_unique(parts: list[str]) -> str:

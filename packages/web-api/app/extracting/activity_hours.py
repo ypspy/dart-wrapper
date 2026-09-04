@@ -15,6 +15,18 @@ _INTERIM_LABELS = ("분ㆍ반기검토", "분·반기검토", "분기검토", "�
 _AUDIT_EXCLUDES = ("감사참여자", "감사업무", "감사시간")
 
 
+def _is_axis_header(token: str) -> bool:
+    """구분·기간·모서리 제목은 역할 열이 아니다."""
+    if token in _LABEL_TOKENS:
+        return True
+    return "감사참여자" in token or "인원수및시간" in token
+
+
+def _is_parent_role_header(token: str) -> bool:
+    """담당이사·등록·수습을 묶는 부모 칸은 역할이 아니다."""
+    return "감사업무담당회계사" in token
+
+
 def extract_hours(html: str) -> tuple[list[dict[str, object]], str]:
     """2절 표의 역할×지표×기간 칸을 피벗한다.
 
@@ -40,8 +52,8 @@ def _headcount_row_index(matrix: list[list[str]]) -> int | None:
 
 
 def _role_from_token(token: str) -> str | None:
-    """스펙 표 순서대로 역할을 고른다. 당기/전기·빈 칸은 None."""
-    if token in _LABEL_TOKENS:
+    """스펙 표 순서대로 역할을 고른다. 축·부모 제목과 당기/전기는 None."""
+    if _is_axis_header(token) or _is_parent_role_header(token):
         return None
     if "품질관리검토자" in token or "심리실" in token:
         return "qcr"
@@ -74,12 +86,22 @@ def _metric_from_token(token: str) -> str | None:
 
 
 def _match_role(header_texts: list[str]) -> tuple[str, str, bool]:
-    """열 헤더에서 역할과 원문을 읽는다. 헤더가 비면 unmapped이다."""
+    """열 헤더에서 역할과 원문을 읽는다. 헤더가 비면 unmapped이다.
+
+    부모·모서리 제목은 건너뛰고 그 아래 담당이사 등 잎 칸을 쓴다.
+    잎이 없고 부모만 있으면 other로 둔다.
+    """
+    parent_raw = ""
     for text in header_texts:
-        role = _role_from_token(compact(text))
+        token = compact(text)
+        if _is_parent_role_header(token) and not parent_raw:
+            parent_raw = text
+        role = _role_from_token(token)
         if role is None:
             continue
         return role, text, False
+    if parent_raw:
+        return "other", parent_raw, False
     return "other", "", True
 
 
@@ -132,7 +154,7 @@ def _is_label_column(header_texts: list[str], col_index: int) -> bool:
     if not meaningful:
         # 맨 앞 빈 열은 구분 자리이고, 그 밖 빈 헤더는 역할 열로 둔다.
         return col_index == 0
-    return all(token in {"구분", _PERIOD_CURRENT, _PERIOD_PRIOR} for token in meaningful)
+    return all(_is_axis_header(token) for token in meaningful)
 
 
 def _is_row_label_cell(text: str, col_index: int, metric_raw: str, row: list[str]) -> bool:
