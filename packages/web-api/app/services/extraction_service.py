@@ -745,7 +745,14 @@ class ExtractionService:
         bs_html = html_by_role.get("bs_entry_id")
         is_html = html_by_role.get("is_entry_id")
         parent_html = html_by_role.get("fs_parent_entry_id")
-        if bs_html is None and is_html is None and parent_html:
+        # 계정용 부모 HTML은 BS·IS leaf가 없을 때만 쓴다. 연결 주석 fallback용 부모는 제외.
+        if (
+            bs_html is None
+            and is_html is None
+            and parent_html
+            and not leaves.bs_entry_id
+            and not leaves.is_entry_id
+        ):
             cut = cut_notes(parent_html)
             bs_html = is_html = cut
         if bs_html is None and is_html is None:

@@ -1042,6 +1042,73 @@ async def test_consolidated_parent_notes_fallback_403_does_not_block_document(
     assert job.status == "succeeded"
 
 
+async def test_f002_bs_is_fetch_failure_does_not_use_parent_for_accounts(
+    sessionmaker_fixture,
+) -> None:
+    """BS·IS leaf fetch가 실패해도 연결 부모 HTML로 accounts fallback하지 않는다."""
+    parent_html = _FS_HTML + "주석 3. 종속기업" + NOTES_HTML
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f002_leaves(),
+            _entry(
+                entry_id="e-bs",
+                report_type="F002",
+                document_name="연결감사보고서",
+                section_name="연결재무상태표",
+                path=["연결재무상태표"],
+                viewer_url=BS_URL,
+            ),
+            _entry(
+                entry_id="e-is",
+                report_type="F002",
+                document_name="연결감사보고서",
+                section_name="연결손익계산서",
+                path=["연결손익계산서"],
+                viewer_url=IS_URL,
+            ),
+            _entry(
+                entry_id="e-fs-parent",
+                report_type="F002",
+                document_name="연결감사보고서",
+                section_name="(첨부)연결재무제표",
+                path=["(첨부)연결재무제표"],
+                viewer_url=FS_PARENT_URL,
+            ),
+        ],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            BS_URL: (500, "error"),
+            IS_URL: (500, "error"),
+            FS_PARENT_URL: (200, parent_html),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.bs_entry_id == "e-bs"
+    assert fact.is_entry_id == "e-is"
+    assert fact.fs_parent_entry_id == "e-fs-parent"
+    assert fact.accounts_status == "skipped"
+    assert fact.accounts == []
+    assert not any(a.get("account") == "total_asset" for a in fact.accounts)
+    assert fact.subsidiary_status == "ok"
+    assert fact.subsidiary_count == 2
+    assert job is not None
+    assert job.status == "succeeded"
+
+
 async def test_going_concern_parser_exception_sets_not_found_without_failing_job(
     sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
