@@ -8,7 +8,7 @@ DART 공시 파이프라인의 FastAPI 서비스입니다. Admin 카탈로그 �
 |--------|------|------|
 | API | `app/api` | 라우터·의존성 |
 | Service | `app/services` | 수집 오케스트레이션, Viewer 파이프라인, 감사 추출 잡 |
-| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계·계속기업·종속기업 순수 추출·해소 (`audit_opinion.v16`) |
+| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계·계속기업·종속기업 순수 추출·해소 (`audit_opinion.v17`) |
 | Port/Adapter | `app/ports`, `app/adapters` | 엔트리 수집기, DART HTTP |
 | Parsing | `app/parsing` | 본문 정제, 표 → JSON |
 | DB | `app/models`, `app/repositories`, `app/db` | 엔트리·작업 메타데이터 |
@@ -85,12 +85,12 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 뽑아 `audit_report_facts`에 저장합니다. 같은 행에 외부감사 실시내용 1~4절 JSON
 (`hours`, `activities`, `communications`)과 첨부 제표 계정 JSON(`accounts`)도 붙입니다.
 같은 행에 내부회계관리제도 감사·검토 의견(`icfr_engagement`, `icfr_opinion_code`, `icfr_status`)과
-당기 계속기업 중요한 불확실성(`going_concern`)·연결 종속기업 수(`subsidiary_count`)도 붙입니다.
+당기 계속기업 중요한 불확실성(`going_concern`, 적정 의견의 제목·강조사항만)·연결 종속기업 수(`subsidiary_count`)도 붙입니다.
 `accounts`에는 부채총계(`total_liability`) 당기·전기 금액도 포함합니다.
 별도 문서(`fs_scope=separate`)의 종속기업 수는 `subsidiary_status=not_applicable`이며 카운트는 null입니다.
 연결 문서는 주석 표를 1차로 세고, 같은 접수 A001 계열회사 표에서 종속 구분 칸을 읽을 수 있을 때만 2차로
 보강합니다. 감사는 적정·부적정·거절, 검토는 거기에 한정·중요한취약점입니다. 회사 운영보고서는 읽지 않습니다.
-5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v16`입니다.
+5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v17`입니다.
 원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**

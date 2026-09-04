@@ -1,6 +1,6 @@
 # 부채총계·계속기업·연결 종속기업 수 추출 설계
 
-날짜: 2026-09-04  
+날짜: 2026-09-04 (2026-09-05: GC는 적정 제목·강조사항만)  
 상태: 초안 (브레인스토밍 승인 반영)  
 범위: `packages/web-api` — 기존 감사 추출 잡이 같은 `audit_report_facts` 행에
 부채총계, 당기 계속기업 중요한 불확실성(MU), 연결 종속기업 수를 붙인다.  
@@ -43,13 +43,13 @@ D-3-2는 적정/한정/거절/부적정만 본다. D-7은 정관 OCR(감사 vs �
 | 저장 단위 | 감사보고서 문서 (`rcept_no` + `dcm_no`) |
 | 공시 유형 | F001, F002, A001 첨부 감사·연결감사. `is_audit_document` 변경 없음 |
 | 부채총계 | `accounts` JSON `total_liability`. 당기·전기. 새 컬럼 없음 |
-| 계속기업 | 당기 MU가 있으면 1 (적정 포함). 전기 인용만이면 0. 청산기준 강조사항만이면 0 |
+| 계속기업 | 적정 의견의 제목·강조사항 MU만 1. 한정·부적정·거절 근거는 0. 전기 인용만이면 0. 청산기준 강조사항만이면 0 |
 | 종속 | 연결만 숫자. 주석 1차 → 같은 접수 A001 종속 구분 가능할 때만 2차. **종속기업만** |
 | 별도 문서 | `fs_scope=separate` → `subsidiary_status=not_applicable`, 카운트 null (0 아님) |
 | HTML | 저장하지 않음. 재추출은 URL을 다시 fetch |
 | 패키지 | `packages/web-api` `app/extracting/` |
 | 해소 | 형제 F001/A001 행과 금액을 맞추거나 `conflicts`에 넣지 않음 |
-| 버전 | `extractor_version` = `audit_opinion.v16` |
+| 버전 | `extractor_version` = `audit_opinion.v17` |
 
 카탈로그 수집과 추출 잡의 DART 상호 배타는 의견 추출과 같다.
 
@@ -92,14 +92,15 @@ D-3-2는 적정/한정/거절/부적정만 본다. D-7은 정관 OCR(감사 vs �
 |------|------|
 | `going_concern` | `1` 또는 `0`. skipped·예외면 null |
 | `going_concern_status` | `ok` / `skipped` / `not_found`(예외만) |
-| `going_concern_raw` | 매칭 제목 또는 근거 한 줄. 0이면 null |
-| `going_concern_source` | `heading` / `eom` / `grounds`. 0이면 null |
+| `going_concern_raw` | 매칭 제목 또는 강조사항 한 줄. 0이면 null |
+| `going_concern_source` | `heading` / `eom`. 0이면 null |
 
 의견 HTML을 읽었고 MU가 없으면 `0`이고 `status=ok`다.
 MU 없음을 `not_found`로 두지 않는다. 의견 leaf가 없으면 `skipped`.
 파서 예외만 행을 살리고 `going_concern=null`, `status=not_found`다.
 
 변형 코드(한정 vs 거절)는 `opinion_code`에 있으므로 별도 컬럼이 없다.
+GC 파서는 그 코드를 받아 **적정일 때만** 제목·강조사항을 본다.
 
 ### 4.3 종속기업 수
 
@@ -134,20 +135,20 @@ F001/F002 단독 접수에 A001이 없으면 주석 실패 후 `not_found`다.
   `계속기업`과 `중요한 불확실성`이 있다).
 - `기타사항` (전기 감사보고서 인용).
 - 핵심감사사항이 GC 단락을 **가리키기만** 하는 문장
-  (제목·강조사항·근거가 없을 때 1로 올리지 않음).
+  (제목·강조사항이 없을 때 1로 올리지 않음).
 
 ### 5.2 GC = 1 (당기 MU)
 
 한공회 작성사례 변형. compact 매칭. 2018 `회계의계속기업전제`와 2014 `계속기업가정`을 모두 받는다.
-첫 매칭이 이긴다.
+첫 매칭이 이긴다. **`opinion_code`가 `unqualified`가 아니면 아래를 보지 않고 0이다.**
 
 | 우선 | 조건 | `source` | 사례 |
 |------|------|----------|------|
 | 1 | 제목 compact `계속기업관련중요한불확실성` | `heading` | 별첨1 5.1 적정 |
 | 2 | `강조사항`/`특기사항` 본문에 계속기업(가정·전제)과 (`중요한불확실성` 또는 존속능력에 대한 유의적 의문) | `eom` | 2014 5.2 적정 |
-| 3 | `한정의견근거` / `부적정의견근거` / `의견거절근거`에 같은 계속기업 MU·전제 부적합·평가 기피·평가 미실시 | `grounds` | 별첨1 5.3–5.8, 2014 2.3–2.4·3.2–3.3·4.4–4.5 |
 
-적정이어도 1이다. 의견 코드는 바꾸지 않는다.
+한정·부적정·거절 근거 단락은 보지 않는다. 거절 근거에 MU 문장이 있어도 0이다.
+의견 코드는 바꾸지 않는다.
 
 ### 5.3 GC = 0
 
@@ -155,8 +156,9 @@ F001/F002 단독 접수에 A001이 없으면 주석 실패 후 `not_found`다.
 - 소송 등 **다른** 강조사항의 `중요한불확실성` (계속기업 토큰 없음).
 - **청산가치·청산기준** 강조사항만 있음 (계속기업전제를 버린 작성. 별첨1 5.2, 2014 5.5).
   그 강조사항에 `계속기업`이 있어도 `중요한불확실성`이 없으면 5.2의 `eom`으로 쓰지 않는다.
-  같은 보고서에 MU 제목·근거가 따로 있으면 5.2가 이긴다.
+  같은 보고서에 MU 제목이 따로 있고 적정이면 5.2가 이긴다.
 - `기타사항`의 전기 계속기업 한정 인용만.
+- `한정의견근거` / `부적정의견근거` / `의견거절근거`의 계속기업 MU (의견 변형은 `opinion_code`).
 
 ## 6. 종속기업 selector · 세기
 
@@ -195,7 +197,7 @@ F001/F002 단독 접수에 A001이 없으면 주석 실패 후 `not_found`다.
 ## 7. 잡 · API
 
 기존 `POST /admin/extract/audit-opinion`.
-`EXTRACTOR_VERSION`을 `audit_opinion.v16`으로 올린다. v15 `ok` 행은 다음 `extract`에서
+`EXTRACTOR_VERSION`을 `audit_opinion.v17`으로 올린다. v16 `ok` 행은 다음 `extract`에서
 다시 돈다. override·LLM 보고일은 유지한다.
 
 `reparse`의 not_found 필드에 `subsidiary_status`와 `going_concern_status`를 넣는다.
@@ -216,13 +218,14 @@ MU 없음은 `ok`+`0`이라 reparse에 안 걸린다. 파서 예외로만 `going
 실제 DART 호출 없음. 한공회 doc 원문은 저장하지 않는다. compact 가능한 한글 fixture.
 
 - 부채: `부채총계` 당기·전기. `부채와자본총계` 비매칭. `유동부채`와 키 분리.
-- GC: 2018 제목 → 1·`heading`. 2014 강조사항 → 1·`eom`. 한정·부적정·거절 근거 → 1·`grounds`.
-  책임 문단만 → 0. 소송 강조사항만 → 0. 청산가치 강조사항만 → 0. 기타사항 전기 인용만 → 0.
+- GC: 적정 + 2018 제목 → 1·`heading`. 적정 + 2014 강조사항 → 1·`eom`.
+  한정·부적정·거절(근거 MU·제목 포함) → 0. 책임 문단만 → 0. 소송 강조사항만 → 0.
+  청산가치 강조사항만 → 0. 기타사항 전기 인용만 → 0.
 - 종속: 주석 종속 표 행 수. 구분 칸 혼합표는 종속만. A001은 구분 가능할 때만.
   구분 없는 계열 표 → `not_found`. 별도 → `not_applicable`. 주석 실패 후 A001 성공 → `source=a001`.
   헤더만 있는 종속 표 → `0` + `ok`.
 - selector: 정확 `주석`, `재무상태표에대한주석` 제외, 부모 주석 꼬리, A001 `계열회사`·`타법인출자` 제외.
-- 기존 의견·D-4·D-5·D-6 테스트가 v16 upsert 후에도 깨지지 않음.
+- 기존 의견·D-4·D-5·D-6 테스트가 v17 upsert 후에도 깨지지 않음.
 
 ## 9. 범위 밖
 
@@ -243,7 +246,7 @@ app/extracting/accounts.py              # total_liability
 app/extracting/going_concern.py         # extract_going_concern
 app/extracting/subsidiaries.py          # extract_subsidiaries
 app/extracting/selector.py              # notes_entry_id, a001_affiliate_entry_id
-app/extracting/constants.py             # audit_opinion.v16
+app/extracting/constants.py             # audit_opinion.v17
 app/models/audit_report_fact.py         # GC·종속 컬럼
 app/db/session.py                       # ensure_schema 패치
 app/services/extraction_service.py      # fetch + 파서 연결, reparse

@@ -1,4 +1,4 @@
-"""의견서 HTML에서 당기 계속기업 중요한 불확실성(MU)을 판정한다."""
+"""의견서 HTML에서 적정 의견에 붙은 당기 계속기업 MU 강조를 판정한다."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ _GC_STEMS = ("계속기업가정", "계속기업전제", "계속기업")
 _MU_MARKERS = ("중요한불확실성",)
 _DOUBT_MARKERS = ("존속능력", "유의적의문", "유의적의문을")
 _LIQUIDATION = ("청산가치", "청산기준")
-_GROUNDS_HEADS = ("한정의견근거", "부적정의견근거", "의견거절근거")
 _EOM_HEADS = ("강조사항", "특기사항")
 _STRIP_FROM = (
     "재무제표에대한경영진과지배기구의책임",
@@ -35,18 +34,6 @@ _EOM_END = (
     "부적정의견근거",
     "의견거절근거",
 )
-_GROUNDS_END = (
-    "한정의견",
-    "부적정의견",
-    "의견거절",
-    "강조사항",
-    "특기사항",
-    "핵심감사사항",
-    "기타사항",
-    "재무제표에대한경영진과지배기구의책임",
-    "재무제표에대한경영진의책임",
-)
-_GROUNDS_STRIP_FROM = ("기타사항",)
 
 
 @dataclass(frozen=True)
@@ -130,10 +117,21 @@ def _is_liquidation_only(compacted: str) -> bool:
     return "중요한불확실성" not in compacted
 
 
-def extract_going_concern(opinion_html: str | None) -> GoingConcernResult:
-    """의견서 HTML에서 당기 MU가 있으면 1, 없으면 0이다. HTML이 없으면 skipped."""
+def extract_going_concern(
+    opinion_html: str | None,
+    *,
+    opinion_code: str | None = None,
+) -> GoingConcernResult:
+    """적정 의견서의 제목·강조사항에 당기 MU가 있으면 1, 없으면 0이다.
+
+    HTML이 없으면 skipped. 한정·부적정·거절이거나 의견 코드가 없으면 강조가
+    있어도 0이다. 근거 단락은 보지 않는다.
+    """
     if not opinion_html:
         return GoingConcernResult(None, "skipped", None, None)
+
+    if opinion_code != "unqualified":
+        return GoingConcernResult(0, "ok", None, None)
 
     full = _compact_html(opinion_html)
     searchable = _cut_from(full, _STRIP_FROM)
@@ -150,14 +148,5 @@ def extract_going_concern(opinion_html: str | None) -> GoingConcernResult:
         if _has_mu(section):
             snippet = section[:80]
             return GoingConcernResult(1, "ok", snippet, "eom")
-
-    grounds_searchable = _cut_from(full, _GROUNDS_STRIP_FROM)
-    for head in _GROUNDS_HEADS:
-        section = _section_after(grounds_searchable, head, _GROUNDS_END)
-        if not section:
-            continue
-        if _has_mu(section):
-            snippet = section[:80]
-            return GoingConcernResult(1, "ok", snippet, "grounds")
 
     return GoingConcernResult(0, "ok", None, None)

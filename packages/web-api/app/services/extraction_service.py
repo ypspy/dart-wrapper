@@ -839,7 +839,10 @@ class ExtractionService:
                 icfr_status = "not_found"
 
         try:
-            gc = extract_going_concern(html_by_role.get("opinion_entry_id"))
+            gc = extract_going_concern(
+                html_by_role.get("opinion_entry_id"),
+                opinion_code=opinion["value"],
+            )
         except Exception:
             logger.exception("계속기업 판정에 실패했습니다.")
             gc = None
