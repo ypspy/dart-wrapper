@@ -19,3 +19,15 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 packages/web-api/*.db
+
+# Ad-hoc DART probes and live dumps (keep on disk, do not track)
+packages/web-api/scripts/probe_*
+packages/web-api/scripts/extract_*_sample.*
+packages/web-api/scripts/a001_*
+packages/web-api/scripts/audit_*
+packages/web-api/scripts/time_one_extract.*
+packages/web-api/scripts/catalog_descriptive_stats.py
+packages/web-api/scripts/dump_activity_full.py
+packages/web-api/scripts/gen_d4_canvas.py
+packages/web-api/scripts/reextract_attachment_corrections.py
+packages/entry-extractor/scripts/
