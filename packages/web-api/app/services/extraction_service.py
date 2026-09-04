@@ -612,6 +612,7 @@ class ExtractionService:
                         html_by_role["notes_entry_id"] = html
 
         fs_scope_guess = fs_scope_for(sample.report_type or "", sample.document_name)
+        # 연결 주석 fallback용 부모 fetch는 403/429·캡차여도 문서 blocked로 올리지 않는다.
         if (
             fs_scope_guess == "consolidated"
             and not leaves.notes_entry_id
@@ -622,13 +623,10 @@ class ExtractionService:
             if parent is not None and parent.viewer_url:
                 try:
                     html = await self._http.fetch_html(parent.viewer_url)
-                except SourceFetchError as exc:
-                    if exc.status_code in _BLOCK_HTTP_STATUSES:
-                        blocked = True
+                except SourceFetchError:
+                    pass
                 else:
-                    if html_looks_blocked(html):
-                        blocked = True
-                    else:
+                    if not html_looks_blocked(html):
                         html_by_role["fs_parent_entry_id"] = html
 
         notes_html = html_by_role.get("notes_entry_id")

@@ -260,12 +260,13 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
             (entry.entry_id for entry in audit_entries if _is_ci_section(entry)),
             None,
         )
+    fs_parent_candidate = next(
+        (entry.entry_id for entry in audit_entries if _is_fs_parent(entry)),
+        None,
+    )
     fs_parent_entry_id = None
     if bs_entry_id is None and is_entry_id is None:
-        fs_parent_entry_id = next(
-            (entry.entry_id for entry in audit_entries if _is_fs_parent(entry)),
-            None,
-        )
+        fs_parent_entry_id = fs_parent_candidate
 
     icfr_entry_id = next(
         (
@@ -282,6 +283,12 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
             (entry.entry_id for entry in audit_entries if _is_notes_section(entry)),
             None,
         )
+        if (
+            notes_entry_id is None
+            and fs_parent_candidate is not None
+            and fs_parent_entry_id is None
+        ):
+            fs_parent_entry_id = fs_parent_candidate
 
     affiliate_candidates = [entry for entry in entries if _is_a001_affiliate_leaf(entry)]
     a001_affiliate_entry_id = (

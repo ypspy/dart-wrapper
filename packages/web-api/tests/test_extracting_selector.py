@@ -180,6 +180,21 @@ def test_select_leaves_consolidated_statement_names() -> None:
     assert leaves.is_entry_id == "is_"
 
 
+def test_select_leaves_consolidated_fs_parent_for_notes_when_no_notes_leaf() -> None:
+    """연결 BS/IS leaf가 있어도 주석 leaf가 없으면 부모 id를 주석 fallback용으로 고른다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F002", "body", "연결감사보고서", "감사보고서"),
+        SelectorEntry("bs", "r", "d", "F002", "body", "연결감사보고서", "연결재무상태표"),
+        SelectorEntry("is_", "r", "d", "F002", "body", "연결감사보고서", "연결손익계산서"),
+        SelectorEntry("p", "r", "d", "F002", "body", "연결감사보고서", "(첨부)연결재무제표"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.bs_entry_id == "bs"
+    assert leaves.is_entry_id == "is_"
+    assert leaves.notes_entry_id is None
+    assert leaves.fs_parent_entry_id == "p"
+
+
 def test_select_leaves_falls_back_to_fs_parent_when_only_notes() -> None:
     """본표 leaf가 없고 주석만 있으면 부모 (첨부)연결재무제표를 쓴다."""
     rows = [
