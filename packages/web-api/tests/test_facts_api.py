@@ -67,6 +67,7 @@ def _fact(**overrides: object) -> AuditReportFact:
         "icfr_status": "ok",
         "going_concern": 0,
         "going_concern_status": "ok",
+        "subsidiary_count": None,
         "subsidiary_status": "not_applicable",
         "fetch_status": "ok",
         "conflicts": [{"field": "auditor", "left": "표지", "right": "본문"}],
@@ -159,6 +160,8 @@ async def test_audit_facts_returns_resolved_source_conflicts_and_fetch_status(
     assert "going_concern" in row
     assert row["going_concern"] == 0
     assert row["going_concern_status"] == "ok"
+    assert "subsidiary_count" in row
+    assert row["subsidiary_count"] is None
     assert "subsidiary_status" in row
     assert row["subsidiary_status"] == "not_applicable"
     assert row["conflicts"] == [{"field": "auditor", "left": "표지", "right": "본문"}]
@@ -267,6 +270,7 @@ async def test_list_facts_pages_and_rejects_bad_cursor(client_factory) -> None:
             assert body["items"][0]["rcept_no"] == "20200331000002"
             assert body["items"][0]["corp_name"] == "을"
             assert "going_concern" in body["items"][0]
+            assert "subsidiary_count" in body["items"][0]
             assert "subsidiary_status" in body["items"][0]
             assert "accounts" in body["items"][0]
             assert "date_resolver_model" not in body["items"][0]
