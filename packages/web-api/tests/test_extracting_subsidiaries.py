@@ -113,6 +113,47 @@ def test_related_party_title_without_kind_is_not_found() -> None:
     assert result.count is None
 
 
+def test_notes_unit_banner_table_does_not_zero_the_next_list() -> None:
+    """제목 다음 (단위:천원) 표는 건너뛰고, 바로 뒤 회사명 표를 센다."""
+    html = """
+    <html><body>
+    <p>① 당기말 현재 연결대상 종속기업의 현황은 다음과 같습니다.</p>
+    <table class="nb"><tr><td>(단위 : 천원)</td></tr></table>
+    <table border="1">
+    <tr><th>회사명</th><th>소재지</th><th>지분율</th></tr>
+    <tr><td>원명해운(주)</td><td>대한민국</td><td>100%</td></tr>
+    </table>
+    <p>② 연결대상 종속기업의 요약재무현황</p>
+    <table class="nb"><tr><td>(당기)</td></tr><tr><td>(단위 : 천원)</td></tr></table>
+    <table border="1">
+    <tr><th>회사명</th><th>자산총액</th></tr>
+    <tr><td>원명해운(주)</td><td>1000</td></tr>
+    </table>
+    </body></html>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 1
+    assert result.source == "notes"
+
+
+def test_notes_unit_banner_before_exim_style_list() -> None:
+    """종속기업 현황 제목과 단위 표 다음의 회사 1행을 센다."""
+    html = """
+    <html><body>
+    <p>(2) 종속기업의 개요 1) 종속기업 현황은 다음과 같습니다.</p>
+    <table class="nb"><tr><td>(단위 : 천원)</td></tr></table>
+    <table border="1">
+    <tr><th>회사명</th><th>자본금</th><th>지분율</th><th>업종</th></tr>
+    <tr><td>(주)동인인터내셔날</td><td>100000</td><td>100%</td><td>제조</td></tr>
+    </table>
+    </body></html>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 1
+
+
 def test_empty_subsidiary_table_is_zero() -> None:
     html = """
     <html><body>

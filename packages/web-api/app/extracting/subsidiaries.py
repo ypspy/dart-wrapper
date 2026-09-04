@@ -13,6 +13,7 @@ _SKIP_ROWS = ("합계", "소계")
 _KIND_HEADERS = ("구분", "관계", "기업구분")
 _NAME_HEADERS = ("회사명", "기업명", "종속기업명", "법인명")
 _NOTES_MARKER = "주석 "
+_UNIT_BANNER_MARKERS = ("단위", "당기", "전기")
 
 
 @dataclass(frozen=True)
@@ -31,13 +32,34 @@ def notes_tail(html: str) -> str:
     return html.split(_NOTES_MARKER, 1)[1]
 
 
+def _table_joined_text(table: Tag) -> str:
+    """표 칸을 compact로 이어 붙인다."""
+    matrix = expand_table_matrix(table)
+    return compact("".join("".join(row) for row in matrix))
+
+
+def _is_unit_banner_table(table: Tag) -> bool:
+    """(단위:천원)·(당기)처럼 본표 앞의 단위 안내 표인지 본다."""
+    joined = _table_joined_text(table)
+    if not joined:
+        return False
+    if any(hint in joined for hint in _NAME_HEADERS + _KIND_HEADERS):
+        return False
+    return any(marker in joined for marker in _UNIT_BANNER_MARKERS)
+
+
 def _heading_from_previous_siblings(element: Tag) -> str:
-    """요소 앞 형제에서 표 경계 전의 제목 텍스트를 읽는다."""
+    """요소 앞 형제에서 표 경계 전의 제목 텍스트를 읽는다.
+
+    단위 안내 표는 제목을 가리지 않는다.
+    """
     heading_tags = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "span", "div"}
     for sibling in element.previous_siblings:
         if not isinstance(sibling, Tag):
             continue
         if sibling.name == "table":
+            if _is_unit_banner_table(sibling):
+                continue
             break
         if sibling.name in heading_tags:
             heading = compact(sibling.get_text(" ", strip=True))
@@ -156,6 +178,8 @@ def _count_from_html(html: str, *, require_kind: bool, notes_mode: bool) -> int 
     """조건에 맞는 첫 표를 찾아 센다."""
     soup = BeautifulSoup(html, "lxml")
     for table in soup.find_all("table"):
+        if _is_unit_banner_table(table):
+            continue
         if notes_mode and not _is_notes_heading(_heading_before(table)):
             continue
         count = _count_table(table, require_kind=require_kind)
