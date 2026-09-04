@@ -46,6 +46,7 @@ _GROUNDS_END = (
     "재무제표에대한경영진과지배기구의책임",
     "재무제표에대한경영진의책임",
 )
+_GROUNDS_STRIP_FROM = ("기타사항",)
 
 
 @dataclass(frozen=True)
@@ -79,12 +80,36 @@ def _section_after(compacted: str, head: str, ends: tuple[str, ...]) -> str | No
     return _cut_from(body, ends)
 
 
+def _eom_section_ranges(compacted: str) -> list[tuple[int, int]]:
+    """강조사항/특기사항 본문 구간 (start, end) 목록."""
+    ranges: list[tuple[int, int]] = []
+    for head in _EOM_HEADS:
+        start = 0
+        while True:
+            found = compacted.find(head, start)
+            if found < 0:
+                break
+            body_start = found + len(head)
+            body = compacted[body_start:]
+            body_end = body_start + len(_cut_from(body, _EOM_END))
+            ranges.append((body_start, body_end))
+            start = found + 1
+    return ranges
+
+
+def _is_inside_eom_section(compacted: str, pos: int) -> bool:
+    return any(start <= pos < end for start, end in _eom_section_ranges(compacted))
+
+
 def _has_gc_heading(compacted: str) -> bool:
     start = 0
     while True:
         found = compacted.find(_HEADING, start)
         if found < 0:
             return False
+        if _is_inside_eom_section(compacted, found):
+            start = found + 1
+            continue
         after = compacted[found + len(_HEADING) :]
         if not after.startswith("단락"):
             return True
@@ -126,8 +151,9 @@ def extract_going_concern(opinion_html: str | None) -> GoingConcernResult:
             snippet = section[:80]
             return GoingConcernResult(1, "ok", snippet, "eom")
 
+    grounds_searchable = _cut_from(full, _GROUNDS_STRIP_FROM)
     for head in _GROUNDS_HEADS:
-        section = _section_after(full, head, _GROUNDS_END)
+        section = _section_after(grounds_searchable, head, _GROUNDS_END)
         if not section:
             continue
         if _has_mu(section):

@@ -116,3 +116,36 @@ def test_other_matter_prior_year_is_zero() -> None:
         )
     )
     assert result.going_concern == 0
+
+
+def test_eom_gc_heading_phrase_in_body_is_eom_not_heading() -> None:
+    """강조사항 본문에 계속기업관련중요한불확실성 문구가 있어도 heading이 아닌 eom."""
+    result = extract_going_concern(
+        _html(
+            "감사의견",
+            "적정입니다.",
+            "강조사항",
+            "계속기업 관련 중요한 불확실성에 대해 주석 XX에 기술되어 있습니다. "
+            "계속기업으로서의 존속능력에 유의적 의문을 제기할 만한 중요한 불확실성이 존재함을 나타냅니다.",
+            "경영진의 책임",
+            _RESP,
+        )
+    )
+    assert result.going_concern == 1
+    assert result.source == "eom"
+
+
+def test_other_matter_qualified_grounds_prior_year_is_zero() -> None:
+    """기타사항에 한정의견근거·MU 전기 인용이 있어도 grounds로 잡히지 않는다."""
+    result = extract_going_concern(
+        _html(
+            "감사의견",
+            "적정입니다.",
+            "기타사항",
+            "전기 감사보고서의 한정의견 근거에는 "
+            "계속기업으로서의 존속능력에 유의적 의문을 제기할 수 있는 중요한 불확실성의 존재가 기술되어 있습니다.",
+            "재무제표에 대한 경영진과 지배기구의 책임",
+            _RESP,
+        )
+    )
+    assert result.going_concern == 0
