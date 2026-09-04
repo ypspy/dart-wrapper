@@ -1,0 +1,19 @@
+---
+description: DART Pipeline 공통 규칙 (언어, 스택, Extractor/Lazy Retrieval)
+alwaysApply: true
+---
+
+# DART Pipeline Agent Rules
+
+## Communication & Language
+- 모든 코드 주석, Docstring, 설명, 로그 메시지는 한국어로 작성합니다.
+- 예외 처리 구문 및 사용자 응답 메시지는 친절한 한국어로 제공합니다.
+
+## Tech Stack & Architecture
+- Framework: FastAPI, Pydantic v2, httpx (Async HTTP Client), BeautifulSoup4, pandas
+- Extractor Constraints:
+  - OpenDART API 대신 DART 상세검색 및 상세페이지 HTML 스크래핑 방식을 사용합니다.
+  - 공시 문서 컨테이너를 스캔하여 구성 문서/섹션을 leaf 단계까지 분해(flatten)한 뒤, 목록 features와 결합한 flat entry 구조로 추출합니다.
+- Lazy Retrieval Architecture: DB에는 메타데이터만 저장하고, 본문 텍스트 및 표 데이터는 Serve 시점에 viewer_url을 통해 동적 파싱합니다.
+- DART 원문 수집 시 한국어 인코딩(EUC-KR / UTF-8) 자동 처리 로직을 필수 적용합니다.
+- 모든 비동기 함수는 async/await 방식을 준수하며, 명확한 Type Hinting을 제공합니다.
