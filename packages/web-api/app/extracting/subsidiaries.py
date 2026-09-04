@@ -31,10 +31,10 @@ def notes_tail(html: str) -> str:
     return html.split(_NOTES_MARKER, 1)[1]
 
 
-def _heading_before(table: Tag) -> str:
-    """표 바로 앞의 제목 성격 요소에서 텍스트를 읽는다."""
+def _heading_from_previous_siblings(element: Tag) -> str:
+    """요소 앞 형제에서 표 경계 전의 제목 텍스트를 읽는다."""
     heading_tags = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "span", "div"}
-    for sibling in table.previous_siblings:
+    for sibling in element.previous_siblings:
         if not isinstance(sibling, Tag):
             continue
         if sibling.name == "table":
@@ -43,6 +43,30 @@ def _heading_before(table: Tag) -> str:
             heading = compact(sibling.get_text(" ", strip=True))
             if heading:
                 return heading
+    return ""
+
+
+def _heading_before(table: Tag) -> str:
+    """caption·형제·첫 행·부모 형제에서 표 제목을 읽는다."""
+    caption = table.find("caption", recursive=False)
+    if caption is not None:
+        heading = compact(caption.get_text(" ", strip=True))
+        if heading:
+            return heading
+
+    heading = _heading_from_previous_siblings(table)
+    if heading:
+        return heading
+
+    first_row = table.find("tr")
+    if first_row is not None:
+        heading = compact(first_row.get_text(" ", strip=True))
+        if _is_notes_heading(heading):
+            return heading
+
+    parent = table.parent
+    if isinstance(parent, Tag):
+        return _heading_from_previous_siblings(parent)
     return ""
 
 
@@ -61,11 +85,16 @@ def _header_row_index(matrix: list[list[str]]) -> int:
     return 0
 
 
-def _kind_column(header: list[str]) -> int | None:
-    """구분·관계·기업구분 열의 위치를 반환한다."""
+def _kind_column(header: list[str], body: list[list[str]]) -> int | None:
+    """본문 값이 분류형인 구분·관계·기업구분 열의 위치를 반환한다."""
     for index, cell in enumerate(header):
         token = compact(cell)
-        if any(name in token for name in _KIND_HEADERS):
+        if any(name in token for name in _KIND_HEADERS) and any(
+            not _is_skip_row(row)
+            and index < len(row)
+            and _is_taxonomic_kind(row[index])
+            for row in body
+        ):
             return index
     return None
 
@@ -88,6 +117,12 @@ def _is_subsidiary_kind(cell: str) -> bool:
     return "종속" in token and "관계" not in token and "공동" not in token
 
 
+def _is_taxonomic_kind(cell: str) -> bool:
+    """종속·관계·공동 분류값인지 판별한다."""
+    token = compact(cell)
+    return any(marker in token for marker in ("종속", "관계", "공동"))
+
+
 def _count_table(table: Tag, *, require_kind: bool) -> int | None:
     """표를 한 번 펼쳐 종속기업 행 수를 센다."""
     matrix = expand_table_matrix(table)
@@ -95,13 +130,14 @@ def _count_table(table: Tag, *, require_kind: bool) -> int | None:
         return None
 
     header_index = _header_row_index(matrix)
-    kind_index = _kind_column(matrix[header_index])
+    body = matrix[header_index + 1 :]
+    kind_index = _kind_column(matrix[header_index], body)
     if require_kind and kind_index is None:
         return None
 
     body_rows = 0
     count = 0
-    for row in matrix[header_index + 1 :]:
+    for row in body:
         if _is_skip_row(row):
             continue
         body_rows += 1

@@ -600,21 +600,24 @@ class ExtractionService:
                         html_by_role["fs_parent_entry_id"] = html
 
         # 주석 leaf는 403/429·캡차여도 문서 전체를 blocked로 만들지 않는다.
-        if leaves.notes_entry_id:
+        if not blocked and leaves.notes_entry_id:
             notes_entry = by_id.get(leaves.notes_entry_id)
             if notes_entry is not None and notes_entry.viewer_url:
                 try:
                     html = await self._http.fetch_html(notes_entry.viewer_url)
-                except SourceFetchError:
-                    pass
+                except SourceFetchError as exc:
+                    logger.warning("연결 주석 HTML을 가져오지 못했습니다: %s", exc)
                 else:
-                    if not html_looks_blocked(html):
+                    if html_looks_blocked(html):
+                        logger.warning("연결 주석 HTML이 차단 응답으로 보입니다.")
+                    else:
                         html_by_role["notes_entry_id"] = html
 
         fs_scope_guess = fs_scope_for(sample.report_type or "", sample.document_name)
         # 연결 주석 fallback용 부모 fetch는 403/429·캡차여도 문서 blocked로 올리지 않는다.
         if (
-            fs_scope_guess == "consolidated"
+            not blocked
+            and fs_scope_guess == "consolidated"
             and not leaves.notes_entry_id
             and leaves.fs_parent_entry_id
             and "fs_parent_entry_id" not in html_by_role
@@ -623,10 +626,12 @@ class ExtractionService:
             if parent is not None and parent.viewer_url:
                 try:
                     html = await self._http.fetch_html(parent.viewer_url)
-                except SourceFetchError:
-                    pass
+                except SourceFetchError as exc:
+                    logger.warning("연결 부모 주석 HTML을 가져오지 못했습니다: %s", exc)
                 else:
-                    if not html_looks_blocked(html):
+                    if html_looks_blocked(html):
+                        logger.warning("연결 부모 주석 HTML이 차단 응답으로 보입니다.")
+                    else:
                         html_by_role["fs_parent_entry_id"] = html
 
         notes_html = html_by_role.get("notes_entry_id")
@@ -646,15 +651,17 @@ class ExtractionService:
             except Exception:
                 logger.exception("종속기업 수 미리보기에 실패했습니다.")
                 need_a001 = bool(leaves.a001_affiliate_entry_id)
-        if need_a001:
+        if need_a001 and not blocked:
             aff = by_id.get(leaves.a001_affiliate_entry_id or "")
             if aff is not None and aff.viewer_url:
                 try:
                     html = await self._http.fetch_html(aff.viewer_url)
-                except SourceFetchError:
-                    pass
+                except SourceFetchError as exc:
+                    logger.warning("A001 계열회사 HTML을 가져오지 못했습니다: %s", exc)
                 else:
-                    if not html_looks_blocked(html):
+                    if html_looks_blocked(html):
+                        logger.warning("A001 계열회사 HTML이 차단 응답으로 보입니다.")
+                    else:
                         html_by_role["a001_affiliate_entry_id"] = html
 
         if blocked:

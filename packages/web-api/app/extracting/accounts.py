@@ -140,7 +140,8 @@ def _account_of(label: str) -> str | None:
         if "부채와자본총계" in token or "부채및자본총계" in token:
             return None
         return "total_equity"
-    if "부채총계" in token:
+    if "부채총계" in token and "유동부채" not in token:
+        # 결합 총계는 앞의 자본총계 분기에서 제외되지만 방어적으로 유지한다.
         if "부채와자본총계" in token or "부채및자본총계" in token:
             return None
         return "total_liability"

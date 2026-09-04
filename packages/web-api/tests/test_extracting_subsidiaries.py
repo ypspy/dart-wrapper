@@ -47,6 +47,57 @@ def test_kind_column_counts_subsidiary_only() -> None:
     assert result.count == 1
 
 
+def test_notes_non_taxonomic_kind_column_counts_all_companies() -> None:
+    """구분 값이 국내·해외이면 분류 열이 아니므로 회사 행을 모두 센다."""
+    html = """
+    <html><body>
+    <p>종속기업</p>
+    <table>
+    <tr><td>회사명</td><td>구분</td></tr>
+    <tr><td>갑</td><td>국내</td></tr>
+    <tr><td>을</td><td>해외</td></tr>
+    </table>
+    </body></html>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 2
+
+
+def test_notes_uses_later_taxonomic_kind_column() -> None:
+    """일반 구분 열 뒤의 관계 열에 분류값이 있으면 그 열로 종속기업을 센다."""
+    html = """
+    <html><body>
+    <p>종속기업</p>
+    <table>
+    <tr><td>회사명</td><td>구분</td><td>관계</td></tr>
+    <tr><td>갑</td><td>국내</td><td>종속기업</td></tr>
+    <tr><td>을</td><td>해외</td><td>관계기업</td></tr>
+    </table>
+    </body></html>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 1
+
+
+def test_notes_taxonomic_kind_column_with_only_related_companies_is_zero() -> None:
+    """분류 열이 모두 관계기업이면 종속기업 수는 0이다."""
+    html = """
+    <html><body>
+    <p>종속기업 및 관계기업</p>
+    <table>
+    <tr><td>회사명</td><td>구분</td></tr>
+    <tr><td>갑</td><td>관계기업</td></tr>
+    <tr><td>을</td><td>관계기업</td></tr>
+    </table>
+    </body></html>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 0
+
+
 def test_related_party_title_without_kind_is_not_found() -> None:
     html = """
     <html><body>
@@ -142,6 +193,50 @@ def test_notes_uses_first_matching_heading_table() -> None:
     assert result.status == "ok"
     assert result.count == 1
     assert result.source == "notes"
+
+
+def test_notes_caption_qualifies_table() -> None:
+    """caption의 종속기업 제목으로 주석 표를 찾는다."""
+    html = """
+    <table>
+    <caption>종속기업</caption>
+    <tr><td>회사명</td></tr>
+    <tr><td>갑</td></tr>
+    </table>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 1
+
+
+def test_notes_parent_previous_sibling_qualifies_wrapped_table() -> None:
+    """부모 div 앞의 종속기업 제목으로 감싼 주석 표를 찾는다."""
+    html = """
+    <p>종속기업</p>
+    <div>
+    <table>
+    <tr><td>회사명</td></tr>
+    <tr><td>갑</td></tr>
+    </table>
+    </div>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 1
+
+
+def test_notes_merged_first_row_qualifies_table() -> None:
+    """병합된 첫 행의 종속기업 제목으로 주석 표를 찾는다."""
+    html = """
+    <table>
+    <tr><td colspan="2">종속기업</td></tr>
+    <tr><td>회사명</td><td>소재지</td></tr>
+    <tr><td>갑</td><td>한국</td></tr>
+    </table>
+    """
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html=html, a001_html=None)
+    assert result.status == "ok"
+    assert result.count == 1
 
 
 def test_notes_tail_is_inverse_of_cut_notes() -> None:

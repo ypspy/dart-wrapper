@@ -568,3 +568,40 @@ def test_liability_and_equity_total_is_not_total_liability() -> None:
     item = _by_account_period(rows, "total_liability", "current")
     assert item["status"] == "not_found"
     assert item["value"] is None
+
+
+def test_liability_totals_map_current_and_total_rows_separately() -> None:
+    """유동부채총계는 유동부채로, 실제 부채총계는 부채총계로 추출한다."""
+    html = """
+    <html><body>
+    <p>재무상태표</p>
+    <table>
+    <tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+    <tr><td>유동부채총계</td><td>100</td><td>90</td></tr>
+    <tr><td>비유동부채총계</td><td>200</td><td>180</td></tr>
+    <tr><td>부채총계</td><td>300</td><td>270</td></tr>
+    </table>
+    </body></html>
+    """
+    rows, status = extract_accounts(bs_html=html, is_html=None)
+    assert status == "ok"
+    assert _by_account_period(rows, "current_liability", "current")["value"] == 100
+    assert _by_account_period(rows, "total_liability", "current")["value"] == 300
+
+
+def test_noncurrent_liability_total_is_not_total_liability() -> None:
+    """비유동부채총계만 있으면 total_liability는 not_found다."""
+    html = """
+    <html><body>
+    <p>재무상태표</p>
+    <table>
+    <tr><td>과 목</td><td>당기</td><td>전기</td></tr>
+    <tr><td>비유동부채총계</td><td>200</td><td>180</td></tr>
+    </table>
+    </body></html>
+    """
+    rows, status = extract_accounts(bs_html=html, is_html=None)
+    assert status == "ok"
+    item = _by_account_period(rows, "total_liability", "current")
+    assert item["status"] == "not_found"
+    assert item["value"] is None

@@ -26,6 +26,7 @@ FS_PARENT_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=fsparent"
 ICFR_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=icfr"
 NOTES_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=notes"
 A001_OPINION_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=opinion"
+A001_AFFILIATE_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=2&eleId=affiliate"
 
 _FS_HTML = """
 <html><body>
@@ -110,6 +111,17 @@ NOTES_HTML = """
 </body></html>
 """
 
+A001_AFFILIATE_HTML = """
+<html><body>
+<p>계열회사의 현황</p>
+<table>
+<tr><td>회사명</td><td>관계</td></tr>
+<tr><td>갑주식회사</td><td>종속회사</td></tr>
+<tr><td>을주식회사</td><td>관계회사</td></tr>
+</table>
+</body></html>
+"""
+
 
 @pytest.fixture
 async def sessionmaker_fixture():
@@ -186,6 +198,19 @@ def _notes_leaf() -> EntryRecord:
         section_name="주석",
         path=["주석"],
         viewer_url=NOTES_URL,
+    )
+
+
+def _a001_affiliate_leaf() -> EntryRecord:
+    return _entry(
+        entry_id="e-a001-affiliate",
+        report_type="A001",
+        source="body",
+        dcm_no="22222",
+        document_name="사업보고서",
+        section_name="계열회사의 현황",
+        path=["계열회사의 현황"],
+        viewer_url=A001_AFFILIATE_URL,
     )
 
 
@@ -916,6 +941,112 @@ async def test_extract_job_counts_notes_subsidiaries(sessionmaker_fixture) -> No
     assert fact.subsidiary_count == 2
     assert fact.subsidiary_source == "notes"
     assert fact.notes_entry_id == "e-notes"
+
+
+async def test_extract_job_falls_back_to_a001_affiliate(sessionmaker_fixture) -> None:
+    """주석 표를 못 찾으면 같은 접수의 A001 계열회사 표를 사용한다."""
+    notes_without_heading = """
+    <table>
+    <tr><td>회사명</td><td>소재지</td></tr>
+    <tr><td>갑주식회사</td><td>한국</td></tr>
+    </table>
+    """
+    await _seed_entries(
+        sessionmaker_fixture,
+        [*_f002_leaves(), _notes_leaf(), _a001_affiliate_leaf()],
+    )
+    service, client = _service(
+        sessionmaker_fixture,
+        {
+            COVER_URL: (200, COVER_HTML),
+            OPINION_URL: (200, OPINION_HTML),
+            NOTES_URL: (200, notes_without_heading),
+            A001_AFFILIATE_URL: (200, A001_AFFILIATE_HTML),
+        },
+    )
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.subsidiary_status == "ok"
+    assert fact.subsidiary_count == 1
+    assert fact.subsidiary_source == "a001"
+    assert fact.a001_affiliate_entry_id == "e-a001-affiliate"
+
+
+async def test_successful_notes_does_not_fetch_a001_affiliate(
+    sessionmaker_fixture,
+) -> None:
+    """주석 파싱이 성공하면 A001 계열회사 URL을 요청하지 않는다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [*_f002_leaves(), _notes_leaf(), _a001_affiliate_leaf()],
+    )
+    calls: list[str] = []
+    mapping = {
+        COVER_URL: (200, COVER_HTML),
+        OPINION_URL: (200, OPINION_HTML),
+        NOTES_URL: (200, NOTES_HTML),
+        A001_AFFILIATE_URL: (200, A001_AFFILIATE_HTML),
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        status, body = mapping.get(str(request.url), (404, "없음"))
+        return httpx.Response(status, text=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        http = DartHttpClient(client, max_retries=0, retry_backoff_seconds=0.0)
+        service = ExtractionService(sessionmaker_fixture, http)
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.subsidiary_source == "notes"
+    assert A001_AFFILIATE_URL not in calls
+
+
+async def test_blocked_required_leaf_skips_notes_and_a001(
+    sessionmaker_fixture,
+) -> None:
+    """필수 leaf가 blocked이면 주석과 A001 추가 요청을 건너뛴다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [*_f002_leaves(), _notes_leaf(), _a001_affiliate_leaf()],
+    )
+    calls: list[str] = []
+    mapping = {
+        COVER_URL: (403, "forbidden"),
+        OPINION_URL: (200, OPINION_HTML),
+        NOTES_URL: (200, NOTES_HTML),
+        A001_AFFILIATE_URL: (200, A001_AFFILIATE_HTML),
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        status, body = mapping.get(str(request.url), (404, "없음"))
+        return httpx.Response(status, text=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        http = DartHttpClient(client, max_retries=0, retry_backoff_seconds=0.0)
+        service = ExtractionService(sessionmaker_fixture, http)
+        job_id = await service.start("20200301", "20200331", ["F002"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+
+    assert fact is not None
+    assert fact.fetch_status == "blocked"
+    assert NOTES_URL not in calls
+    assert A001_AFFILIATE_URL not in calls
 
 
 async def test_notes_fetch_failure_sets_not_found_without_failing_job(
