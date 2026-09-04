@@ -92,6 +92,16 @@ class AuditReportFact(Base):
     icfr_opinion_code: Mapped[str | None] = mapped_column(String(32))
     icfr_status: Mapped[str | None] = mapped_column(String(32))
 
+    going_concern: Mapped[int | None] = mapped_column()
+    going_concern_status: Mapped[str | None] = mapped_column(String(32))
+    going_concern_raw: Mapped[str | None] = mapped_column(Text)
+    going_concern_source: Mapped[str | None] = mapped_column(String(32))
+    subsidiary_count: Mapped[int | None] = mapped_column()
+    subsidiary_status: Mapped[str | None] = mapped_column(String(32))
+    subsidiary_source: Mapped[str | None] = mapped_column(String(32))
+    notes_entry_id: Mapped[str | None] = mapped_column(String(128))
+    a001_affiliate_entry_id: Mapped[str | None] = mapped_column(String(128))
+
     fetch_status: Mapped[str] = mapped_column(String(32), nullable=False)
     conflicts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

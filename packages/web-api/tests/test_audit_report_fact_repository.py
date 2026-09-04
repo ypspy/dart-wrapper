@@ -73,6 +73,15 @@ SPEC_FACT_COLUMNS = (
     "icfr_opinion_raw",
     "icfr_opinion_code",
     "icfr_status",
+    "going_concern",
+    "going_concern_status",
+    "going_concern_raw",
+    "going_concern_source",
+    "subsidiary_count",
+    "subsidiary_status",
+    "subsidiary_source",
+    "notes_entry_id",
+    "a001_affiliate_entry_id",
 )
 
 
@@ -144,7 +153,7 @@ def _make_fact(**overrides: object) -> AuditReportFact:
 
 def test_extractor_version_constant() -> None:
     """추출기 버전 상수는 계획에 적힌 값을 쓴다."""
-    assert EXTRACTOR_VERSION == "audit_opinion.v15"
+    assert EXTRACTOR_VERSION == "audit_opinion.v16"
 
 
 def test_audit_report_fact_has_all_spec_columns() -> None:

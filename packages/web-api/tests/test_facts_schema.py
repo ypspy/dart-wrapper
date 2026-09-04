@@ -115,4 +115,13 @@ def test_fact_list_item_json_schema_exposes_fields() -> None:
     assert "corp_name" in properties
     assert "rcept_no" in properties
     assert "source_report_type" in properties
+    assert "going_concern" in properties
+    assert "going_concern_status" in properties
+    assert "going_concern_raw" in properties
+    assert "going_concern_source" in properties
+    assert "subsidiary_count" in properties
+    assert "subsidiary_status" in properties
+    assert "subsidiary_source" in properties
+    assert "notes_entry_id" in properties
+    assert "a001_affiliate_entry_id" in properties
     assert list(properties)[:4] == ["corp_name", "year_end", "rcept_dt", "correction_type"]

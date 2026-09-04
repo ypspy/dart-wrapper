@@ -203,7 +203,7 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.fetch_status == "ok"
     assert fact.opinion_code == "unqualified"
     assert fact.opinion_status == "ok"
-    assert fact.extractor_version == "audit_opinion.v15"
+    assert fact.extractor_version == "audit_opinion.v16"
     assert fact.hours_status == "skipped"
     assert fact.activities_status == "skipped"
     assert fact.communications_status == "skipped"
@@ -944,7 +944,7 @@ async def test_extract_refetches_when_extractor_version_differs(
 
     assert fact is not None
     assert fact.opinion_code == "unqualified"
-    assert fact.extractor_version == "audit_opinion.v15"
+    assert fact.extractor_version == "audit_opinion.v16"
 
 
 async def test_reparse_refetches_when_field_is_not_found(

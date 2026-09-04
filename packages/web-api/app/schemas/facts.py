@@ -83,6 +83,16 @@ class AuditReportFactItem(BaseModel):
     icfr_opinion_code: str | None = None
     icfr_status: str | None = None
 
+    going_concern: int | None = None
+    going_concern_status: str | None = None
+    going_concern_raw: str | None = None
+    going_concern_source: str | None = None
+    subsidiary_count: int | None = None
+    subsidiary_status: str | None = None
+    subsidiary_source: str | None = None
+    notes_entry_id: str | None = None
+    a001_affiliate_entry_id: str | None = None
+
     fetch_status: str
     conflicts: list[Any] = Field(default_factory=list)
     extracted_at: datetime

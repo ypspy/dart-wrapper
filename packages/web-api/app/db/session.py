@@ -135,6 +135,60 @@ _COLUMN_PATCHES: tuple[tuple[str, str, str, str], ...] = (
         "VARCHAR(32)",
         "VARCHAR(32)",
     ),
+    (
+        "audit_report_facts",
+        "going_concern",
+        "INTEGER",
+        "INTEGER",
+    ),
+    (
+        "audit_report_facts",
+        "going_concern_status",
+        "VARCHAR(32)",
+        "VARCHAR(32)",
+    ),
+    (
+        "audit_report_facts",
+        "going_concern_raw",
+        "TEXT",
+        "TEXT",
+    ),
+    (
+        "audit_report_facts",
+        "going_concern_source",
+        "VARCHAR(32)",
+        "VARCHAR(32)",
+    ),
+    (
+        "audit_report_facts",
+        "subsidiary_count",
+        "INTEGER",
+        "INTEGER",
+    ),
+    (
+        "audit_report_facts",
+        "subsidiary_status",
+        "VARCHAR(32)",
+        "VARCHAR(32)",
+    ),
+    (
+        "audit_report_facts",
+        "subsidiary_source",
+        "VARCHAR(32)",
+        "VARCHAR(32)",
+    ),
+    (
+        "audit_report_facts",
+        "notes_entry_id",
+        "VARCHAR(128)",
+        "VARCHAR(128)",
+    ),
+    (
+        "audit_report_facts",
+        "a001_affiliate_entry_id",
+        "VARCHAR(128)",
+        "VARCHAR(128)",
+    ),
 )
 
 
