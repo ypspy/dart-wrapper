@@ -45,6 +45,8 @@ def test_select_leaves_f001() -> None:
     assert leaves.activity_entry_id == "a"
     assert leaves.icfr_entry_id == "x"
     assert leaves.a001_opinion_entry_id is None
+    assert leaves.notes_entry_id is None
+    assert leaves.a001_affiliate_entry_id is None
 
 
 def test_select_leaves_separate_ignores_consolidated_icfr() -> None:
@@ -225,6 +227,47 @@ def test_select_leaves_excludes_bs_notes_section() -> None:
     assert leaves.bs_entry_id is None
     assert leaves.is_entry_id is None
     assert leaves.fs_parent_entry_id == "p"
+
+
+def test_select_leaves_consolidated_picks_exact_notes() -> None:
+    """연결 문서의 정확 주석 leaf만 고르고 본표 주석은 제외한다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F002", "body", "연결감사보고서", "감사보고서"),
+        SelectorEntry("n", "r", "d", "F002", "body", "연결감사보고서", "주석"),
+        SelectorEntry(
+            "bsn", "r", "d", "F002", "body", "연결감사보고서", "재무상태표에 대한 주석"
+        ),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.notes_entry_id == "n"
+
+
+def test_select_leaves_separate_skips_notes() -> None:
+    """별도 문서는 주석 leaf를 고르지 않는다."""
+    rows = [
+        SelectorEntry("c", "r", "d", "F001", "body", "감사보고서", "감사보고서"),
+        SelectorEntry("n", "r", "d", "F001", "body", "감사보고서", "주석"),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.notes_entry_id is None
+
+
+def test_select_leaves_a001_affiliate_prefers_status_section() -> None:
+    """계열회사 현황이 부모보다 앞이고 타법인출자는 제외한다."""
+    rows = [
+        SelectorEntry("c", "r", "d1", "A001", "attachment", "연결감사보고서", "감사보고서"),
+        SelectorEntry(
+            "parent", "r", "d2", "A001", "body", "사업보고서", "IX. 계열회사 등에 관한 사항"
+        ),
+        SelectorEntry(
+            "status", "r", "d2", "A001", "body", "사업보고서", "1. 계열회사의 현황"
+        ),
+        SelectorEntry(
+            "inv", "r", "d2", "A001", "body", "사업보고서", "타법인출자 현황"
+        ),
+    ]
+    leaves = select_leaves(rows)
+    assert leaves.a001_affiliate_entry_id == "status"
 
 
 def test_select_leaves_ci_only_sets_is_entry_id() -> None:

@@ -42,6 +42,8 @@ class LeafIds:
     is_entry_id: str | None
     fs_parent_entry_id: str | None
     icfr_entry_id: str | None
+    notes_entry_id: str | None
+    a001_affiliate_entry_id: str | None
 
 
 def is_audit_document(
@@ -161,6 +163,22 @@ def _is_fs_parent(entry: SelectorEntry) -> bool:
     return "첨부" in token and "재무제표" in token and "주석" not in token
 
 
+def _is_a001_affiliate_leaf(entry: SelectorEntry) -> bool:
+    if entry.report_type != "A001" or entry.source != "body":
+        return False
+    token = compact(entry.section_name)
+    if "타법인출자" in token:
+        return False
+    return "계열회사" in token
+
+
+def _a001_affiliate_priority(entry: SelectorEntry) -> int:
+    token = compact(entry.section_name)
+    if "계열회사현황" in token or "계열회사의현황" in token:
+        return 0
+    return 1
+
+
 def _is_icfr_section(entry: SelectorEntry, fs_scope: str) -> bool:
     """같은 dcm의 내부회계 leaf인지 본다. 주석은 제외한다."""
     token = compact(entry.section_name)
@@ -258,6 +276,20 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
         None,
     )
 
+    notes_entry_id = None
+    if icfr_scope == "consolidated":
+        notes_entry_id = next(
+            (entry.entry_id for entry in audit_entries if _is_notes_section(entry)),
+            None,
+        )
+
+    affiliate_candidates = [entry for entry in entries if _is_a001_affiliate_leaf(entry)]
+    a001_affiliate_entry_id = (
+        min(affiliate_candidates, key=_a001_affiliate_priority).entry_id
+        if affiliate_candidates
+        else None
+    )
+
     return LeafIds(
         cover_entry_id=cover_entry_id,
         opinion_entry_id=opinion_entry_id,
@@ -268,4 +300,6 @@ def select_leaves(entries: list[SelectorEntry]) -> LeafIds:
         is_entry_id=is_entry_id,
         fs_parent_entry_id=fs_parent_entry_id,
         icfr_entry_id=icfr_entry_id,
+        notes_entry_id=notes_entry_id,
+        a001_affiliate_entry_id=a001_affiliate_entry_id,
     )
