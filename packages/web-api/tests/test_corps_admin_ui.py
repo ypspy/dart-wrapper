@@ -17,6 +17,7 @@ from app.api.deps import (
 from app.config import Settings
 from app.main import create_app
 from app.models.extraction_job import ExtractionJob, ExtractionJobLog
+from app.errors import CatalogConflict
 from app.services.corp_industry_service import CorpIndustrySummary
 from tests.test_admin_ui import FakeCatalogService, FakeSliceQueryService
 
@@ -80,6 +81,15 @@ class FakeCorpIndustryService:
         self.finished.append(job_id)
 
 
+class ConflictCorpIndustryService(FakeCorpIndustryService):
+    """start()가 CatalogConflict를 내는 회사 업종 서비스 대역."""
+
+    async def start(self) -> str:
+        """이미 진행 중인 작업 충돌을 시뮬레이션한다."""
+        self.started += 1
+        raise CatalogConflict("회사 업종 작업이 이미 진행 중입니다.")
+
+
 def _app(
     corps: FakeCorpIndustryService,
     *,
@@ -137,6 +147,20 @@ async def test_corps_panel_disables_start_without_opendart_key(
     assert start.status_code == 303
     assert start.headers["location"].endswith("/admin")
     assert corps.started == 0
+
+
+async def test_start_corps_conflict_redirects_to_admin(
+    client_factory: ClientFactory,
+) -> None:
+    """시작 충돌 시에도 HTML 폼은 JSON 오류 대신 대시보드로 돌아간다."""
+    corps = ConflictCorpIndustryService()
+    async with client_factory(_app(corps)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post("/admin/corps/start")
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/admin")
+    assert corps.executed == []
 
 
 async def test_start_corps_job_redirects_to_admin(

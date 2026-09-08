@@ -21,7 +21,7 @@ from app.api.deps import (
     get_slice_query_service,
 )
 from app.config import Settings
-from app.errors import CatalogConflict, CatalogNotFound
+from app.errors import BadRequest, CatalogConflict, CatalogNotFound
 from app.report_types import report_type_label, report_type_options
 from app.schemas.catalog import (
     ExtractRequest,
@@ -271,7 +271,10 @@ async def start_corps(
     if not settings.opendart_api_key.strip():
         return RedirectResponse("/admin", status_code=303)
 
-    job_id = await service.start()
+    try:
+        job_id = await service.start()
+    except (CatalogConflict, BadRequest):
+        return RedirectResponse("/admin", status_code=303)
     background_tasks.add_task(service.run_job, job_id)
     return RedirectResponse("/admin", status_code=303)
 
