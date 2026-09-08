@@ -1,0 +1,91 @@
+"""OpenDART company.json 클라이언트 테스트. 실호출 없음."""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from app.adapters.opendart_company import (
+    COMPANY_URL,
+    OpenDartCompanyClient,
+    OpenDartHttpError,
+)
+
+
+def _client(handler: object, max_retries: int = 0) -> OpenDartCompanyClient:
+    transport = httpx.MockTransport(handler)
+    return OpenDartCompanyClient(
+        httpx.AsyncClient(transport=transport),
+        timeout_seconds=1.0,
+        max_retries=max_retries,
+    )
+
+
+async def test_fetch_maps_flat_000() -> None:
+    """최상위 status=000과 개황 필드를 매핑한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).startswith(COMPANY_URL)
+        assert request.url.params["crtfc_key"] == "key"
+        assert request.url.params["corp_code"] == "00126380"
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "message": "정상",
+                "corp_name": "삼성전자",
+                "stock_name": "삼성전자",
+                "stock_code": "005930",
+                "corp_cls": "Y",
+                "bizr_no": "1248100998",
+                "acc_mt": "12",
+                "induty_code": "264",
+            },
+        )
+
+    overview = await _client(handler).fetch("00126380", "key")
+    assert overview.status == "000"
+    assert overview.corp_name == "삼성전자"
+    assert overview.stock_code == "005930"
+    assert overview.induty_code == "264"
+
+
+async def test_fetch_reads_status_under_result() -> None:
+    """result.status도 읽는다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"result": {"status": "013", "message": "조회된 데이타가 없습니다."}},
+        )
+
+    overview = await _client(handler).fetch("00000000", "key")
+    assert overview.status == "013"
+    assert overview.induty_code is None
+
+
+async def test_fetch_blank_stock_code_becomes_none() -> None:
+    """비상장 빈 종목코드는 None이다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"status": "000", "message": "정상", "stock_code": "  ", "induty_code": ""},
+        )
+
+    overview = await _client(handler).fetch("001", "key")
+    assert overview.stock_code is None
+    assert overview.induty_code is None
+
+
+async def test_fetch_retries_then_raises() -> None:
+    """HTTP 오류는 재시도 후 OpenDartHttpError."""
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(500, text="err")
+
+    with pytest.raises(OpenDartHttpError):
+        await _client(handler, max_retries=1).fetch("00126380", "key")
+    assert attempts["n"] == 2
