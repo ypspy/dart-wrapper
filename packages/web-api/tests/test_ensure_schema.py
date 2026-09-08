@@ -100,3 +100,29 @@ async def test_ensure_schema_adds_hours_to_legacy_audit_report_facts() -> None:
     assert "notes_entry_id" in columns
     assert "a001_affiliate_entry_id" in columns
     await engine.dispose()
+
+
+async def test_ensure_schema_creates_corps_table() -> None:
+    """빈 DB를 열면 corps 테이블이 생긴다."""
+    engine = create_db_engine("sqlite+aiosqlite:///:memory:")
+    await ensure_schema(engine)
+    async with engine.begin() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'corps'"
+                )
+            )
+        ).first()
+        columns = {
+            row[1]
+            for row in (await connection.execute(text("PRAGMA table_info(corps)"))).fetchall()
+        }
+    await engine.dispose()
+    assert rows is not None
+    assert "corp_code" in columns
+    assert "induty_code" in columns
+    assert "induty_name_div" in columns
+    assert "fetch_status" in columns
+    assert "opendart_status" in columns
+    assert "fetched_at" in columns

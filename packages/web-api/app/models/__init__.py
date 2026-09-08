@@ -3,6 +3,7 @@
 from app.models.audit_report_fact import AuditReportFact
 from app.models.base import Base
 from app.models.catalog_job import CatalogJob, CatalogJobLog
+from app.models.corp import Corp
 from app.models.disclosure import Disclosure
 from app.models.entry import Entry
 from app.models.extraction_job import ExtractionJob, ExtractionJobLog
@@ -13,6 +14,7 @@ __all__ = [
     "Base",
     "CatalogJob",
     "CatalogJobLog",
+    "Corp",
     "Disclosure",
     "DisclosureAttempt",
     "Entry",
