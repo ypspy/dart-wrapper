@@ -87,46 +87,48 @@ class CorpIndustryService:
         self._api_key = api_key
         self._concurrency = max(1, concurrency)
         self._stop_requested: set[str] = set()
+        self._start_lock = asyncio.Lock()
 
     async def start(self) -> str:
         """동일 추출기의 활성 잡만 확인하고 새 잡을 등록한다."""
-        if not self._api_key.strip():
-            raise BadRequest(
-                "OpenDART 인증키가 없습니다. OPENDART_API_KEY를 설정한 뒤 다시 시작해 주세요."
-            )
+        async with self._start_lock:
+            if not self._api_key.strip():
+                raise BadRequest(
+                    "OpenDART 인증키가 없습니다. OPENDART_API_KEY를 설정한 뒤 다시 시작해 주세요."
+                )
 
-        async with self._sessionmaker() as session:
-            jobs = ExtractionJobRepository(session)
-            active = await jobs.find_any_active(extractor_id=CORP_INDUSTRY_EXTRACTOR_ID)
-            if active is not None:
-                if _is_stale_running(active):
-                    await jobs.set_status(
-                        active.job_id,
-                        "failed",
-                        error_message="작업이 오래 실행 중이라 중단된 것으로 보고 종료했습니다.",
-                    )
-                    await jobs.add_log(
-                        active.job_id,
-                        "warning",
-                        "오래된 회사 업종 작업을 종료하고 잠금을 해제했습니다.",
-                    )
-                else:
-                    raise CatalogConflict(
-                        "회사 업종 작업이 이미 진행 중입니다. "
-                        f"현재 작업({active.job_id[:8]} · {active.status})이 끝난 뒤에 "
-                        "다시 시작해 주세요."
-                    )
+            async with self._sessionmaker() as session:
+                jobs = ExtractionJobRepository(session)
+                active = await jobs.find_any_active(extractor_id=CORP_INDUSTRY_EXTRACTOR_ID)
+                if active is not None:
+                    if _is_stale_running(active):
+                        await jobs.set_status(
+                            active.job_id,
+                            "failed",
+                            error_message="작업이 오래 실행 중이라 중단된 것으로 보고 종료했습니다.",
+                        )
+                        await jobs.add_log(
+                            active.job_id,
+                            "warning",
+                            "오래된 회사 업종 작업을 종료하고 잠금을 해제했습니다.",
+                        )
+                    else:
+                        raise CatalogConflict(
+                            "회사 업종 작업이 이미 진행 중입니다. "
+                            f"현재 작업({active.job_id[:8]} · {active.status})이 끝난 뒤에 "
+                            "다시 시작해 주세요."
+                        )
 
-            job_id = uuid.uuid4().hex
-            await jobs.create(
-                job_id,
-                CORP_INDUSTRY_EXTRACTOR_ID,
-                {},
-                mode=FILL_MISSING_MODE,
-            )
-            await jobs.add_log(job_id, "info", "회사 업종 작업을 등록했습니다.")
-            await session.commit()
-        return job_id
+                job_id = uuid.uuid4().hex
+                await jobs.create(
+                    job_id,
+                    CORP_INDUSTRY_EXTRACTOR_ID,
+                    {},
+                    mode=FILL_MISSING_MODE,
+                )
+                await jobs.add_log(job_id, "info", "회사 업종 작업을 등록했습니다.")
+                await session.commit()
+            return job_id
 
     async def run_job(self, job_id: str) -> None:
         """누락 회사를 제한된 동시성으로 조회하고 회사별로 커밋한다."""

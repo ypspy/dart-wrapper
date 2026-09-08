@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import cast
@@ -102,6 +103,26 @@ async def test_start_rejects_duplicate_active_job(
         await session.commit()
     with pytest.raises(CatalogConflict, match="회사 업종"):
         await service.start()
+
+
+async def test_start_rejects_concurrent_calls(
+    sessionmaker_fixture: async_sessionmaker[AsyncSession],
+) -> None:
+    """동시 start() 호출 중 하나만 성공하고 나머지는 CatalogConflict."""
+    service = _svc(sessionmaker_fixture, FakeClient({}))
+    results = await asyncio.gather(
+        service.start(),
+        service.start(),
+        return_exceptions=True,
+    )
+    job_ids = [result for result in results if isinstance(result, str)]
+    conflicts = [result for result in results if isinstance(result, CatalogConflict)]
+    assert len(job_ids) == 1
+    assert len(conflicts) == 1
+    async with sessionmaker_fixture() as session:
+        job = await ExtractionJobRepository(session).find_latest(CORP_INDUSTRY_EXTRACTOR_ID)
+    assert job is not None
+    assert job.job_id == job_ids[0]
 
 
 async def test_start_ignores_catalog_and_audit_locks(
