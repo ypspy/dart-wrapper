@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.models.corp import Corp
@@ -16,7 +18,7 @@ from app.repositories.extraction_job_repository import ExtractionJobRepository
 
 
 @pytest.fixture
-async def sessionmaker_fixture():
+async def sessionmaker_fixture() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_db_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
     yield create_sessionmaker(engine)
@@ -36,7 +38,7 @@ def _disc(rcept_no: str, corp_code: str | None) -> Disclosure:
 
 
 async def test_list_distinct_corp_codes_skips_blank_and_dedupes(
-    sessionmaker_fixture,
+    sessionmaker_fixture: async_sessionmaker[AsyncSession],
 ) -> None:
     """NULL·빈 문자열을 빼고 고유번호만 모은다."""
     async with sessionmaker_fixture() as session:
@@ -54,7 +56,9 @@ async def test_list_distinct_corp_codes_skips_blank_and_dedupes(
     assert codes == ["00126380", "00401731"]
 
 
-async def test_list_ok_codes_and_upsert(sessionmaker_fixture) -> None:
+async def test_list_ok_codes_and_upsert(
+    sessionmaker_fixture: async_sessionmaker[AsyncSession],
+) -> None:
     """ok만 건너뛸 집합에 들어가고, 같은 PK는 덮어쓴다."""
     async with sessionmaker_fixture() as session:
         repos = CorpRepository(session)
@@ -87,7 +91,7 @@ async def test_list_ok_codes_and_upsert(sessionmaker_fixture) -> None:
 
 
 async def test_extraction_job_find_latest_and_update_params(
-    sessionmaker_fixture,
+    sessionmaker_fixture: async_sessionmaker[AsyncSession],
 ) -> None:
     """extractor별 최신 잡과 JSON params 갱신."""
     async with sessionmaker_fixture() as session:

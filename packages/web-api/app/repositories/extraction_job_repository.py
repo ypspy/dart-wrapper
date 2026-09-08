@@ -53,7 +53,10 @@ class ExtractionJobRepository:
         statement = (
             select(ExtractionJob)
             .where(ExtractionJob.extractor_id == extractor_id)
-            .order_by(ExtractionJob.created_at.desc())
+            .order_by(
+                ExtractionJob.created_at.desc(),
+                ExtractionJob.job_id.desc(),
+            )
             .limit(1)
         )
         result = await self._session.execute(statement)
