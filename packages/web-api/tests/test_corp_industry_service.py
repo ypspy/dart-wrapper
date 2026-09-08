@@ -55,6 +55,24 @@ class FakeClient:
         return item
 
 
+class FailingConcurrentClient:
+    """한 워커가 실패한 동안 다른 워커를 대기시키는 클라이언트."""
+
+    def __init__(self) -> None:
+        self.both_started = asyncio.Event()
+        self.failure_raised = asyncio.Event()
+        self.release_sibling = asyncio.Event()
+
+    async def fetch(self, corp_code: str, api_key: str) -> CompanyOverview:
+        if corp_code == "001":
+            await self.both_started.wait()
+            self.failure_raised.set()
+            raise RuntimeError("의도한 워커 실패")
+        self.both_started.set()
+        await self.release_sibling.wait()
+        return CompanyOverview(status="000", message="정상", induty_code="264")
+
+
 def _disc(rcept_no: str, corp_code: str) -> Disclosure:
     return Disclosure(
         rcept_no=rcept_no,
@@ -71,13 +89,14 @@ def _svc(
     sessionmaker: async_sessionmaker[AsyncSession],
     client: FakeClient,
     api_key: str = "key",
+    concurrency: int = 1,
 ) -> CorpIndustryService:
     return CorpIndustryService(
         sessionmaker,
         cast(OpenDartCompanyClient, client),
         KSIC,
         api_key=api_key,
-        concurrency=1,
+        concurrency=concurrency,
     )
 
 
@@ -218,6 +237,42 @@ async def test_run_stops_on_quota(
     assert "한도" in (job.error_message or "")
     assert one is not None and one.fetch_status == "ok"
     assert two is None
+
+
+async def test_run_waits_for_sibling_workers_before_marking_failed(
+    sessionmaker_fixture: async_sessionmaker[AsyncSession],
+) -> None:
+    """워커 예외가 나도 진행 중인 형제 워커 종료 전에는 잡을 실패 처리하지 않는다."""
+    async with sessionmaker_fixture() as session:
+        session.add_all([_disc("a", "001"), _disc("b", "002")])
+        await session.commit()
+    client = FailingConcurrentClient()
+    service = _svc(
+        sessionmaker_fixture,
+        cast(FakeClient, client),
+        concurrency=2,
+    )
+    job_id = await service.start()
+    task = asyncio.create_task(service.run_job(job_id))
+
+    await client.failure_raised.wait()
+    await asyncio.sleep(0.05)
+    done_before_release = task.done()
+    async with sessionmaker_fixture() as session:
+        job_before_release = await session.get(ExtractionJob, job_id)
+
+    client.release_sibling.set()
+    await task
+
+    assert not done_before_release
+    assert job_before_release is not None
+    assert job_before_release.status == "running"
+    async with sessionmaker_fixture() as session:
+        job = await session.get(ExtractionJob, job_id)
+        sibling = await session.get(Corp, "002")
+    assert job is not None
+    assert job.status == "failed"
+    assert sibling is not None
 
 
 async def test_run_http_error_continues(

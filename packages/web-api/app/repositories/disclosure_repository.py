@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.disclosure import Disclosure
@@ -38,6 +38,16 @@ class DisclosureRepository:
         )
         result = await self._session.execute(statement)
         return [row[0] for row in result.all() if row[0]]
+
+    async def count_distinct_corp_codes(self) -> int:
+        """공시에 나온 비어 있지 않은 고유번호 수를 SQL로 집계한다."""
+        statement = (
+            select(func.count(Disclosure.corp_code.distinct()))
+            .where(Disclosure.corp_code.is_not(None))
+            .where(Disclosure.corp_code != "")
+        )
+        result = await self._session.execute(statement)
+        return int(result.scalar_one())
 
     async def list_page(
         self,

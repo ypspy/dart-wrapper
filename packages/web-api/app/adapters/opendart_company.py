@@ -92,7 +92,13 @@ class OpenDartCompanyClient:
                 )
                 response.raise_for_status()
             except httpx.HTTPError as exc:
-                last_reason = str(exc)
+                if isinstance(exc, httpx.HTTPStatusError):
+                    last_reason = (
+                        f"HTTP {exc.response.status_code} "
+                        f"({exc.__class__.__name__})"
+                    )
+                else:
+                    last_reason = exc.__class__.__name__
                 if attempt >= self._max_retries:
                     break
                 await asyncio.sleep(self._retry_backoff_seconds * (2**attempt))

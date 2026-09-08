@@ -202,7 +202,7 @@ class CorpIndustryService:
                     level = "warning"
                 await save_result(corp, message, level)
 
-            async def worker() -> OpenDartFatalError | None:
+            async def worker() -> Exception | None:
                 while True:
                     async with claim_lock:
                         if fatal_event.is_set() or job_id in self._stop_requested or not queue:
@@ -213,12 +213,21 @@ class CorpIndustryService:
                     except OpenDartFatalError as exc:
                         fatal_event.set()
                         return exc
+                    except Exception as exc:
+                        fatal_event.set()
+                        return exc
 
             worker_count = min(self._concurrency, len(missing))
-            results = await asyncio.gather(*(worker() for _ in range(worker_count)))
-            fatal = next((result for result in results if result is not None), None)
-            if fatal is not None:
-                raise fatal
+            results = await asyncio.gather(
+                *(worker() for _ in range(worker_count)),
+                return_exceptions=True,
+            )
+            failure = next(
+                (result for result in results if isinstance(result, Exception)),
+                None,
+            )
+            if failure is not None:
+                raise failure
             if job_id in self._stop_requested:
                 await self._finish(
                     job_id,
@@ -284,7 +293,9 @@ class CorpIndustryService:
     async def summarize(self) -> CorpIndustrySummary:
         """공시 회사 수와 완료·잔여 수를 집계한다."""
         async with self._sessionmaker() as session:
-            disclosure_corps = len(await DisclosureRepository(session).list_distinct_corp_codes())
+            disclosure_corps = await DisclosureRepository(
+                session
+            ).count_distinct_corp_codes()
             ok_count = await CorpRepository(session).count_ok()
         return CorpIndustrySummary(
             disclosure_corps=disclosure_corps,

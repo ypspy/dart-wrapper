@@ -91,6 +91,20 @@ async def test_fetch_retries_then_raises() -> None:
     assert attempts["n"] == 2
 
 
+async def test_fetch_http_error_does_not_expose_api_key() -> None:
+    """HTTP 오류 메시지에 OpenDART 인증키를 포함하지 않는다."""
+    api_key = "secret-opendart-api-key"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="err")
+
+    with pytest.raises(OpenDartHttpError) as caught:
+        await _client(handler).fetch("00126380", api_key)
+
+    assert api_key not in str(caught.value)
+    assert "500" in str(caught.value)
+
+
 async def test_fetch_mixed_payload_top_status_result_induty_code() -> None:
     """status는 최상위, induty_code는 result에만 있을 때 둘 다 읽는다."""
 

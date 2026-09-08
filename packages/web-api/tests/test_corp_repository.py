@@ -56,6 +56,25 @@ async def test_list_distinct_corp_codes_skips_blank_and_dedupes(
     assert codes == ["00126380", "00401731"]
 
 
+async def test_count_distinct_corp_codes_skips_blank_and_dedupes(
+    sessionmaker_fixture: async_sessionmaker[AsyncSession],
+) -> None:
+    """NULL·빈 문자열을 제외한 고유 회사 수를 SQL로 집계한다."""
+    async with sessionmaker_fixture() as session:
+        session.add_all(
+            [
+                _disc("a", "00126380"),
+                _disc("b", "00126380"),
+                _disc("c", ""),
+                _disc("d", None),
+                _disc("e", "00401731"),
+            ]
+        )
+        await session.commit()
+        count = await DisclosureRepository(session).count_distinct_corp_codes()
+    assert count == 2
+
+
 async def test_list_ok_codes_and_upsert(
     sessionmaker_fixture: async_sessionmaker[AsyncSession],
 ) -> None:
