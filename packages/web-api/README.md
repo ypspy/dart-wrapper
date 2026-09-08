@@ -53,6 +53,11 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | POST | `/admin/extract/jobs/{job_id}/soft-stop` | 다음 접수 경계에서 추출 중단 |
 | POST | `/admin/extract/jobs/{job_id}/force-finish` | 멈춘 추출 잡 강제 종료(DART 잠금 해제) |
 | GET | `/admin/extract/audit-opinion/completeness` | 기간·유형별 추출 완전성 집계 |
+| POST | `/admin/corps/enrich` | 빠진 회사 OpenDART 개황 채우기 (202, `job_id`) |
+| GET | `/admin/corps/status?job_id=` | 회사 업종 잡 현황·로그 |
+| GET | `/admin/corps/summary` | 공시 distinct / ok / 남음 |
+| POST | `/admin/corps/jobs/{job_id}/soft-stop` | 다음 회사 경계에서 중단 |
+| POST | `/admin/corps/jobs/{job_id}/force-finish` | 강제 마감 |
 | PATCH | `/admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date` | 감사보고서일 수동 보정 |
 | POST | `/admin/extract/resolve-dates` | ambiguous 감사보고서일 LLM 해소 |
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
@@ -95,6 +100,18 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
 날짜 LLM 해소는 DART를 쓰지 않아 수집과 병행할 수 있습니다.
+
+## 회사 업종 (OpenDART)
+
+공시 HTML 수집·감사 추출과 달리, 회사 마스터 보강만 [OpenDART 기업개황 API](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019002)
+(`GET /api/company.json`)를 씁니다. `.env`의 `OPENDART_API_KEY`가 없으면 잡을 시작하지 않습니다.
+대상은 `disclosures`에 있는 distinct `corp_code`이며, `fetch_status=ok`인 회사는 건너뜁니다.
+수집·감사 추출의 `dart_job_lock`과 **공유하지 않아** 동시에 돌릴 수 있습니다.
+
+`POST /admin/corps/enrich`로 잡을 등록하면 202와 `job_id`를 받고, 현황은
+`GET /admin/corps/status?job_id=`·집계는 `GET /admin/corps/summary`로 확인합니다.
+운영 화면 `/admin` 오른쪽 **회사 업종** 칸에서 공시 회사 수·완료·잔여와 「빠진 회사 채우기」 버튼을 제공합니다.
+HTML 폼은 `POST /admin/corps/start`(303)이고, JSON API와 경로를 나눕니다.
 
 대상은 F001·F002와 A001 첨부 감사·연결감사입니다. 저장 단위는 문서 하나(`rcept_no`+`dcm_no`)이고,
 정정 전·후 접수는 각각 행입니다.
@@ -239,7 +256,7 @@ DART는 차단·점검·지연으로 수집이 자주 끊깁니다. 그래서 �
 처음 열면 토큰 입력 화면으로 이동하며, 입력한 토큰은 HttpOnly 쿠키에 저장됩니다.
 
 - **왼쪽(완전성 탐색)**: 연도 요약 바 → 선택 연도의 일별 히트맵 → 선택 연도 슬라이스 요약
-- **오른쪽(실행 컨트롤)**: 최근 작업 상태 카드(항상 표시) → 수집 폼(기본 접힘) → 로그
+- **오른쪽(실행 컨트롤)**: 최근 작업 상태 카드(항상 표시) → **회사 업종** 패널(공시 distinct 회사 수·완료·잔여, 「빠진 회사 채우기」) → 수집 폼(기본 접힘) → 로그
 - **상단 유형 칩**: `HEATMAP_REPORT_TYPES`(기본 `A001,A002,A003,F001,F002,F004`)를 눌러 보고서 유형을 전환합니다.
   칩에는 코드와 한국어 명칭(A001 사업보고서, A002 반기보고서, A003 분기보고서, F001 감사보고서,
   F002 연결감사보고서, F004 회계법인사업보고서)이 함께 나옵니다.
@@ -313,3 +330,5 @@ Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_ST
 
 감사보고서일 LLM 해소는 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`, `DATE_RESOLVER_PROMPT_VERSION`입니다.
 키가 비어 있으면 `POST /admin/extract/resolve-dates`는 시작하지 않습니다.
+
+회사 업종 보강은 `OPENDART_API_KEY`입니다. 키가 비어 있으면 `POST /admin/corps/enrich`와 Admin 「빠진 회사 채우기」가 시작되지 않습니다.

@@ -62,7 +62,7 @@ venv는 루트가 아니라 `packages/web-api/.venv`에 있습니다.
 
 - API 문서: http://127.0.0.1:8000/docs
 - Admin 운영 화면: http://127.0.0.1:8000/admin  
-  (처음 열면 `ADMIN_TOKEN` 입력 → 수집 시작·이어하기·슬라이스 완전성 확인)
+  (처음 열면 `ADMIN_TOKEN` 입력 → 수집 시작·이어하기·슬라이스 완전성·회사 업종 채우기)
 - Catalog 탐색: http://127.0.0.1:8000/catalog  
   (공시 목록 → entry 전 컬럼 표·`is_leaf` 구분, 인증 없음)
 - Facts 탐색: http://127.0.0.1:8000/facts  
