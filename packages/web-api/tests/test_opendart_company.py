@@ -89,3 +89,37 @@ async def test_fetch_retries_then_raises() -> None:
     with pytest.raises(OpenDartHttpError):
         await _client(handler, max_retries=1).fetch("00126380", "key")
     assert attempts["n"] == 2
+
+
+async def test_fetch_mixed_payload_top_status_result_induty_code() -> None:
+    """status는 최상위, induty_code는 result에만 있을 때 둘 다 읽는다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "message": "정상",
+                "corp_name": "삼성전자",
+                "result": {"induty_code": "264"},
+            },
+        )
+
+    overview = await _client(handler).fetch("00126380", "key")
+    assert overview.status == "000"
+    assert overview.message == "정상"
+    assert overview.corp_name == "삼성전자"
+    assert overview.induty_code == "264"
+
+
+async def test_fetch_json_array_does_not_retry() -> None:
+    """200이지만 JSON 배열이면 재시도 없이 OpenDartHttpError."""
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(200, json=[{"status": "000"}])
+
+    with pytest.raises(OpenDartHttpError, match="객체가 아닙니다"):
+        await _client(handler, max_retries=2).fetch("00126380", "key")
+    assert attempts["n"] == 1

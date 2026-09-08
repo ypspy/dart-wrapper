@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import httpx
 
 COMPANY_URL = "https://opendart.fss.or.kr/api/company.json"
-_EMPTY = frozenset({"", " "})
 
 
 class OpenDartHttpError(Exception):
@@ -37,28 +36,31 @@ def _blank_to_none(value: object) -> str | None:
     return text or None
 
 
+def _field(payload: dict[str, object], result: dict[str, object] | None, key: str) -> object:
+    """개황 필드는 최상위를 우선하고, 없으면 result에서 읽는다."""
+    if key in payload:
+        return payload[key]
+    if result is not None and key in result:
+        return result[key]
+    return None
+
+
 def parse_company_payload(payload: dict[str, object]) -> CompanyOverview:
     """최상위 또는 result 아래 status·필드를 정규화한다."""
     nested = payload.get("result")
-    body: dict[str, object] = payload
-    if isinstance(nested, dict):
-        status = str(payload.get("status") or nested.get("status") or "")
-        message = str(payload.get("message") or nested.get("message") or "")
-        if "corp_name" not in payload and "induty_code" not in payload:
-            body = nested
-    else:
-        status = str(payload.get("status") or "")
-        message = str(payload.get("message") or "")
+    result = nested if isinstance(nested, dict) else None
+    status = str(payload.get("status") or (result or {}).get("status") or "")
+    message = str(payload.get("message") or (result or {}).get("message") or "")
     return CompanyOverview(
         status=status,
         message=message,
-        corp_name=_blank_to_none(body.get("corp_name")),
-        stock_name=_blank_to_none(body.get("stock_name")),
-        stock_code=_blank_to_none(body.get("stock_code")),
-        corp_cls=_blank_to_none(body.get("corp_cls")),
-        bizr_no=_blank_to_none(body.get("bizr_no")),
-        acc_mt=_blank_to_none(body.get("acc_mt")),
-        induty_code=_blank_to_none(body.get("induty_code")),
+        corp_name=_blank_to_none(_field(payload, result, "corp_name")),
+        stock_name=_blank_to_none(_field(payload, result, "stock_name")),
+        stock_code=_blank_to_none(_field(payload, result, "stock_code")),
+        corp_cls=_blank_to_none(_field(payload, result, "corp_cls")),
+        bizr_no=_blank_to_none(_field(payload, result, "bizr_no")),
+        acc_mt=_blank_to_none(_field(payload, result, "acc_mt")),
+        induty_code=_blank_to_none(_field(payload, result, "induty_code")),
     )
 
 
@@ -89,15 +91,19 @@ class OpenDartCompanyClient:
                     timeout=self._timeout_seconds,
                 )
                 response.raise_for_status()
-                payload = response.json()
-                if not isinstance(payload, dict):
-                    raise OpenDartHttpError("기업개황 응답이 객체가 아닙니다.")
-                return parse_company_payload(payload)
-            except (httpx.HTTPError, ValueError, OpenDartHttpError) as exc:
+            except httpx.HTTPError as exc:
                 last_reason = str(exc)
                 if attempt >= self._max_retries:
                     break
                 await asyncio.sleep(self._retry_backoff_seconds * (2**attempt))
+                continue
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise OpenDartHttpError("기업개황 JSON 파싱에 실패했습니다.") from exc
+            if not isinstance(payload, dict):
+                raise OpenDartHttpError("기업개황 응답이 객체가 아닙니다.")
+            return parse_company_payload(payload)
         raise OpenDartHttpError(
             f"기업개황을 가져오지 못했습니다({corp_code}): {last_reason}"
         )
