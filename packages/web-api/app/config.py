@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     dart_fetch_concurrency: int = 4
     dart_fetch_timeout_seconds: float = 15.0
     dart_fetch_max_retries: int = 2
+    opendart_api_key: str = ""
+    opendart_concurrency: int = 2
+    opendart_timeout_seconds: float = 15.0
+    opendart_max_retries: int = 2
 
     # Admin 운영: 1인 운영을 전제로 공유 토큰 하나만 사용한다.
     admin_token: str = "dev-admin-token"
