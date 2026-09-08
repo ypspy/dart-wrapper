@@ -101,18 +101,6 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
 날짜 LLM 해소는 DART를 쓰지 않아 수집과 병행할 수 있습니다.
 
-## 회사 업종 (OpenDART)
-
-공시 HTML 수집·감사 추출과 달리, 회사 마스터 보강만 [OpenDART 기업개황 API](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019002)
-(`GET /api/company.json`)를 씁니다. `.env`의 `OPENDART_API_KEY`가 없으면 잡을 시작하지 않습니다.
-대상은 `disclosures`에 있는 distinct `corp_code`이며, `fetch_status=ok`인 회사는 건너뜁니다.
-수집·감사 추출의 `dart_job_lock`과 **공유하지 않아** 동시에 돌릴 수 있습니다.
-
-`POST /admin/corps/enrich`로 잡을 등록하면 202와 `job_id`를 받고, 현황은
-`GET /admin/corps/status?job_id=`·집계는 `GET /admin/corps/summary`로 확인합니다.
-운영 화면 `/admin` 오른쪽 **회사 업종** 칸에서 공시 회사 수·완료·잔여와 「빠진 회사 채우기」 버튼을 제공합니다.
-HTML 폼은 `POST /admin/corps/start`(303)이고, JSON API와 경로를 나눕니다.
-
 대상은 F001·F002와 A001 첨부 감사·연결감사입니다. 저장 단위는 문서 하나(`rcept_no`+`dcm_no`)이고,
 정정 전·후 접수는 각각 행입니다.
 
@@ -229,6 +217,18 @@ ambiguous 감사보고서일은 `POST /admin/extract/resolve-dates`로 LLM이 �
 ```
 
 `--database-url` 기본값은 앱 `DATABASE_URL`과 같고, `--out`이 없으면 표준 출력으로 씁니다.
+
+## 회사 업종 (OpenDART)
+
+공시 HTML 수집·감사 추출과 달리, 회사 마스터 보강만 [OpenDART 기업개황 API](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019002)
+(`GET /api/company.json`)를 씁니다. `.env`의 `OPENDART_API_KEY`가 없으면 잡을 시작하지 않습니다.
+대상은 `disclosures`에 있는 distinct `corp_code`이며, `fetch_status=ok`인 회사는 건너뜁니다.
+수집·감사 추출의 `dart_job_lock`과 **공유하지 않아** 동시에 돌릴 수 있습니다.
+
+`POST /admin/corps/enrich`로 잡을 등록하면 202와 `job_id`를 받고, 현황은
+`GET /admin/corps/status?job_id=`·집계는 `GET /admin/corps/summary`로 확인합니다.
+운영 화면 `/admin` 오른쪽 **회사 업종** 칸에서 공시 회사 수·완료·잔여와 「빠진 회사 채우기」 버튼을 제공합니다.
+HTML 폼은 `POST /admin/corps/start`(303)이고, JSON API와 경로를 나눕니다.
 
 ## 본문 정제 (blocks)
 
