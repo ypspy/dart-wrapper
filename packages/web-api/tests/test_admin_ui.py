@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.api.deps import get_catalog_service, get_slice_query_service
+from app.api.deps import (
+    get_catalog_service,
+    get_corp_industry_service,
+    get_slice_query_service,
+)
+from app.errors import CatalogNotFound
 from app.main import create_app
 from app.schemas.catalog import (
     DisclosureAttemptItem,
@@ -20,6 +25,7 @@ from app.schemas.catalog import (
     YearSummaryItem,
     YearSummaryResponse,
 )
+from app.services.corp_industry_service import CorpIndustrySummary
 
 SUMMARY = SliceSummary(
     slice_id="s1",
@@ -172,6 +178,18 @@ class FakeCatalogService:
         self.force_finished.append(job_id)
 
 
+class FakeCorpIndustryService:
+    """회사 업종 작업 이력이 없는 대시보드 상태를 흉내 낸다."""
+
+    async def summarize(self) -> CorpIndustrySummary:
+        """빈 회사 업종 집계를 반환한다."""
+        return CorpIndustrySummary(disclosure_corps=0, ok_count=0, remaining_count=0)
+
+    async def get_status(self, job_id: str | None) -> None:
+        """최근 회사 업종 작업이 없음을 알린다."""
+        raise CatalogNotFound("회사 업종 작업을 찾을 수 없습니다.")
+
+
 def _app(
     catalog: FakeCatalogService | None = None,
     slices: FakeSliceQueryService | None = None,
@@ -180,6 +198,7 @@ def _app(
     query_service = slices or FakeSliceQueryService()
     app.dependency_overrides[get_slice_query_service] = lambda: query_service
     app.dependency_overrides[get_catalog_service] = lambda: catalog or FakeCatalogService()
+    app.dependency_overrides[get_corp_industry_service] = lambda: FakeCorpIndustryService()
     return app
 
 

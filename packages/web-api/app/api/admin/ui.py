@@ -16,11 +16,12 @@ from fastapi.templating import Jinja2Templates
 from app.api.deps import (
     ADMIN_TOKEN_COOKIE,
     get_catalog_service,
+    get_corp_industry_service,
     get_settings_dep,
     get_slice_query_service,
 )
 from app.config import Settings
-from app.errors import CatalogConflict
+from app.errors import CatalogConflict, CatalogNotFound
 from app.report_types import report_type_label, report_type_options
 from app.schemas.catalog import (
     ExtractRequest,
@@ -31,6 +32,7 @@ from app.schemas.catalog import (
     YearSummaryResponse,
 )
 from app.services.catalog_service import CatalogService
+from app.services.corp_industry_service import CorpIndustryService
 from app.services.slice_query_service import SliceQueryService, kst_today, last_closed_date
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -140,6 +142,28 @@ def _to_token_page() -> RedirectResponse:
     return RedirectResponse("/admin/token")
 
 
+async def _corp_panel_context(
+    settings: Settings,
+    service: CorpIndustryService,
+) -> dict[str, object]:
+    """회사 업종 요약과 최신 작업을 패널 컨텍스트로 만든다."""
+    summary = await service.summarize()
+    try:
+        job, logs = await service.get_status(None)
+    except CatalogNotFound:
+        job, logs = None, []
+    return {
+        "corps_summary": summary,
+        "corps_job": job,
+        "corps_logs": logs,
+        "corps_stop_requested": (
+            job is not None
+            and job.job_id in getattr(service, "_stop_requested", set())
+        ),
+        "opendart_ready": bool(settings.opendart_api_key.strip()),
+    }
+
+
 @router.get("/token", response_class=HTMLResponse, summary="Admin 토큰 입력")
 async def token_form(request: Request) -> HTMLResponse:
     """토큰 입력 화면을 보여준다."""
@@ -177,6 +201,7 @@ async def dashboard(
     settings: Settings = Depends(get_settings_dep),
     slices: SliceQueryService = Depends(get_slice_query_service),
     service: CatalogService = Depends(get_catalog_service),
+    corps_service: CorpIndustryService = Depends(get_corp_industry_service),
 ) -> HTMLResponse:
     """왼쪽 완전성 탐색과 오른쪽 실행 컨트롤을 함께 보여준다."""
     if not _has_valid_token(request, settings):
@@ -190,6 +215,7 @@ async def dashboard(
     heatmap = await slices.heatmap(year=selected_year, report_type=report_type or None)
     listing = await _list_year_slices(slices, report_type, selected_year)
     job_busy = job is not None and job.status in ACTIVE_JOB_STATUSES
+    corps_context = await _corp_panel_context(settings, corps_service)
     return templates.TemplateResponse(
         request,
         "admin/index.html",
@@ -210,8 +236,74 @@ async def dashboard(
             "include_attachments": True,
             "job_busy": job_busy,
             "notice": notice,
+            **corps_context,
         },
     )
+
+
+@router.get("/corps-panel", response_class=HTMLResponse, summary="회사 업종 패널 갱신")
+async def corps_panel_partial(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+    service: CorpIndustryService = Depends(get_corp_industry_service),
+) -> HTMLResponse:
+    """회사 업종 회사 수와 최신 작업 상태를 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/corps_panel.html",
+        await _corp_panel_context(settings, service),
+    )
+
+
+@router.post("/corps/start", summary="회사 업종 채움 시작")
+async def start_corps(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings_dep),
+    service: CorpIndustryService = Depends(get_corp_industry_service),
+) -> RedirectResponse:
+    """빠진 회사 업종 채움 작업을 시작하고 대시보드로 돌아간다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+    if not settings.opendart_api_key.strip():
+        return RedirectResponse("/admin", status_code=303)
+
+    job_id = await service.start()
+    background_tasks.add_task(service.run_job, job_id)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/corps/jobs/{job_id}/stop", summary="회사 업종 작업 중단")
+async def stop_corps_job(
+    request: Request,
+    job_id: str,
+    settings: Settings = Depends(get_settings_dep),
+    service: CorpIndustryService = Depends(get_corp_industry_service),
+) -> RedirectResponse:
+    """회사 업종 작업에 소프트 스톱을 요청한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    await service.request_soft_stop(job_id)
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/corps/jobs/{job_id}/finish", summary="회사 업종 작업 강제 종료")
+async def finish_corps_job(
+    request: Request,
+    job_id: str,
+    settings: Settings = Depends(get_settings_dep),
+    service: CorpIndustryService = Depends(get_corp_industry_service),
+) -> RedirectResponse:
+    """회사 업종 작업을 강제로 부분 종료한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    await service.force_finish(job_id)
+    return RedirectResponse("/admin", status_code=303)
 
 
 @router.get("/year-bar", response_class=HTMLResponse, summary="연도 요약 바 갱신")

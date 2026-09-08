@@ -1,0 +1,56 @@
+{% set active = corps_job and corps_job.status in ("pending", "running") %}
+<section class="job-card{% if active %} job-card-active{% endif %}"
+         aria-label="회사 업종 채움 현황"
+         aria-live="polite">
+  <p>공시 회사 {{ corps_summary.disclosure_corps }} · 채움(ok) {{ corps_summary.ok_count }} · 남음 {{ corps_summary.remaining_count }}</p>
+
+  {% if corps_job %}
+  {% set processed = corps_job.params.get("processed_count", 0) %}
+  {% set target = corps_job.params.get("target_count", 0) %}
+  {% set percent = (processed * 100 // target) if target else 0 %}
+  {% if corps_job.status == "running" %}{% set status_label = "실행 중" %}
+  {% elif corps_job.status == "pending" %}{% set status_label = "대기" %}
+  {% elif corps_job.status == "succeeded" %}{% set status_label = "완료" %}
+  {% elif corps_job.status == "partial" %}{% set status_label = "부분 완료" %}
+  {% elif corps_job.status == "failed" %}{% set status_label = "실패" %}
+  {% else %}{% set status_label = corps_job.status %}{% endif %}
+  <p>{{ status_label }} · 처리 {{ processed }} / 대상 {{ target }}</p>
+  {% if target %}
+  <div class="job-progress{% if active %} job-progress-live{% endif %}" aria-hidden="true">
+    <i style="width: {{ percent }}%"></i>
+  </div>
+  {% endif %}
+  {% if corps_logs %}
+  <p class="job-last-log">
+    <span class="muted">최근</span>
+    <span class="job-log-level">{{ corps_logs[0].level|upper }}</span>
+    {{ corps_logs[0].message }}
+  </p>
+  {% endif %}
+  {% endif %}
+
+  <form method="post" action="/admin/corps/start">
+    <button type="submit" class="btn btn-primary"{% if not opendart_ready or active %} disabled{% endif %}>
+      빠진 회사 채우기
+    </button>
+  </form>
+  {% if not opendart_ready %}
+  <p class="muted">OpenDART 인증키가 없습니다.</p>
+  {% elif active %}
+  <p class="muted">회사 업종 작업이 진행 중입니다.</p>
+  {% endif %}
+
+  {% if active %}
+  <div class="job-actions">
+    <form method="post" action="/admin/corps/jobs/{{ corps_job.job_id }}/stop">
+      <button type="submit" class="btn btn-danger"{% if corps_stop_requested %} disabled{% endif %}>
+        {% if corps_stop_requested %}중단 요청됨{% else %}소프트 스톱{% endif %}
+      </button>
+    </form>
+    <form method="post" action="/admin/corps/jobs/{{ corps_job.job_id }}/finish"
+          onsubmit="return confirm('회사 업종 작업을 지금 강제 종료할까요?');">
+      <button type="submit" class="btn">강제 종료</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
