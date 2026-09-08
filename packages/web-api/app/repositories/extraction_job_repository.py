@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.extraction_job import ExtractionJob, ExtractionJobLog
 
@@ -42,6 +43,27 @@ class ExtractionJobRepository:
         self._session.add(job)
         await self._session.flush()
         return job
+
+    async def get(self, job_id: str) -> ExtractionJob | None:
+        """작업 단건. 없으면 None."""
+        return await self._session.get(ExtractionJob, job_id)
+
+    async def find_latest(self, extractor_id: str) -> ExtractionJob | None:
+        """해당 추출기의 가장 최근 잡."""
+        statement = (
+            select(ExtractionJob)
+            .where(ExtractionJob.extractor_id == extractor_id)
+            .order_by(ExtractionJob.created_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(statement)
+        return result.scalars().first()
+
+    async def update_params(self, job_id: str, params: dict[str, Any]) -> None:
+        """잡 params JSON을 통째로 교체한다."""
+        job = await self._require(job_id)
+        job.params = params
+        flag_modified(job, "params")
 
     async def find_any_active(
         self, extractor_id: str | None = None

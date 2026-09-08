@@ -27,6 +27,18 @@ class DisclosureRepository:
         """접수번호로 공시 1건을 조회한다."""
         return await self._session.get(Disclosure, rcept_no)
 
+    async def list_distinct_corp_codes(self) -> list[str]:
+        """공시에 나온 비어 있지 않은 고유번호를 정렬해 반환한다."""
+        statement = (
+            select(Disclosure.corp_code)
+            .where(Disclosure.corp_code.is_not(None))
+            .where(Disclosure.corp_code != "")
+            .distinct()
+            .order_by(Disclosure.corp_code)
+        )
+        result = await self._session.execute(statement)
+        return [row[0] for row in result.all() if row[0]]
+
     async def list_page(
         self,
         *,
