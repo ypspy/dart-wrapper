@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.dart_http import DartHttpClient
 from app.adapters.llm_date_resolver import LlmDateResolver
+from app.adapters.opendart_company import OpenDartCompanyClient
 from app.config import Settings, get_settings
 from app.errors import Unauthorized
+from app.ksic import load_ksic_table
 from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
 from app.repositories.fact_repository import FactRepository
@@ -19,6 +21,7 @@ from app.services.catalog_query_service import CatalogQueryService
 from app.services.fact_query_service import FactQueryService
 from app.services.catalog_service import CatalogService
 from app.services.completeness_service import CompletenessService
+from app.services.corp_industry_service import CorpIndustryService
 from app.services.date_resolver_service import DateResolverService
 from app.services.extraction_service import ExtractionService
 from app.services.slice_query_service import SliceQueryService
@@ -159,6 +162,29 @@ def get_completeness_service(
 ) -> CompletenessService:
     """감사 추출 완전성 조회·날짜 보정 서비스를 제공한다."""
     return CompletenessService(session)
+
+
+def get_corp_industry_service(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+) -> CorpIndustryService:
+    """OpenDART 기업개황으로 회사 업종을 채우는 서비스를 제공한다."""
+    service = getattr(request.app.state, "corp_industry_service", None)
+    if service is None:
+        client = OpenDartCompanyClient(
+            request.app.state.opendart_http_client,
+            timeout_seconds=settings.opendart_timeout_seconds,
+            max_retries=settings.opendart_max_retries,
+        )
+        service = CorpIndustryService(
+            request.app.state.sessionmaker,
+            client,
+            load_ksic_table(),
+            api_key=settings.opendart_api_key,
+            concurrency=settings.opendart_concurrency,
+        )
+        request.app.state.corp_industry_service = service
+    return service
 
 
 def get_date_resolver_service(

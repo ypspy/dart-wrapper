@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from app.adapters.node_entry_collector import NodeEntryCollector
 from app.api.admin import catalog
+from app.api.admin import corps as admin_corps
 from app.api.admin import extract as admin_extract
 from app.api.admin import ui as admin_ui
 from app.api.catalog import ui as catalog_ui
@@ -46,6 +47,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     http_client = httpx.AsyncClient(headers=_DEFAULT_HEADERS, follow_redirects=True)
     # OpenAI 호출에는 DART Referer를 붙이지 않는다.
     llm_http_client = httpx.AsyncClient(follow_redirects=True)
+    # OpenDART API 호출에도 DART 상세페이지 Referer를 붙이지 않는다.
+    opendart_http_client = httpx.AsyncClient(follow_redirects=True)
     sessionmaker = create_sessionmaker(engine)
 
     app.state.settings = settings
@@ -53,6 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sessionmaker = sessionmaker
     app.state.http_client = http_client
     app.state.llm_http_client = llm_http_client
+    app.state.opendart_http_client = opendart_http_client
     app.state.entry_collector = NodeEntryCollector(
         settings.node_executable,
         settings.entry_collector_script,
@@ -73,6 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await opendart_http_client.aclose()
         await llm_http_client.aclose()
         await http_client.aclose()
         await engine.dispose()
@@ -89,6 +94,7 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(catalog.router)
+    app.include_router(admin_corps.router)
     app.include_router(admin_extract.router)
     app.include_router(admin_ui.router)
     app.include_router(catalog_ui.router)
