@@ -248,6 +248,15 @@ async def test_admin_index_defaults_to_latest_job_report_type(client_factory) ->
     assert 'class="report-type-chip is-selected"' in body
 
 
+async def test_admin_index_has_extract_nav(client_factory) -> None:
+    """수집 화면에 추출 화면 링크가 있다."""
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin")
+    assert response.status_code == 200
+    assert 'href="/admin/extract"' in response.text
+
+
 async def test_admin_index_renders_two_column_ops_console(client_factory) -> None:
     async with client_factory(_app()) as client:
         client.cookies.set("admin_token", "dev-admin-token")

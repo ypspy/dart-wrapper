@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -17,6 +17,7 @@ from app.api.deps import (
     ADMIN_TOKEN_COOKIE,
     get_catalog_service,
     get_corp_industry_service,
+    get_extraction_service,
     get_settings_dep,
     get_slice_query_service,
 )
@@ -31,8 +32,10 @@ from app.schemas.catalog import (
     SliceListResponse,
     YearSummaryResponse,
 )
+from app.schemas.extract import ExtractJobStatusResponse
 from app.services.catalog_service import CatalogService
 from app.services.corp_industry_service import CorpIndustryService
+from app.services.extraction_service import ExtractionService
 from app.services.slice_query_service import SliceQueryService, kst_today, last_closed_date
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -44,8 +47,14 @@ DEFAULT_RESCAN_DAYS = 7
 IDLE_LOG_LEVELS = "warn,error"
 ACTIVE_LOG_LEVELS = "info,warn,error"
 ACTIVE_JOB_STATUSES = frozenset({"pending", "running"})
+# 연구 창 추출 화면의 기본 기간·유형. 수집 히트맵 유형(A002 등)은 넣지 않는다.
+RESEARCH_EXTRACT_START_DATE = "20160101"
+RESEARCH_EXTRACT_END_DATE = "20260909"
+RESEARCH_EXTRACT_REPORT_TYPES = ("F001", "F002", "A001")
 # 한 해는 최대 366일이므로 연도 슬라이스 조회 상한을 넉넉히 잡는다.
 YEAR_SLICE_LIMIT = 400
+
+OpsJob = JobStatusResponse | ExtractJobStatusResponse
 
 router = APIRouter(prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
@@ -112,7 +121,7 @@ async def _list_year_slices(
     )
 
 
-def _filter_logs(job: JobStatusResponse | None, levels: str) -> list[JobLogItem]:
+def _filter_logs(job: OpsJob | None, levels: str) -> list[JobLogItem]:
     """작업 로그에서 요청한 레벨만 남긴다."""
     if job is None:
         return []
@@ -123,11 +132,50 @@ def _filter_logs(job: JobStatusResponse | None, levels: str) -> list[JobLogItem]
     return [log for log in job.logs if log.level.lower() in allowed]
 
 
-def _log_levels_for(job: JobStatusResponse | None) -> str:
+def _log_levels_for(job: OpsJob | None) -> str:
     """실행 중이면 진행 로그를 포함하고, 아니면 경고·오류만 보여준다."""
     if job is not None and job.status in ACTIVE_JOB_STATUSES:
         return ACTIVE_LOG_LEVELS
     return IDLE_LOG_LEVELS
+
+
+def _job_busy(job: OpsJob | None) -> bool:
+    """대기·실행 중이면 새 DART 작업을 시작하지 못한다."""
+    return job is not None and job.status in ACTIVE_JOB_STATUSES
+
+
+async def _extract_ops_context(
+    extraction: ExtractionService,
+    catalog: CatalogService,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    report_types: list[str] | None = None,
+    mode: str | None = None,
+) -> dict[str, object]:
+    """추출 화면과 HTMX 조각이 공유하는 컨텍스트를 만든다."""
+    extract_job = await extraction.get_latest_status()
+    catalog_job = await catalog.get_latest_status()
+    selected_types = (
+        [code.strip().upper() for code in report_types if code.strip()]
+        if report_types is not None
+        else list(RESEARCH_EXTRACT_REPORT_TYPES)
+    )
+    selected_mode = (mode or "extract").strip() or "extract"
+    return {
+        "ops_section": "extract",
+        "start_date": start_date or RESEARCH_EXTRACT_START_DATE,
+        "end_date": end_date or RESEARCH_EXTRACT_END_DATE,
+        "report_types": selected_types,
+        "extract_report_type_options": report_type_options(RESEARCH_EXTRACT_REPORT_TYPES),
+        "mode": selected_mode,
+        "job": extract_job,
+        "extract_job": extract_job,
+        "catalog_job": catalog_job,
+        "extract_busy": _job_busy(extract_job),
+        "catalog_busy": _job_busy(catalog_job),
+        "logs": _filter_logs(extract_job, _log_levels_for(extract_job)),
+    }
 
 
 def _default_range() -> tuple[str, str]:
@@ -236,8 +284,99 @@ async def dashboard(
             "include_attachments": True,
             "job_busy": job_busy,
             "notice": notice,
+            "ops_section": "catalog",
             **corps_context,
         },
+    )
+
+
+@router.get("/extract", response_class=HTMLResponse, summary="추출 Admin 화면")
+async def extract_dashboard(
+    request: Request,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    extraction: ExtractionService = Depends(get_extraction_service),
+    catalog: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """추출 완전성 자리와 잡 카드를 보여 준다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    return templates.TemplateResponse(
+        request,
+        "admin/extract.html",
+        await _extract_ops_context(
+            extraction,
+            catalog,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+    )
+
+
+@router.get("/extract/job-status", response_class=HTMLResponse, summary="추출 작업 상태 카드")
+async def extract_job_status_partial(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+    extraction: ExtractionService = Depends(get_extraction_service),
+    catalog: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """가장 최근 추출 작업의 상태 카드를 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/extract_job.html",
+        await _extract_ops_context(extraction, catalog),
+    )
+
+
+@router.get("/extract/form", response_class=HTMLResponse, summary="추출 시작 폼 갱신")
+async def extract_form_partial(
+    request: Request,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    report_types: list[str] | None = Query(default=None),
+    mode: str | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    extraction: ExtractionService = Depends(get_extraction_service),
+    catalog: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """진행 중 여부에 따라 추출 폼 활성/비활성 상태를 갱신한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/extract_form.html",
+        await _extract_ops_context(
+            extraction,
+            catalog,
+            start_date=start_date,
+            end_date=end_date,
+            report_types=report_types,
+            mode=mode,
+        ),
+    )
+
+
+@router.get("/extract/logs", response_class=HTMLResponse, summary="추출 작업 로그")
+async def extract_logs_partial(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+    extraction: ExtractionService = Depends(get_extraction_service),
+    catalog: CatalogService = Depends(get_catalog_service),
+) -> HTMLResponse:
+    """가장 최근 추출 작업의 로그를 보여준다. 실행 중이면 info도 포함한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/extract_logs.html",
+        await _extract_ops_context(extraction, catalog),
     )
 
 
@@ -580,6 +719,7 @@ async def slice_detail(
             "slice": detail.slice,
             "attempts": detail.attempts,
             "report_type": detail.slice.report_type,
+            "ops_section": "catalog",
         },
     )
 

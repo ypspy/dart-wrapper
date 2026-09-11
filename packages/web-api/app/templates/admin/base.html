@@ -136,6 +136,7 @@
     select:focus,
     button:focus-visible,
     summary:focus-visible,
+    .ops-switch a:focus-visible,
     .report-type-chip:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: 1px;
@@ -207,6 +208,33 @@
       flex-wrap: wrap;
       gap: var(--space-3);
       align-items: flex-end;
+    }
+
+    /* 수집 | 추출 전환 */
+    .ops-switch {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 var(--space-4);
+    }
+    .ops-switch a {
+      display: inline-flex;
+      align-items: center;
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--text);
+      font-size: var(--fs-sm);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .ops-switch a:hover { text-decoration: none; border-color: var(--accent); }
+    .ops-switch a.is-selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-text);
     }
 
     /* Top bar */
@@ -468,6 +496,19 @@
       color: var(--text);
       font-weight: 500;
     }
+    .collect-form fieldset {
+      border: 0;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: var(--space-2);
+    }
+    .collect-form legend {
+      margin: 0 0 var(--space-1);
+      font-size: var(--fs-sm);
+      font-weight: 500;
+      color: var(--text-muted);
+    }
 
     .slice-chips {
       display: flex;
@@ -598,6 +639,10 @@
 </head>
 <body>
   <h1><a href="{% if report_type %}/admin?report_type={{ report_type }}{% else %}/admin{% endif %}">DART 수집 운영</a></h1>
+  <nav class="ops-switch" aria-label="운영 화면">
+    <a href="/admin" class="{% if ops_section == 'catalog' %}is-selected{% endif %}">수집</a>
+    <a href="/admin/extract" class="{% if ops_section == 'extract' %}is-selected{% endif %}">추출</a>
+  </nav>
   {% block content %}{% endblock %}
 </body>
 </html>

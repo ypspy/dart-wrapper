@@ -1,0 +1,53 @@
+{% extends "admin/base.html" %}
+{% block title %}추출 · 완전성{% endblock %}
+{% block content %}
+<header class="ops-topbar">
+  <div>
+    <h2>추출 · 완전성</h2>
+    <p class="muted">
+      왼쪽에서 연구 창 추출 완전성을 보고, 오른쪽에서 감사 추출 작업을 실행·감시합니다.
+    </p>
+  </div>
+</header>
+
+<div class="ops-grid">
+  <section class="ops-left" aria-label="추출 완전성">
+    <form method="get" action="/admin/extract" class="inline">
+      <label>
+        시작일
+        <input type="text" name="start_date" value="{{ start_date }}" pattern="\d{8}" required>
+      </label>
+      <label>
+        종료일
+        <input type="text" name="end_date" value="{{ end_date }}" pattern="\d{8}" required>
+      </label>
+      <button type="submit" class="btn">기간 적용</button>
+    </form>
+    <div id="extract-completeness"></div>
+  </section>
+
+  <aside class="ops-right" aria-label="추출 실행 컨트롤">
+    <h3>작업 현황</h3>
+    <div hx-get="/admin/extract/job-status"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/extract_job.html" %}
+    </div>
+
+    <h3>추출</h3>
+    <div hx-get="/admin/extract/form"
+         hx-trigger="every 5s"
+         hx-include="find form"
+         hx-swap="innerHTML">
+      {% include "admin/partials/extract_form.html" %}
+    </div>
+
+    <h3>로그</h3>
+    <div hx-get="/admin/extract/logs"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/extract_logs.html" %}
+    </div>
+  </aside>
+</div>
+{% endblock %}

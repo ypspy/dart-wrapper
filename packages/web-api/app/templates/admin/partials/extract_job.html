@@ -1,0 +1,75 @@
+{% if job %}
+{% set processed = job.params.get("processed_count", 0) %}
+{% set target = job.params.get("target_count", 0) %}
+{% set percent = (processed * 100 // target) if target else 0 %}
+{% set active = job.status in ("pending", "running") %}
+{% if job.status == "running" %}{% set status_label = "실행 중" %}
+{% elif job.status == "pending" %}{% set status_label = "대기" %}
+{% elif job.status == "succeeded" %}{% set status_label = "완료" %}
+{% elif job.status == "partial" %}{% set status_label = "부분 완료" %}
+{% elif job.status == "failed" %}{% set status_label = "실패" %}
+{% else %}{% set status_label = job.status %}{% endif %}
+<section class="job-card{% if active %} job-card-active{% endif %}" aria-label="최근 추출 작업 현황" aria-live="polite">
+  <div class="job-card-head">
+    <strong>작업 {{ job.job_id[:8] }} · {{ job.mode }}</strong>
+    <span class="job-chip job-chip-{{ job.status }}{% if active %} is-pulsing{% endif %}">
+      {% if active %}<span class="job-pulse" aria-hidden="true"></span>{% endif %}
+      {{ status_label }}
+    </span>
+  </div>
+  {% if active %}
+  <p class="job-live">추출이 진행 중입니다. 처리 수치와 로그가 5초마다 갱신됩니다.</p>
+  {% endif %}
+  <p>처리 {{ processed }} / 대상 {{ target }}</p>
+  {% if target %}
+  <div class="job-progress{% if active %} job-progress-live{% endif %}" aria-hidden="true">
+    <i style="width: {{ percent }}%"></i>
+  </div>
+  {% endif %}
+  <dl class="job-meta">
+    <div>
+      <dt>기간</dt>
+      <dd>{{ job.params.get("start_date", "—") }} ~ {{ job.params.get("end_date", "—") }}</dd>
+    </div>
+    <div>
+      <dt>유형</dt>
+      <dd>{{ (job.params.get("report_types") or []) | join(", ") or "—" }}</dd>
+    </div>
+    {% if job.started_at %}
+    <div><dt>시작</dt><dd>{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</dd></div>
+    {% endif %}
+  </dl>
+  {% if job.logs %}
+  <p class="job-last-log">
+    <span class="muted">최근</span>
+    <span class="job-log-level">{{ job.logs[0].level|upper }}</span>
+    {% if job.logs[0].created_at %}
+    <span class="muted">{{ job.logs[0].created_at.strftime("%H:%M:%S") }}</span>
+    {% endif %}
+    {{ job.logs[0].message }}
+  </p>
+  {% endif %}
+  {% if active %}
+  <div class="job-actions">
+    <form method="post" action="/admin/extract/jobs/{{ job.job_id }}/soft-stop">
+      <button type="submit" class="btn btn-danger">소프트 스톱</button>
+    </form>
+    <form method="post" action="/admin/extract/jobs/{{ job.job_id }}/force-finish"
+          onsubmit="return confirm('지금 바로 추출 작업을 마감할까요?');">
+      <button type="submit" class="btn">강제 종료</button>
+    </form>
+  </div>
+  {% endif %}
+  {% if job.error_message %}
+  <p class="job-error">{{ job.error_message }}</p>
+  {% endif %}
+</section>
+{% else %}
+<section class="job-card job-card-idle" aria-label="최근 추출 작업 현황">
+  <div class="job-card-head">
+    <strong>대기 중</strong>
+    <span class="job-chip">idle</span>
+  </div>
+  <p class="muted">아직 추출 작업 이력이 없습니다.</p>
+</section>
+{% endif %}
