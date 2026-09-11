@@ -380,6 +380,25 @@ class ExtractionService:
             logs=[JobLogItem.model_validate(log) for log in logs],
         )
 
+    async def get_latest_status(self) -> ExtractJobStatusResponse | None:
+        """가장 최근 audit_opinion 잡. 없으면 None. JSON status의 job_id 필수와 별개다."""
+        async with self._sessionmaker() as session:
+            jobs = ExtractionJobRepository(session)
+            job = await jobs.find_latest(DART_EXTRACTOR_ID)
+            if job is None:
+                return None
+            logs = await jobs.recent_logs(job.job_id)
+        return ExtractJobStatusResponse(
+            job_id=job.job_id,
+            status=job.status,
+            mode=job.mode,
+            params=dict(job.params or {}),
+            error_message=job.error_message,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            logs=[JobLogItem.model_validate(log) for log in logs],
+        )
+
     async def run_job(self, job_id: str) -> None:
         """기간 안 감사 문서를 하나씩 추출하고 커밋한다."""
         async with self._sessionmaker() as session:
@@ -402,7 +421,30 @@ class ExtractionService:
                     start_date, end_date, report_types
                 )
 
+            target_count = 0
+            for rcept_no in rcept_nos:
+                async with self._sessionmaker() as session:
+                    filing = await EntryRepository(session).list_by_rcept_no(rcept_no)
+                audit_selectors = [
+                    selector
+                    for entry in filing
+                    if (selector := _to_selector(entry)) is not None
+                    and is_audit_document(
+                        selector.report_type, selector.source, selector.document_name
+                    )
+                ]
+                target_count += len(group_by_dcm(audit_selectors))
+
+            visited = 0
             processed = 0
+            async with self._sessionmaker() as session:
+                job_row = await session.get(ExtractionJob, job_id)
+                params = dict(job_row.params or {}) if job_row is not None else dict(params)
+                params["target_count"] = target_count
+                params["processed_count"] = 0
+                await ExtractionJobRepository(session).update_params(job_id, params)
+                await session.commit()
+
             block_streak = 0
             for rcept_no in rcept_nos:
                 if job_id in self._stop_requested:
@@ -431,8 +473,16 @@ class ExtractionService:
                             raise
                         await self._mark_document_failed(job_id, sample, exc)
                         fetch_status = "fetch_failed"
+                    visited += 1
                     if fetch_status is not None:
                         processed += 1
+                    async with self._sessionmaker() as session:
+                        job_row = await session.get(ExtractionJob, job_id)
+                        current = dict(job_row.params or {}) if job_row is not None else {}
+                        current["target_count"] = target_count
+                        current["processed_count"] = visited
+                        await ExtractionJobRepository(session).update_params(job_id, current)
+                        await session.commit()
                     if fetch_status == "blocked":
                         block_streak += 1
                         if block_streak >= self._block_streak_threshold:

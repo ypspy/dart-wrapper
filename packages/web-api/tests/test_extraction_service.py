@@ -1932,3 +1932,78 @@ async def test_force_finish_unlocks_pending_extraction(sessionmaker_fixture) -> 
         job = await session.get(ExtractionJob, first)
     assert job is not None
     assert job.status == "partial"
+
+
+async def test_get_latest_status_returns_none_when_empty(
+    sessionmaker_fixture,
+) -> None:
+    """추출 잡이 없으면 None이다. JSON get_status의 job_id 필수와 별개다."""
+    http = DartHttpClient(
+        httpx.AsyncClient(),
+        max_retries=0,
+        retry_backoff_seconds=0.0,
+    )
+    service = ExtractionService(sessionmaker_fixture, http)
+    assert await service.get_latest_status() is None
+
+
+async def test_get_latest_status_returns_latest_job(
+    sessionmaker_fixture,
+) -> None:
+    """같은 추출기의 가장 최근 잡을 돌려준다."""
+    http = DartHttpClient(
+        httpx.AsyncClient(),
+        max_retries=0,
+        retry_backoff_seconds=0.0,
+    )
+    service = ExtractionService(sessionmaker_fixture, http)
+    first = await service.start("20200301", "20200331", ["F001"], "extract")
+    async with sessionmaker_fixture() as session:
+        await ExtractionJobRepository(session).set_status(first, "succeeded")
+        await session.commit()
+    second = await service.start("20200401", "20200430", ["F002"], "resume")
+    latest = await service.get_latest_status()
+    assert latest is not None
+    assert latest.job_id == second
+    assert latest.job_id != first
+    assert latest.params["report_types"] == ["F002"]
+    assert latest.mode == "resume"
+
+
+async def test_run_job_counts_visits_including_skips(
+    sessionmaker_fixture,
+) -> None:
+    """대상 1건을 스킵해도 processed_count는 1이고 종료 로그는 문서 0건이다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            AuditReportFact(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                source_report_type="F001",
+                fs_scope="separate",
+                fetch_status="ok",
+                opinion_code="unqualified",
+                opinion_status="ok",
+                conflicts=[],
+                audit_report_date_candidates=[],
+            )
+        )
+        await session.commit()
+
+    http = DartHttpClient(
+        httpx.AsyncClient(),
+        max_retries=0,
+        retry_backoff_seconds=0.0,
+    )
+    service = ExtractionService(sessionmaker_fixture, http)
+    job_id = await service.start("20200301", "20200331", ["F001"], "resume")
+    await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        job = await session.get(ExtractionJob, job_id)
+        logs = await ExtractionJobRepository(session).recent_logs(job_id)
+    assert job is not None
+    assert job.params["target_count"] == 1
+    assert job.params["processed_count"] == 1
+    assert any("문서 0건" in log.message for log in logs)
