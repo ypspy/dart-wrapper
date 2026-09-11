@@ -104,6 +104,13 @@ def _admin_dashboard_url(*, report_type: str | None = None, notice: str | None =
     return "/admin?" + "&".join(params) if params else "/admin"
 
 
+def _extract_dashboard_url(*, notice: str | None = None) -> str:
+    """추출 화면으로 돌아갈 때 안내 문구를 유지한다."""
+    if notice:
+        return f"/admin/extract?notice={quote(notice)}"
+    return "/admin/extract"
+
+
 def _report_type_from_job(job: JobStatusResponse | None) -> str | None:
     """작업 파라미터에서 보고서 유형을 꺼낸다."""
     if job is None:
@@ -346,6 +353,7 @@ async def extract_dashboard(
     request: Request,
     start_date: str | None = None,
     end_date: str | None = None,
+    notice: str | None = None,
     settings: Settings = Depends(get_settings_dep),
     extraction: ExtractionService = Depends(get_extraction_service),
     catalog: CatalogService = Depends(get_catalog_service),
@@ -358,17 +366,19 @@ async def extract_dashboard(
     resolved_start, resolved_end, date_notice, rows = await _extract_completeness_page(
         completeness, start_date, end_date
     )
+    context = await _extract_ops_context(
+        extraction,
+        catalog,
+        start_date=resolved_start,
+        end_date=resolved_end,
+        notice=notice,
+        completeness_rows=rows,
+    )
+    context["date_notice"] = date_notice
     return templates.TemplateResponse(
         request,
         "admin/extract.html",
-        await _extract_ops_context(
-            extraction,
-            catalog,
-            start_date=resolved_start,
-            end_date=resolved_end,
-            notice=date_notice,
-            completeness_rows=rows,
-        ),
+        context,
     )
 
 
@@ -397,7 +407,7 @@ async def extract_completeness_cards(
         {
             "start_date": resolved_start,
             "end_date": resolved_end,
-            "notice": date_notice,
+            "date_notice": date_notice,
             "completeness_rows": rows,
         },
     )
@@ -527,6 +537,64 @@ async def extract_logs_partial(
         "admin/partials/extract_logs.html",
         await _extract_ops_context(extraction, catalog),
     )
+
+
+@router.post("/extract/start", summary="추출 시작")
+async def start_extract(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    start_date: str = Form(),
+    end_date: str = Form(),
+    report_types: list[str] = Form(default=[]),
+    mode: str = Form(),
+    settings: Settings = Depends(get_settings_dep),
+    service: ExtractionService = Depends(get_extraction_service),
+) -> RedirectResponse:
+    """폼 입력으로 감사 추출 작업을 시작하고 추출 화면으로 돌아간다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    try:
+        if not report_types:
+            raise BadRequest("유형을 하나 이상 선택해 주세요.")
+        job_id = await service.start(start_date, end_date, report_types, mode)
+    except (CatalogConflict, BadRequest) as exc:
+        return RedirectResponse(
+            _extract_dashboard_url(notice=str(exc)),
+            status_code=303,
+        )
+    background_tasks.add_task(service.run_job, job_id)
+    return RedirectResponse(_extract_dashboard_url(), status_code=303)
+
+
+@router.post("/extract/jobs/{job_id}/stop", summary="추출 작업 중단")
+async def stop_extract_job(
+    request: Request,
+    job_id: str,
+    settings: Settings = Depends(get_settings_dep),
+    service: ExtractionService = Depends(get_extraction_service),
+) -> RedirectResponse:
+    """다음 접수 경계에서 추출을 멈추도록 요청한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    await service.request_soft_stop(job_id)
+    return RedirectResponse(_extract_dashboard_url(), status_code=303)
+
+
+@router.post("/extract/jobs/{job_id}/finish", summary="추출 작업 강제 종료")
+async def finish_extract_job(
+    request: Request,
+    job_id: str,
+    settings: Settings = Depends(get_settings_dep),
+    service: ExtractionService = Depends(get_extraction_service),
+) -> RedirectResponse:
+    """멈춘 추출 잡을 즉시 마감해 DART 잠금을 푼다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    await service.force_finish(job_id)
+    return RedirectResponse(_extract_dashboard_url(), status_code=303)
 
 
 @router.get("/corps-panel", response_class=HTMLResponse, summary="회사 업종 패널 갱신")

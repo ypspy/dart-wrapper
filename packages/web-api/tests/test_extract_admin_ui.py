@@ -15,10 +15,11 @@ from app.api.deps import (
     get_extraction_service,
     get_slice_query_service,
 )
+from app.errors import CatalogConflict
 from app.main import create_app
 from app.schemas.catalog import JobLogItem
 from app.schemas.extract import CompletenessItem, CompletenessResponse, ExtractJobStatusResponse
-from tests.test_admin_ui import FakeCatalogService, FakeSliceQueryService
+from tests.test_admin_ui import JOB_STATUS, FakeCatalogService, FakeSliceQueryService
 from tests.test_corps_admin_ui import FakeCorpIndustryService
 
 ClientFactory = Callable[[FastAPI], httpx.AsyncClient]
@@ -86,6 +87,21 @@ class FakeExtractionService:
     async def force_finish(self, job_id: str) -> None:
         """강제 종료를 기록한다."""
         self.finished.append(job_id)
+
+
+class ConflictExtractionService(FakeExtractionService):
+    """잠금 충돌을 흉내 낸다."""
+
+    async def start(
+        self,
+        start_date: str,
+        end_date: str,
+        report_types: list[str],
+        mode: str,
+    ) -> str:
+        """폼 시작을 기록한 뒤 잠금 충돌을 일으킨다."""
+        self.started.append((start_date, end_date, report_types, mode))
+        raise CatalogConflict("감사 추출 작업이 이미 진행 중입니다.")
 
 
 RUNNING_EXTRACT = ExtractJobStatusResponse(
@@ -227,3 +243,112 @@ async def test_extract_page_invalid_dates_keep_form_and_notice(
     assert "20160101" not in response.text
     assert "YYYYMMDD" in response.text
     assert completeness.calls == []
+
+
+async def test_start_extract_form_runs_job(
+    client_factory: ClientFactory,
+) -> None:
+    """폼 POST는 서비스를 호출하고 추출 화면으로 돌아온다."""
+    extraction = FakeExtractionService()
+    async with client_factory(_app(extraction)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/extract/start",
+            data={
+                "start_date": "20160101",
+                "end_date": "20260909",
+                "report_types": ["F001", "F002"],
+                "mode": "resume",
+            },
+        )
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/admin/extract")
+    assert extraction.started == [
+        ("20160101", "20260909", ["F001", "F002"], "resume")
+    ]
+    assert extraction.executed == ["extract-job-1"]
+
+
+async def test_start_extract_conflict_sets_notice(
+    client_factory: ClientFactory,
+) -> None:
+    """잠금이면 JSON 대신 notice와 함께 추출 화면으로 돌아온다."""
+    extraction = ConflictExtractionService()
+    async with client_factory(_app(extraction)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/extract/start",
+            data={
+                "start_date": "20160101",
+                "end_date": "20260909",
+                "report_types": ["F001"],
+                "mode": "extract",
+            },
+            follow_redirects=True,
+        )
+    assert "진행 중" in response.text
+    assert extraction.executed == []
+
+
+async def test_extract_form_disabled_when_catalog_busy(
+    client_factory: ClientFactory,
+) -> None:
+    """수집이 돌면 추출 시작 버튼이 비활성이다."""
+    async with client_factory(_app(catalog=FakeCatalogService(job=JOB_STATUS))) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/extract")
+    assert "수집 중이니 추출을 시작할 수 없습니다" in response.text
+    assert "disabled" in response.text
+
+
+async def test_extract_soft_stop_and_force_finish(
+    client_factory: ClientFactory,
+) -> None:
+    """중단·강제 종료 폼이 추출 화면으로 돌아온다."""
+    extraction = FakeExtractionService(RUNNING_EXTRACT)
+    async with client_factory(_app(extraction)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        card = await client.get("/admin/extract/job-status")
+        assert "/admin/extract/jobs/abcdef12deadbeef/stop" in card.text
+        assert "/admin/extract/jobs/abcdef12deadbeef/finish" in card.text
+        assert "/soft-stop" not in card.text
+        assert "/force-finish" not in card.text
+        stop = await client.post("/admin/extract/jobs/abcdef12deadbeef/stop")
+        finish = await client.post("/admin/extract/jobs/abcdef12deadbeef/finish")
+    assert stop.status_code == 303
+    assert finish.status_code == 303
+    assert extraction.stopped == ["abcdef12deadbeef"]
+    assert extraction.finished == ["abcdef12deadbeef"]
+
+
+async def test_start_extract_requires_report_types(
+    client_factory: ClientFactory,
+) -> None:
+    """유형을 하나도 고르지 않으면 notice로 돌아온다."""
+    extraction = FakeExtractionService()
+    async with client_factory(_app(extraction)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/extract/start",
+            data={
+                "start_date": "20160101",
+                "end_date": "20260909",
+                "mode": "extract",
+            },
+            follow_redirects=True,
+        )
+    assert "유형을 하나 이상 선택해 주세요." in response.text
+    assert extraction.started == []
+    assert extraction.executed == []
+
+
+async def test_extract_page_shows_extract_busy_banner(
+    client_factory: ClientFactory,
+) -> None:
+    """추출이 돌면 상단에 진행 배너가 보인다."""
+    extraction = FakeExtractionService(RUNNING_EXTRACT)
+    async with client_factory(_app(extraction)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/extract")
+    assert "추출 작업이 진행 중입니다." in response.text
+    assert "disabled" in response.text

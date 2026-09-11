@@ -51,10 +51,10 @@
   {% endif %}
   {% if active %}
   <div class="job-actions">
-    <form method="post" action="/admin/extract/jobs/{{ job.job_id }}/soft-stop">
+    <form method="post" action="/admin/extract/jobs/{{ job.job_id }}/stop">
       <button type="submit" class="btn btn-danger">소프트 스톱</button>
     </form>
-    <form method="post" action="/admin/extract/jobs/{{ job.job_id }}/force-finish"
+    <form method="post" action="/admin/extract/jobs/{{ job.job_id }}/finish"
           onsubmit="return confirm('지금 바로 추출 작업을 마감할까요?');">
       <button type="submit" class="btn">강제 종료</button>
     </form>

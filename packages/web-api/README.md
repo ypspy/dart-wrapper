@@ -145,6 +145,9 @@ resolved에 쓰는 것은 4순위일 때뿐입니다.
 
 ### Admin 추출
 
+운영 화면 `/admin/extract`에서 연구 창 완전성(F001/F002/A001)과 추출 잡을 봅니다.
+JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
+
 `POST /admin/extract/audit-opinion`에 기간·유형·모드를 보냅니다.
 
 ```json

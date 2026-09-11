@@ -1,5 +1,5 @@
-{% if notice %}
-<p class="banner-warn" role="status">{{ notice }}</p>
+{% if date_notice %}
+<p class="banner-warn" role="status">{{ date_notice }}</p>
 {% endif %}
 <div class="extract-completeness-cards">
   {% for report_type, summary in completeness_rows %}
