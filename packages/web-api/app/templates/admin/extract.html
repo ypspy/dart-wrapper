@@ -23,7 +23,12 @@
       </label>
       <button type="submit" class="btn">기간 적용</button>
     </form>
-    <div id="extract-completeness"></div>
+    <div id="extract-completeness"
+         hx-get="/admin/extract/completeness-cards?start_date={{ start_date }}&amp;end_date={{ end_date }}"
+         hx-trigger="every 60s"
+         hx-swap="innerHTML">
+      {% include "admin/partials/extract_completeness.html" %}
+    </div>
   </section>
 
   <aside class="ops-right" aria-label="추출 실행 컨트롤">

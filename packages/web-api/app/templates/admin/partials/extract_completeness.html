@@ -1,0 +1,49 @@
+{% if notice %}
+<p class="banner-warn" role="status">{{ notice }}</p>
+{% endif %}
+<div class="extract-completeness-cards">
+  {% for report_type, summary in completeness_rows %}
+  {% set fail_total = summary.fetch_failed + summary.blocked + summary.section_missing %}
+  {% set items_base = "/admin/extract/completeness-items?start_date=" ~ start_date ~ "&end_date=" ~ end_date ~ "&report_type=" ~ report_type ~ "&status=" %}
+  <article class="extract-card" aria-label="{{ report_type }} 완전성">
+    <h3>{{ report_type }}</h3>
+    <p>대상 {{ summary.target }}</p>
+    <p>추출 ok {{ summary.ok }}</p>
+    <p>
+      <a href="{{ items_base }}unextracted"
+         hx-get="{{ items_base }}unextracted"
+         hx-target="#extract-items-{{ report_type }}"
+         hx-swap="innerHTML">미추출 {{ summary.unextracted }}</a>
+    </p>
+    <p>실패 {{ fail_total }}</p>
+    <p class="extract-card-fail-links">
+      <a href="{{ items_base }}fetch_failed"
+         hx-get="{{ items_base }}fetch_failed"
+         hx-target="#extract-items-{{ report_type }}"
+         hx-swap="innerHTML">fetch_failed {{ summary.fetch_failed }}</a>
+      <a href="{{ items_base }}blocked"
+         hx-get="{{ items_base }}blocked"
+         hx-target="#extract-items-{{ report_type }}"
+         hx-swap="innerHTML">blocked {{ summary.blocked }}</a>
+      <a href="{{ items_base }}section_missing"
+         hx-get="{{ items_base }}section_missing"
+         hx-target="#extract-items-{{ report_type }}"
+         hx-swap="innerHTML">section_missing {{ summary.section_missing }}</a>
+    </p>
+    <p>
+      <a href="{{ items_base }}field_partial"
+         hx-get="{{ items_base }}field_partial"
+         hx-target="#extract-items-{{ report_type }}"
+         hx-swap="innerHTML">부분실패 {{ summary.field_partial }}</a>
+      <span class="muted">ok 중 구멍</span>
+    </p>
+    <p>
+      <a href="{{ items_base }}ambiguous_dates"
+         hx-get="{{ items_base }}ambiguous_dates"
+         hx-target="#extract-items-{{ report_type }}"
+         hx-swap="innerHTML">날짜 모호 {{ summary.ambiguous_dates }}</a>
+    </p>
+    <div id="extract-items-{{ report_type }}"></div>
+  </article>
+  {% endfor %}
+</div>

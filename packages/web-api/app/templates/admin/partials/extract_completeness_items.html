@@ -1,0 +1,18 @@
+{% if notice %}
+<p class="banner-warn" role="status">{{ notice }}</p>
+{% endif %}
+{% if items %}
+<ul class="extract-items">
+  {% for item in items %}
+  <li><code>{{ item.rcept_no }}</code> / <code>{{ item.dcm_no }}</code></li>
+  {% endfor %}
+</ul>
+{% if next_href %}
+<button type="button" class="btn btn-sm"
+        hx-get="{{ next_href }}"
+        hx-target="#extract-items-{{ report_type }}"
+        hx-swap="innerHTML">더 보기</button>
+{% endif %}
+{% elif not notice %}
+<p class="muted">해당 상태 문서가 없습니다.</p>
+{% endif %}

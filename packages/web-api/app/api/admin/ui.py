@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -16,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from app.api.deps import (
     ADMIN_TOKEN_COOKIE,
     get_catalog_service,
+    get_completeness_service,
     get_corp_industry_service,
     get_extraction_service,
     get_settings_dep,
@@ -32,8 +34,9 @@ from app.schemas.catalog import (
     SliceListResponse,
     YearSummaryResponse,
 )
-from app.schemas.extract import ExtractJobStatusResponse
+from app.schemas.extract import CompletenessItem, CompletenessResponse, ExtractJobStatusResponse
 from app.services.catalog_service import CatalogService
+from app.services.completeness_service import CompletenessService
 from app.services.corp_industry_service import CorpIndustryService
 from app.services.extraction_service import ExtractionService
 from app.services.slice_query_service import SliceQueryService, kst_today, last_closed_date
@@ -51,6 +54,8 @@ ACTIVE_JOB_STATUSES = frozenset({"pending", "running"})
 RESEARCH_EXTRACT_START_DATE = "20160101"
 RESEARCH_EXTRACT_END_DATE = "20260909"
 RESEARCH_EXTRACT_REPORT_TYPES = ("F001", "F002", "A001")
+_YYYYMMDD_RE = re.compile(r"^\d{8}$")
+_INVALID_EXTRACT_DATES = "시작일과 종료일은 YYYYMMDD 형식이어야 합니다."
 # 한 해는 최대 366일이므로 연도 슬라이스 조회 상한을 넉넉히 잡는다.
 YEAR_SLICE_LIMIT = 400
 
@@ -144,6 +149,48 @@ def _job_busy(job: OpsJob | None) -> bool:
     return job is not None and job.status in ACTIVE_JOB_STATUSES
 
 
+def _require_extract_dates(start_date: str, end_date: str) -> None:
+    """추출 화면 기간이 YYYYMMDD인지 확인한다.
+
+    :raises BadRequest: 형식이 아니면 폼을 리셋하지 않고 notice로 보여 준다.
+    """
+    if not (_YYYYMMDD_RE.fullmatch(start_date) and _YYYYMMDD_RE.fullmatch(end_date)):
+        raise BadRequest(_INVALID_EXTRACT_DATES)
+
+
+async def _extract_completeness_rows(
+    service: CompletenessService,
+    start_date: str,
+    end_date: str,
+) -> list[tuple[str, CompletenessResponse]]:
+    """연구 창 세 유형을 서버에서 한 번씩 집계한다."""
+    rows: list[tuple[str, CompletenessResponse]] = []
+    for report_type in RESEARCH_EXTRACT_REPORT_TYPES:
+        summary = await service.summarize(
+            start_date=start_date,
+            end_date=end_date,
+            report_type=report_type,
+        )
+        rows.append((report_type, summary))
+    return rows
+
+
+async def _extract_completeness_page(
+    service: CompletenessService,
+    start_date: str | None,
+    end_date: str | None,
+) -> tuple[str, str, str | None, list[tuple[str, CompletenessResponse]]]:
+    """쿼리 기간을 유지하고, 형식이 맞으면 세 카드 집계를 채운다."""
+    resolved_start = start_date or RESEARCH_EXTRACT_START_DATE
+    resolved_end = end_date or RESEARCH_EXTRACT_END_DATE
+    try:
+        _require_extract_dates(resolved_start, resolved_end)
+    except BadRequest as exc:
+        return resolved_start, resolved_end, str(exc), []
+    rows = await _extract_completeness_rows(service, resolved_start, resolved_end)
+    return resolved_start, resolved_end, None, rows
+
+
 async def _extract_ops_context(
     extraction: ExtractionService,
     catalog: CatalogService,
@@ -152,6 +199,8 @@ async def _extract_ops_context(
     end_date: str | None = None,
     report_types: list[str] | None = None,
     mode: str | None = None,
+    notice: str | None = None,
+    completeness_rows: list[tuple[str, CompletenessResponse]] | None = None,
 ) -> dict[str, object]:
     """추출 화면과 HTMX 조각이 공유하는 컨텍스트를 만든다."""
     extract_job = await extraction.get_latest_status()
@@ -175,6 +224,8 @@ async def _extract_ops_context(
         "extract_busy": _job_busy(extract_job),
         "catalog_busy": _job_busy(catalog_job),
         "logs": _filter_logs(extract_job, _log_levels_for(extract_job)),
+        "notice": notice,
+        "completeness_rows": completeness_rows or [],
     }
 
 
@@ -298,20 +349,118 @@ async def extract_dashboard(
     settings: Settings = Depends(get_settings_dep),
     extraction: ExtractionService = Depends(get_extraction_service),
     catalog: CatalogService = Depends(get_catalog_service),
+    completeness: CompletenessService = Depends(get_completeness_service),
 ) -> HTMLResponse:
-    """추출 완전성 자리와 잡 카드를 보여 준다."""
+    """유형별 완전성 카드와 잡 카드를 보여 준다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
+    resolved_start, resolved_end, date_notice, rows = await _extract_completeness_page(
+        completeness, start_date, end_date
+    )
     return templates.TemplateResponse(
         request,
         "admin/extract.html",
         await _extract_ops_context(
             extraction,
             catalog,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=resolved_start,
+            end_date=resolved_end,
+            notice=date_notice,
+            completeness_rows=rows,
         ),
+    )
+
+
+@router.get(
+    "/extract/completeness-cards",
+    response_class=HTMLResponse,
+    summary="추출 완전성 카드",
+)
+async def extract_completeness_cards(
+    request: Request,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    completeness: CompletenessService = Depends(get_completeness_service),
+) -> HTMLResponse:
+    """세 유형 완전성 카드를 한 partial로 반환한다. 60초 폴링용."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    resolved_start, resolved_end, date_notice, rows = await _extract_completeness_page(
+        completeness, start_date, end_date
+    )
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/extract_completeness.html",
+        {
+            "start_date": resolved_start,
+            "end_date": resolved_end,
+            "notice": date_notice,
+            "completeness_rows": rows,
+        },
+    )
+
+
+@router.get(
+    "/extract/completeness-items",
+    response_class=HTMLResponse,
+    summary="추출 완전성 문서 목록",
+)
+async def extract_completeness_items(
+    request: Request,
+    report_type: str,
+    status: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    cursor: str | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    completeness: CompletenessService = Depends(get_completeness_service),
+) -> HTMLResponse:
+    """선택한 유형·상태의 문서 식별자 목록을 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    resolved_start = start_date or RESEARCH_EXTRACT_START_DATE
+    resolved_end = end_date or RESEARCH_EXTRACT_END_DATE
+    notice: str | None = None
+    items: list[CompletenessItem] = []
+    next_href: str | None = None
+    try:
+        _require_extract_dates(resolved_start, resolved_end)
+        summary = await completeness.summarize(
+            start_date=resolved_start,
+            end_date=resolved_end,
+            report_type=report_type,
+            status=status,
+            cursor=cursor,
+            limit=50,
+        )
+        items = list(summary.items)
+        if summary.next_cursor:
+            next_href = (
+                "/admin/extract/completeness-items"
+                f"?start_date={quote(resolved_start)}"
+                f"&end_date={quote(resolved_end)}"
+                f"&report_type={quote(report_type)}"
+                f"&status={quote(status)}"
+                f"&cursor={quote(summary.next_cursor)}"
+            )
+    except BadRequest as exc:
+        notice = str(exc)
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/extract_completeness_items.html",
+        {
+            "start_date": resolved_start,
+            "end_date": resolved_end,
+            "report_type": report_type,
+            "status": status,
+            "items": items,
+            "next_href": next_href,
+            "notice": notice,
+        },
     )
 
 

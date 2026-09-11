@@ -468,6 +468,34 @@
     .job-log-error .job-log-level { color: var(--danger); }
     .job-log-message { min-width: 0; overflow-wrap: anywhere; }
 
+    .extract-completeness-cards {
+      display: grid;
+      gap: var(--space-3);
+      margin-top: var(--space-4);
+    }
+    .extract-card {
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+    }
+    .extract-card h3 { margin: 0 0 var(--space-2); }
+    .extract-card p { margin: 0 0 var(--space-2); font-variant-numeric: tabular-nums; }
+    .extract-card-fail-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2) var(--space-3);
+      font-size: var(--fs-sm);
+    }
+    .extract-items {
+      list-style: none;
+      margin: var(--space-2) 0 0;
+      padding: 0;
+      font-size: var(--fs-sm);
+      font-variant-numeric: tabular-nums;
+    }
+    .extract-items li { padding: 4px 0; }
+
     .collect-form { padding: var(--space-3) var(--space-4); }
     .collect-form summary {
       cursor: pointer;

@@ -17,7 +17,7 @@ from app.api.deps import (
 )
 from app.main import create_app
 from app.schemas.catalog import JobLogItem
-from app.schemas.extract import CompletenessResponse, ExtractJobStatusResponse
+from app.schemas.extract import CompletenessItem, CompletenessResponse, ExtractJobStatusResponse
 from tests.test_admin_ui import FakeCatalogService, FakeSliceQueryService
 from tests.test_corps_admin_ui import FakeCorpIndustryService
 
@@ -27,8 +27,16 @@ ClientFactory = Callable[[FastAPI], httpx.AsyncClient]
 class FakeCompletenessService:
     """유형별 고정 집계를 돌려준다."""
 
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
     async def summarize(self, **kwargs) -> CompletenessResponse:
         """테스트용 완전성 숫자."""
+        self.calls.append(kwargs)
+        status = kwargs.get("status")
+        items = []
+        if status == "unextracted":
+            items = [CompletenessItem(rcept_no="20200331000001", dcm_no="11111")]
         return CompletenessResponse(
             target=10,
             ok=7,
@@ -38,6 +46,7 @@ class FakeCompletenessService:
             unextracted=2,
             ambiguous_dates=1,
             field_partial=3,
+            items=items,
         )
 
 
@@ -104,16 +113,18 @@ RUNNING_EXTRACT = ExtractJobStatusResponse(
 def _app(
     extraction: FakeExtractionService | None = None,
     catalog: FakeCatalogService | None = None,
+    completeness: FakeCompletenessService | None = None,
 ) -> FastAPI:
     """추출 Admin 화면용 의존성을 대역으로 바꾼다."""
     app = create_app()
+    completeness_service = completeness or FakeCompletenessService()
     app.dependency_overrides[get_slice_query_service] = lambda: FakeSliceQueryService()
     app.dependency_overrides[get_catalog_service] = lambda: catalog or FakeCatalogService(
         job=None
     )
     app.dependency_overrides[get_corp_industry_service] = lambda: FakeCorpIndustryService()
     app.dependency_overrides[get_extraction_service] = lambda: extraction or FakeExtractionService()
-    app.dependency_overrides[get_completeness_service] = lambda: FakeCompletenessService()
+    app.dependency_overrides[get_completeness_service] = lambda: completeness_service
     return app
 
 
@@ -151,3 +162,68 @@ async def test_extract_job_card_shows_progress(
     assert response.status_code == 200
     assert "처리 4 / 대상 10" in response.text or "4 / 10" in response.text
     assert "추출 완료(ok)" in response.text
+
+
+async def test_extract_page_renders_three_type_cards(
+    client_factory: ClientFactory,
+) -> None:
+    """세 유형 카드에 같은 Fake 숫자가 보인다."""
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/extract")
+    body = response.text
+    assert response.status_code == 200
+    assert "F001" in body and "F002" in body and "A001" in body
+    assert "대상 10" in body
+    assert "미추출 2" in body
+    assert "ok 중 구멍" in body or "부분실패 3" in body
+    assert "every 60s" in body
+    assert 'hx-get="/admin/extract/completeness-cards' in body
+    assert "status=ok" not in body
+
+
+async def test_completeness_cards_query_uses_requested_dates(
+    client_factory: ClientFactory,
+) -> None:
+    """카드 partial은 쿼리 기간으로 세 유형을 집계한다."""
+    completeness = FakeCompletenessService()
+    async with client_factory(_app(completeness=completeness)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get(
+            "/admin/extract/completeness-cards?start_date=20200101&end_date=20201231"
+        )
+    assert response.status_code == 200
+    types = [call["report_type"] for call in completeness.calls]
+    assert types == ["F001", "F002", "A001"]
+    assert all(call["start_date"] == "20200101" for call in completeness.calls)
+
+
+async def test_completeness_items_lists_documents(
+    client_factory: ClientFactory,
+) -> None:
+    """상태 숫자를 누르면 문서 식별자가 나온다."""
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get(
+            "/admin/extract/completeness-items"
+            "?start_date=20160101&end_date=20260909"
+            "&report_type=F001&status=unextracted"
+        )
+    assert response.status_code == 200
+    assert "20200331000001" in response.text
+    assert "11111" in response.text
+
+
+async def test_extract_page_invalid_dates_keep_form_and_notice(
+    client_factory: ClientFactory,
+) -> None:
+    """잘못된 YYYYMMDD는 notice로 남기고 폼 날짜를 연구 창으로 되돌리지 않는다."""
+    completeness = FakeCompletenessService()
+    async with client_factory(_app(completeness=completeness)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/extract?start_date=bad&end_date=20260909")
+    assert response.status_code == 200
+    assert 'value="bad"' in response.text
+    assert "20160101" not in response.text
+    assert "YYYYMMDD" in response.text
+    assert completeness.calls == []
