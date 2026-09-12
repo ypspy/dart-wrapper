@@ -422,6 +422,7 @@ class ExtractionService:
                 rcept_nos = await DisclosureRepository(session).list_rcept_nos(
                     start_date, end_date, report_types
                 )
+            # 대상은 접수 수, processed_count는 문서 방문 수이다.
             target_count = len(rcept_nos)
 
             visited = 0

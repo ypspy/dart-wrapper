@@ -172,6 +172,7 @@ JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
 
 `GET /admin/extract/audit-opinion/completeness?start_date=&end_date=&report_type=`
 한 유형의 기간 집계입니다. 문서 단위는 `rcept_no`+`dcm_no`입니다.
+문서 카드의 대상/미추출과 잡 `처리 N / 대상 M`의 대상은 접수 수이다. 한 접수에 첨부 감사문서가 둘이면 한쪽만 추출돼도 미추출이 0일 수 있다.
 
 | 키 | 의미 |
 |----|------|
@@ -194,6 +195,7 @@ JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
 `/admin/extract` 왼쪽 문서 카드 아래에 현재 추출기 `fetch_status=ok` 행의 12묶음
 (감사인·의견·GAAP·감사보고서일·당기·감사시간·실시항목·커뮤니케이션·계정·내부회계·계속기업·종속기업)
 성공 / 해당없음 / 제도상없음 / 실패를 보여 줍니다. 성공률은 `성공/(성공+실패)`입니다.
+문서 카드의 대상/미추출과 잡 `처리 N / 대상 M`의 대상은 접수 수이다. 한 접수에 첨부 감사문서가 둘이면 한쪽만 추출돼도 미추출이 0일 수 있다. 12묶음 표는 `fetch_status=ok` **fact 행** 기준이며 F001+F002+A001을 합산한다.
 
 - 별도·unknown 문서의 종속기업 `not_applicable`은 해당없음(분모 제외)
 - 실시내용 1–3절 ok이고 4절만 `not_found`이면 커뮤니케이션은 제도상없음

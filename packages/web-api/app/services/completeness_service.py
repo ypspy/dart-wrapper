@@ -208,7 +208,11 @@ class CompletenessService:
         end_date: str,
         report_types: Sequence[str],
     ) -> dict[str, CompletenessResponse]:
-        """기간 안 여러 유형 건수를 disclosures·facts 두 쿼리로 집계한다."""
+        """기간 안 여러 유형 건수를 disclosures·facts 두 쿼리로 집계한다.
+
+        대상·미추출은 접수(`rcept_no`) 단위이며, 한 접수에 감사 DCM이 둘이면
+        한쪽만 fact여도 미추출이 0일 수 있다.
+        """
         for report_type in report_types:
             if report_type not in _ALLOWED_REPORT_TYPES:
                 raise BadRequest("report_type은 A001, F001, F002 중 하나여야 합니다.")

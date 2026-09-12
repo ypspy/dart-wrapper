@@ -11,7 +11,12 @@ from app.api.deps import get_extraction_service
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.errors import BadRequest, CatalogNotFound
 from app.extracting.constants import EXTRACTOR_VERSION
-from app.extracting.field_bundles import BUNDLE_KEYS, DART_DISCLOSURE_VIEW
+from app.extracting.field_bundles import (
+    BUNDLE_KEYS,
+    DART_DISCLOSURE_VIEW,
+    add_fact_outcomes,
+    empty_field_bundle_counts,
+)
 from app.main import create_app
 from app.models.audit_report_fact import AuditReportFact
 from app.models.disclosure import Disclosure
@@ -982,6 +987,84 @@ async def test_field_bundles_exclude_stale_and_fetch_failed_and_classify(
     assert by_key["subsidiary"].ok == 0
     assert by_key["communications"].expected_missing == 1
     assert by_key["opinion"].ok == 2
+
+
+async def test_field_bundle_sql_counts_match_python_rules(
+    memory_app: tuple[FastAPI, object],
+) -> None:
+    """SQL SUM(CASE) 네 칸이 add_fact_outcomes와 같다."""
+    _app, sessionmaker = memory_app
+    facts = [
+        _ok_fact(
+            rcept_no="20200331000001",
+            dcm_no="1",
+            fs_scope="separate",
+            subsidiary_status="not_applicable",
+        ),
+        _ok_fact(
+            rcept_no="20200331000002",
+            dcm_no="2",
+            communications_status="not_found",
+            hours_status="ok",
+            activities_status="ok",
+        ),
+        _ok_fact(
+            rcept_no="20200331000003",
+            dcm_no="3",
+            communications_status="not_found",
+            hours_status="skipped",
+            activities_status="ok",
+        ),
+        _ok_fact(
+            rcept_no="20200331000004",
+            dcm_no="4",
+            source_report_type="F002",
+            fs_scope="consolidated",
+            subsidiary_status="not_found",
+        ),
+        _ok_fact(
+            rcept_no="20200331000005",
+            dcm_no="5",
+            opinion_status="ok",
+        ),
+    ]
+    entries = [
+        _entry(
+            entry_id=f"e-{fact.rcept_no}",
+            rcept_no=fact.rcept_no,
+            dcm_no=fact.dcm_no,
+            report_type=fact.source_report_type,
+            viewer_url=f"https://dart.fss.or.kr/report/viewer.do?rcpNo={fact.rcept_no}",
+        )
+        for fact in facts
+    ]
+    await _seed(sessionmaker, entries, facts)
+
+    expected = empty_field_bundle_counts()
+    for fact in facts:
+        if fact.fetch_status == "ok":
+            add_fact_outcomes(expected, fact)
+
+    async with sessionmaker() as session:
+        summary = await CompletenessService(session).summarize_field_bundles(
+            start_date="20200301",
+            end_date="20200331",
+        )
+
+    by_key = {row.bundle: row for row in summary.bundles}
+    for key in BUNDLE_KEYS:
+        row = by_key[key]
+        assert (
+            row.ok,
+            row.not_applicable,
+            row.expected_missing,
+            row.fail,
+        ) == (
+            expected[key]["ok"],
+            expected[key]["not_applicable"],
+            expected[key]["expected_missing"],
+            expected[key]["fail"],
+        )
 
 
 async def test_field_bundle_fail_items_list_subsidiary_holes_only(
