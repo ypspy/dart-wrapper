@@ -17,7 +17,7 @@ from app.api.deps import (
 )
 from app.errors import CatalogConflict
 from app.extracting.constants import EXTRACTOR_VERSION
-from app.extracting.field_bundles import BUNDLE_KEYS, BUNDLE_LABELS
+from app.extracting.field_bundles import BUNDLE_KEYS, BUNDLE_LABELS, empty_field_bundle_counts
 from app.main import create_app
 from app.schemas.catalog import JobLogItem
 from app.schemas.extract import (
@@ -183,6 +183,7 @@ RUNNING_EXTRACT = ExtractJobStatusResponse(
         "report_types": ["F001", "F002"],
         "processed_count": 4,
         "target_count": 10,
+        "field_bundles": empty_field_bundle_counts(),
     },
     started_at=datetime(2026, 9, 11, tzinfo=timezone.utc),
     logs=[
@@ -461,3 +462,19 @@ async def test_extract_page_shows_extract_busy_banner(
         response = await client.get("/admin/extract")
     assert "추출 작업이 진행 중입니다." in response.text
     assert "disabled" in response.text
+
+
+async def test_extract_job_card_shows_field_bundle_fail(
+    client_factory: ClientFactory,
+) -> None:
+    from copy import deepcopy
+    job = deepcopy(RUNNING_EXTRACT)
+    job.params["field_bundles"] = {
+        "opinion": {"ok": 3, "not_applicable": 0, "expected_missing": 0, "fail": 1},
+    }
+    extraction = FakeExtractionService(job)
+    async with client_factory(_app(extraction)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/extract/job-status")
+    assert "감사의견" in response.text
+    assert "실패 1" in response.text or ">1<" in response.text

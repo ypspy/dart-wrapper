@@ -26,6 +26,21 @@
     <i style="width: {{ percent }}%"></i>
   </div>
   {% endif %}
+  {% set bundles = job.params.get("field_bundles") or {} %}
+  {% if bundles %}
+  <table class="extract-job-bundles" aria-label="이번 잡 필드 묶음">
+    {% for key, label in bundle_labels %}
+    {% set row = bundles.get(key) or {} %}
+    <tr>
+      <th scope="row">{{ label }}</th>
+      <td>성공 {{ row.get("ok", 0) }}</td>
+      <td>실패 {{ row.get("fail", 0) }}</td>
+      <td>해당없음 {{ row.get("not_applicable", 0) }}</td>
+      <td>제도상없음 {{ row.get("expected_missing", 0) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
   <dl class="job-meta">
     <div>
       <dt>기간</dt>

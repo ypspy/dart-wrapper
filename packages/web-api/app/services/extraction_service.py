@@ -33,6 +33,7 @@ from app.extracting.dates import (
     parse_year_end,
     pick_audit_report_date,
 )
+from app.extracting.field_bundles import add_fact_outcomes, empty_field_bundle_counts
 from app.extracting.gaap import classify_gaap
 from app.extracting.going_concern import extract_going_concern
 from app.extracting.icfr import extract_icfr
@@ -57,6 +58,7 @@ from app.extracting.text import compact
 from app.models.audit_report_fact import AuditReportFact
 from app.models.entry import Entry
 from app.models.extraction_job import ExtractionJob
+from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
 from app.repositories.extraction_job_repository import ExtractionJobRepository
 from app.repositories.fact_repository import FactRepository
@@ -417,31 +419,20 @@ class ExtractionService:
 
         try:
             async with self._sessionmaker() as session:
-                rcept_nos = await EntryRepository(session).list_rcept_nos_for_extraction(
+                rcept_nos = await DisclosureRepository(session).list_rcept_nos(
                     start_date, end_date, report_types
                 )
-
-            target_count = 0
-            for rcept_no in rcept_nos:
-                async with self._sessionmaker() as session:
-                    filing = await EntryRepository(session).list_by_rcept_no(rcept_no)
-                audit_selectors = [
-                    selector
-                    for entry in filing
-                    if (selector := _to_selector(entry)) is not None
-                    and is_audit_document(
-                        selector.report_type, selector.source, selector.document_name
-                    )
-                ]
-                target_count += len(group_by_dcm(audit_selectors))
+            target_count = len(rcept_nos)
 
             visited = 0
             processed = 0
+            bundle_counts = empty_field_bundle_counts()
             async with self._sessionmaker() as session:
                 job_row = await session.get(ExtractionJob, job_id)
                 params = dict(job_row.params or {}) if job_row is not None else dict(params)
                 params["target_count"] = target_count
                 params["processed_count"] = 0
+                params["field_bundles"] = bundle_counts
                 await ExtractionJobRepository(session).update_params(job_id, params)
                 await session.commit()
 
@@ -477,10 +468,15 @@ class ExtractionService:
                     if fetch_status is not None:
                         processed += 1
                     async with self._sessionmaker() as session:
+                        if fetch_status == "ok":
+                            fact = await FactRepository(session).get(rcept_no, dcm_no)
+                            if fact is not None:
+                                add_fact_outcomes(bundle_counts, fact)
                         job_row = await session.get(ExtractionJob, job_id)
                         current = dict(job_row.params or {}) if job_row is not None else {}
                         current["target_count"] = target_count
                         current["processed_count"] = visited
+                        current["field_bundles"] = bundle_counts
                         await ExtractionJobRepository(session).update_params(job_id, current)
                         await session.commit()
                     if fetch_status == "blocked":

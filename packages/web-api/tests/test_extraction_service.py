@@ -9,7 +9,9 @@ from app.adapters.dart_http import DartHttpClient
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.errors import CatalogConflict
 from app.models.audit_report_fact import AuditReportFact
+from app.models.disclosure import Disclosure
 from app.models.extraction_job import ExtractionJob
+from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
 from app.repositories.extraction_job_repository import ExtractionJobRepository
 from app.repositories.fact_repository import FactRepository
@@ -241,9 +243,35 @@ def _service(
     return ExtractionService(sessionmaker, http, **kwargs), client
 
 
+def _disclosures_from_entries(records: list[EntryRecord]) -> list[Disclosure]:
+    """추출 대상 조회가 쓰는 disclosures 행을 entry에서 만든다."""
+    by_rcept: dict[str, Disclosure] = {}
+    for record in records:
+        existing = by_rcept.get(record.rcept_no)
+        if existing is not None:
+            existing.entry_count += 1
+            continue
+        by_rcept[record.rcept_no] = Disclosure(
+            rcept_no=record.rcept_no,
+            corp_code=record.corp_code,
+            corp_name=record.corp_name,
+            report_nm=record.report_nm,
+            report_type=record.report_type,
+            correction_type=record.correction_type,
+            submitter=record.submitter,
+            rcept_dt=record.rcept_dt or "",
+            bsns_year=record.bsns_year,
+            year_end=record.year_end,
+            disclosure_url=record.disclosure_url,
+            entry_count=1,
+        )
+    return list(by_rcept.values())
+
+
 async def _seed_entries(sessionmaker, records: list[EntryRecord]) -> None:
     async with sessionmaker() as session:
         await EntryRepository(session).upsert_many(records)
+        await DisclosureRepository(session).upsert_many(_disclosures_from_entries(records))
         await session.commit()
 
 
@@ -286,6 +314,23 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.going_concern == 0  # fixture 의견서에 MU 없음
     assert fact.subsidiary_status == "not_applicable"
     assert fact.subsidiary_count is None
+
+
+async def test_run_job_adds_field_bundle_counts_for_ok_fact(
+    sessionmaker_fixture,
+) -> None:
+    """fetch ok로 저장한 문서만 params.field_bundles에 더한다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        job = await session.get(ExtractionJob, job_id)
+    assert job is not None
+    bundles = job.params["field_bundles"]
+    assert bundles["opinion"]["ok"] == 1
+    assert bundles["subsidiary"]["not_applicable"] == 1
 
 
 async def test_start_raises_when_catalog_running(sessionmaker_fixture) -> None:

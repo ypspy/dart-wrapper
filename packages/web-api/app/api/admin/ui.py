@@ -25,6 +25,7 @@ from app.api.deps import (
 )
 from app.config import Settings
 from app.errors import BadRequest, CatalogConflict, CatalogNotFound
+from app.extracting.field_bundles import BUNDLE_LABELS
 from app.report_types import report_type_label, report_type_options
 from app.schemas.catalog import (
     ExtractRequest,
@@ -259,6 +260,7 @@ async def _extract_ops_context(
         "logs": _filter_logs(extract_job, _log_levels_for(extract_job)),
         "notice": notice,
         "completeness_rows": completeness_rows or [],
+        "bundle_labels": list(BUNDLE_LABELS.items()),
     }
 
 
