@@ -15,6 +15,13 @@
          hx-target="#extract-items-{{ report_type }}"
          hx-swap="innerHTML">미추출 {{ summary.unextracted }}</a>
     </p>
+    <p>
+      <a href="{{ items_base }}stale_version"
+         hx-get="{{ items_base }}stale_version"
+         hx-target="#extract-items-{{ report_type }}"
+         hx-swap="innerHTML">구버전 {{ summary.stale_version }}</a>
+      <span class="muted">재추출 필요</span>
+    </p>
     <p>실패 {{ fail_total }}</p>
     <p class="extract-card-fail-links">
       <a href="{{ items_base }}fetch_failed"
@@ -47,3 +54,51 @@
   </article>
   {% endfor %}
 </div>
+{% if field_bundles %}
+<p>
+  {% for row in field_bundles.bundles if row.fail %}
+  {% if loop.first %}
+  <a href="/admin/extract/audit-opinion/field-bundles/export?start_date={{ start_date }}&amp;end_date={{ end_date }}&amp;bundle={{ row.bundle }}&amp;outcome=fail">실패 TSV</a>
+  {% endif %}
+  {% endfor %}
+  <span class="muted">묶음별 TSV는 실패 숫자를 누른 목록에서 받습니다.</span>
+</p>
+<table class="extract-field-bundles" aria-label="필드 묶음 추출 품질">
+  <thead>
+    <tr>
+      <th>묶음</th>
+      <th>성공</th>
+      <th>해당없음</th>
+      <th>제도상없음</th>
+      <th>실패</th>
+      <th>성공률</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in field_bundles.bundles %}
+    {% set denom = row.ok + row.fail %}
+    <tr>
+      <th scope="row">{{ row.label }}</th>
+      <td>{{ row.ok }}</td>
+      <td>{{ row.not_applicable }}</td>
+      <td>{{ row.expected_missing }}</td>
+      <td>
+        {% if row.fail %}
+        <a href="/admin/extract/field-bundle-items?start_date={{ start_date }}&amp;end_date={{ end_date }}&amp;bundle={{ row.bundle }}"
+           hx-get="/admin/extract/field-bundle-items?start_date={{ start_date }}&amp;end_date={{ end_date }}&amp;bundle={{ row.bundle }}"
+           hx-target="#extract-field-bundle-items"
+           hx-swap="innerHTML">{{ row.fail }}</a>
+        {% else %}
+        0
+        {% endif %}
+      </td>
+      <td>{% if denom %}{{ (row.ok * 100 // denom) }}%{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p>
+  <span class="muted">모집단 {{ field_bundles.eligible }} · {{ field_bundles.extractor_version }}</span>
+</p>
+<div id="extract-field-bundle-items"></div>
+{% endif %}

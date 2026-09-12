@@ -1,0 +1,28 @@
+{% if notice %}
+<p class="banner-warn" role="status">{{ notice }}</p>
+{% endif %}
+{% if items %}
+<p>
+  <a class="btn btn-sm" href="{{ export_href }}">이 필터 TSV</a>
+</p>
+<ul class="extract-items">
+  {% for item in items %}
+  <li>
+    {{ item.report_type }}
+    <code>{{ item.rcept_no }}</code> / <code>{{ item.dcm_no }}</code>
+    · {{ item.status }}
+    {% if item.viewer_url %}
+    <a href="{{ item.viewer_url }}" target="_blank" rel="noreferrer">원문</a>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if next_href %}
+<button type="button" class="btn btn-sm"
+        hx-get="{{ next_href }}"
+        hx-target="#extract-field-bundle-items"
+        hx-swap="innerHTML">더 보기</button>
+{% endif %}
+{% elif not notice %}
+<p class="muted">해당 실패 문서가 없습니다.</p>
+{% endif %}

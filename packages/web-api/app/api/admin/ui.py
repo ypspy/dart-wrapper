@@ -34,7 +34,13 @@ from app.schemas.catalog import (
     SliceListResponse,
     YearSummaryResponse,
 )
-from app.schemas.extract import CompletenessItem, CompletenessResponse, ExtractJobStatusResponse
+from app.schemas.extract import (
+    CompletenessItem,
+    CompletenessResponse,
+    ExtractJobStatusResponse,
+    FieldBundleCountsResponse,
+    FieldBundleFailItem,
+)
 from app.services.catalog_service import CatalogService
 from app.services.completeness_service import CompletenessService
 from app.services.corp_industry_service import CorpIndustryService
@@ -170,32 +176,52 @@ async def _extract_completeness_rows(
     start_date: str,
     end_date: str,
 ) -> list[tuple[str, CompletenessResponse]]:
-    """연구 창 세 유형을 서버에서 한 번씩 집계한다."""
-    rows: list[tuple[str, CompletenessResponse]] = []
-    for report_type in RESEARCH_EXTRACT_REPORT_TYPES:
-        summary = await service.summarize(
-            start_date=start_date,
-            end_date=end_date,
-            report_type=report_type,
-        )
-        rows.append((report_type, summary))
-    return rows
+    """연구 창 세 유형을 한 번의 기간 스캔으로 집계한다."""
+    summaries = await service.summarize_many(
+        start_date=start_date,
+        end_date=end_date,
+        report_types=list(RESEARCH_EXTRACT_REPORT_TYPES),
+    )
+    return [(report_type, summaries[report_type]) for report_type in RESEARCH_EXTRACT_REPORT_TYPES]
+
+
+def _resolve_extract_window(
+    start_date: str | None,
+    end_date: str | None,
+) -> tuple[str, str, str | None]:
+    """쿼리 기간을 유지하고, 형식이 아니면 notice만 붙인다."""
+    resolved_start = start_date or RESEARCH_EXTRACT_START_DATE
+    resolved_end = end_date or RESEARCH_EXTRACT_END_DATE
+    try:
+        _require_extract_dates(resolved_start, resolved_end)
+    except BadRequest as exc:
+        return resolved_start, resolved_end, str(exc)
+    return resolved_start, resolved_end, None
 
 
 async def _extract_completeness_page(
     service: CompletenessService,
     start_date: str | None,
     end_date: str | None,
-) -> tuple[str, str, str | None, list[tuple[str, CompletenessResponse]]]:
-    """쿼리 기간을 유지하고, 형식이 맞으면 세 카드 집계를 채운다."""
-    resolved_start = start_date or RESEARCH_EXTRACT_START_DATE
-    resolved_end = end_date or RESEARCH_EXTRACT_END_DATE
-    try:
-        _require_extract_dates(resolved_start, resolved_end)
-    except BadRequest as exc:
-        return resolved_start, resolved_end, str(exc), []
+) -> tuple[
+    str,
+    str,
+    str | None,
+    list[tuple[str, CompletenessResponse]],
+    FieldBundleCountsResponse | None,
+]:
+    """쿼리 기간을 유지하고, 형식이 맞으면 세 카드와 12묶음 집계를 채운다."""
+    resolved_start, resolved_end, date_notice = _resolve_extract_window(
+        start_date, end_date
+    )
+    if date_notice:
+        return resolved_start, resolved_end, date_notice, [], None
     rows = await _extract_completeness_rows(service, resolved_start, resolved_end)
-    return resolved_start, resolved_end, None, rows
+    field_bundles = await service.summarize_field_bundles(
+        start_date=resolved_start,
+        end_date=resolved_end,
+    )
+    return resolved_start, resolved_end, None, rows, field_bundles
 
 
 async def _extract_ops_context(
@@ -357,14 +383,13 @@ async def extract_dashboard(
     settings: Settings = Depends(get_settings_dep),
     extraction: ExtractionService = Depends(get_extraction_service),
     catalog: CatalogService = Depends(get_catalog_service),
-    completeness: CompletenessService = Depends(get_completeness_service),
 ) -> HTMLResponse:
     """유형별 완전성 카드와 잡 카드를 보여 준다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
-    resolved_start, resolved_end, date_notice, rows = await _extract_completeness_page(
-        completeness, start_date, end_date
+    resolved_start, resolved_end, date_notice = _resolve_extract_window(
+        start_date, end_date
     )
     context = await _extract_ops_context(
         extraction,
@@ -372,7 +397,7 @@ async def extract_dashboard(
         start_date=resolved_start,
         end_date=resolved_end,
         notice=notice,
-        completeness_rows=rows,
+        completeness_rows=[],
     )
     context["date_notice"] = date_notice
     return templates.TemplateResponse(
@@ -398,8 +423,8 @@ async def extract_completeness_cards(
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
-    resolved_start, resolved_end, date_notice, rows = await _extract_completeness_page(
-        completeness, start_date, end_date
+    resolved_start, resolved_end, date_notice, rows, field_bundles = (
+        await _extract_completeness_page(completeness, start_date, end_date)
     )
     return templates.TemplateResponse(
         request,
@@ -409,6 +434,7 @@ async def extract_completeness_cards(
             "end_date": resolved_end,
             "date_notice": date_notice,
             "completeness_rows": rows,
+            "field_bundles": field_bundles,
         },
     )
 
@@ -469,6 +495,71 @@ async def extract_completeness_items(
             "status": status,
             "items": items,
             "next_href": next_href,
+            "notice": notice,
+        },
+    )
+
+
+@router.get(
+    "/extract/field-bundle-items",
+    response_class=HTMLResponse,
+    summary="필드 묶음 실패 문서 목록",
+)
+async def extract_field_bundle_items(
+    request: Request,
+    bundle: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    cursor: str | None = None,
+    settings: Settings = Depends(get_settings_dep),
+    completeness: CompletenessService = Depends(get_completeness_service),
+) -> HTMLResponse:
+    """선택한 묶음의 실패 문서와 TSV 링크를 반환한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+
+    resolved_start = start_date or RESEARCH_EXTRACT_START_DATE
+    resolved_end = end_date or RESEARCH_EXTRACT_END_DATE
+    notice: str | None = None
+    items: list[FieldBundleFailItem] = []
+    next_href: str | None = None
+    export_href = (
+        "/admin/extract/audit-opinion/field-bundles/export"
+        f"?start_date={quote(resolved_start)}"
+        f"&end_date={quote(resolved_end)}"
+        f"&bundle={quote(bundle)}"
+        "&outcome=fail"
+    )
+    try:
+        _require_extract_dates(resolved_start, resolved_end)
+        page = await completeness.list_field_bundle_fail_items(
+            start_date=resolved_start,
+            end_date=resolved_end,
+            bundle=bundle,
+            cursor=cursor,
+            limit=50,
+        )
+        items = list(page.items)
+        if page.next_cursor:
+            next_href = (
+                "/admin/extract/field-bundle-items"
+                f"?start_date={quote(resolved_start)}"
+                f"&end_date={quote(resolved_end)}"
+                f"&bundle={quote(bundle)}"
+                f"&cursor={quote(page.next_cursor)}"
+            )
+    except BadRequest as exc:
+        notice = str(exc)
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/extract_field_bundle_items.html",
+        {
+            "start_date": resolved_start,
+            "end_date": resolved_end,
+            "bundle": bundle,
+            "items": items,
+            "next_href": next_href,
+            "export_href": export_href,
             "notice": notice,
         },
     )

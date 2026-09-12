@@ -16,9 +16,19 @@ from app.api.deps import (
     get_slice_query_service,
 )
 from app.errors import CatalogConflict
+from app.extracting.constants import EXTRACTOR_VERSION
+from app.extracting.field_bundles import BUNDLE_KEYS, BUNDLE_LABELS
 from app.main import create_app
 from app.schemas.catalog import JobLogItem
-from app.schemas.extract import CompletenessItem, CompletenessResponse, ExtractJobStatusResponse
+from app.schemas.extract import (
+    CompletenessItem,
+    CompletenessResponse,
+    ExtractJobStatusResponse,
+    FieldBundleCountsResponse,
+    FieldBundleFailItem,
+    FieldBundleFailListResponse,
+    FieldBundleRow,
+)
 from tests.test_admin_ui import JOB_STATUS, FakeCatalogService, FakeSliceQueryService
 from tests.test_corps_admin_ui import FakeCorpIndustryService
 
@@ -45,9 +55,68 @@ class FakeCompletenessService:
             blocked=0,
             section_missing=0,
             unextracted=2,
+            stale_version=4,
             ambiguous_dates=1,
             field_partial=3,
             items=items,
+        )
+
+    async def summarize_many(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        report_types: list[str],
+    ) -> dict[str, CompletenessResponse]:
+        """카드용 세 유형 집계. 유형마다 summarize를 호출해 호출 기록을 남긴다."""
+        return {
+            report_type: await self.summarize(
+                start_date=start_date,
+                end_date=end_date,
+                report_type=report_type,
+            )
+            for report_type in report_types
+        }
+
+    async def summarize_field_bundles(self, **kwargs) -> FieldBundleCountsResponse:
+        """테스트용 12묶음 집계."""
+        self.bundle_calls = getattr(self, "bundle_calls", [])
+        self.bundle_calls.append(kwargs)
+        rows = []
+        for key in BUNDLE_KEYS:
+            rows.append(
+                FieldBundleRow(
+                    bundle=key,
+                    label=BUNDLE_LABELS[key],
+                    ok=1,
+                    not_applicable=0 if key != "subsidiary" else 2,
+                    expected_missing=0 if key != "communications" else 3,
+                    fail=4,
+                )
+            )
+        return FieldBundleCountsResponse(
+            start_date=str(kwargs.get("start_date", "")),
+            end_date=str(kwargs.get("end_date", "")),
+            extractor_version=EXTRACTOR_VERSION,
+            eligible=10,
+            bundles=rows,
+        )
+
+    async def list_field_bundle_fail_items(self, **kwargs) -> FieldBundleFailListResponse:
+        """테스트용 묶음 실패 한 건."""
+        return FieldBundleFailListResponse(
+            items=[
+                FieldBundleFailItem(
+                    report_type="F001",
+                    rcept_no="20200331000001",
+                    dcm_no="11111",
+                    fs_scope="separate",
+                    bundle=str(kwargs.get("bundle", "opinion")),
+                    status="not_found",
+                    extractor_version=EXTRACTOR_VERSION,
+                    viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=1",
+                )
+            ]
         )
 
 
@@ -180,20 +249,22 @@ async def test_extract_job_card_shows_progress(
     assert "추출 완료(ok)" in response.text
 
 
-async def test_extract_page_renders_three_type_cards(
+async def test_extract_page_does_not_block_on_completeness(
     client_factory: ClientFactory,
 ) -> None:
-    """세 유형 카드에 같은 Fake 숫자가 보인다."""
-    async with client_factory(_app()) as client:
+    """첫 화면은 집계를 기다리지 않고 카드만 HTMX로 불러온다."""
+    completeness = FakeCompletenessService()
+    async with client_factory(_app(completeness=completeness)) as client:
         client.cookies.set("admin_token", "dev-admin-token")
         response = await client.get("/admin/extract")
     body = response.text
     assert response.status_code == 200
-    assert "F001" in body and "F002" in body and "A001" in body
-    assert "대상 10" in body
-    assert "미추출 2" in body
-    assert "ok 중 구멍" in body or "부분실패 3" in body
+    assert completeness.calls == []
+    assert "대상 10" not in body
+    assert "미추출 2" not in body
+    assert "완전성 카드를 불러오는 중" in body
     assert "every 60s" in body
+    assert "hx-trigger=" in body and "load" in body
     assert 'hx-get="/admin/extract/completeness-cards' in body
     assert "status=ok" not in body
 
@@ -212,6 +283,44 @@ async def test_completeness_cards_query_uses_requested_dates(
     types = [call["report_type"] for call in completeness.calls]
     assert types == ["F001", "F002", "A001"]
     assert all(call["start_date"] == "20200101" for call in completeness.calls)
+    assert "대상 10" in response.text
+    assert "미추출 2" in response.text
+    assert "구버전 4" in response.text
+    assert "재추출 필요" in response.text
+    assert "ok 중 구멍" in response.text or "부분실패 3" in response.text
+
+
+async def test_completeness_cards_include_twelve_bundle_rows(
+    client_factory: ClientFactory,
+) -> None:
+    """카드 partial에 12묶음 표와 실패 TSV 링크가 있다."""
+    completeness = FakeCompletenessService()
+    async with client_factory(_app(completeness=completeness)) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get(
+            "/admin/extract/completeness-cards?start_date=20200101&end_date=20201231"
+        )
+    assert response.status_code == 200
+    assert "감사인" in response.text
+    assert "종속기업" in response.text
+    assert "제도상없음" in response.text
+    assert "field-bundles/export" in response.text
+    assert completeness.bundle_calls[0]["start_date"] == "20200101"
+
+
+async def test_field_bundle_items_partial_lists_fail_row(
+    client_factory: ClientFactory,
+) -> None:
+    """실패 목록 partial에 접수번호와 원문 링크가 있다."""
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get(
+            "/admin/extract/field-bundle-items"
+            "?start_date=20200101&end_date=20201231&bundle=opinion"
+        )
+    assert response.status_code == 200
+    assert "20200331000001" in response.text
+    assert "viewer.do" in response.text
 
 
 async def test_completeness_items_lists_documents(
