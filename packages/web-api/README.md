@@ -189,6 +189,21 @@ JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
 `당기순손실` 과목은 칸 괄호가 없어도 음수로 읽습니다.
 `비유동`·`기타` 과목과 `유동화부채`는 유동 소계로 쓰지 않습니다. `부채와자본총계`는 부채총계로 쓰지 않습니다.
 
+### 필드 묶음 모니터
+
+`/admin/extract` 왼쪽 문서 카드 아래에 현재 추출기 `fetch_status=ok` 행의 12묶음
+(감사인·의견·GAAP·감사보고서일·당기·감사시간·실시항목·커뮤니케이션·계정·내부회계·계속기업·종속기업)
+성공 / 해당없음 / 제도상없음 / 실패를 보여 줍니다. 성공률은 `성공/(성공+실패)`입니다.
+
+- 별도·unknown 문서의 종속기업 `not_applicable`은 해당없음(분모 제외)
+- 실시내용 1–3절 ok이고 4절만 `not_found`이면 커뮤니케이션은 제도상없음
+- 구버전·미추출·fetch 실패는 이 표에 넣지 않습니다 (문서 카드)
+
+JSON: `GET /admin/extract/audit-opinion/field-bundles`, 실패 목록
+`.../field-bundles/items?bundle=&outcome=fail`, TSV
+`.../field-bundles/export` (최대 5000행, `X-Next-Cursor`).
+실행 중 잡은 `params.field_bundles`에 이번 처리분만 가산합니다.
+
 ### Public 조회
 
 `GET /api/v1/disclosures/{rcp_no}/audit-facts`는 인증 없이 해당 접수의 추출 행을 반환합니다.
