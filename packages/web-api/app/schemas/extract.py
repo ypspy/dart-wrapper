@@ -56,6 +56,7 @@ class CompletenessResponse(BaseModel):
     blocked: int
     section_missing: int
     unextracted: int
+    stale_version: int
     ambiguous_dates: int
     field_partial: int
     items: list[CompletenessItem] = Field(default_factory=list)
@@ -94,3 +95,44 @@ class DateOverrideResponse(BaseModel):
     audit_report_date_override: str | None
     audit_report_date_status: str | None
     audit_report_date_source: str | None
+
+
+class FieldBundleRow(BaseModel):
+    """창 표 한 줄."""
+
+    bundle: str
+    label: str
+    ok: int
+    not_applicable: int
+    expected_missing: int
+    fail: int
+
+
+class FieldBundleCountsResponse(BaseModel):
+    """기간 안 현재 추출기 facts의 12묶음 집계."""
+
+    start_date: str
+    end_date: str
+    extractor_version: str
+    eligible: int
+    bundles: list[FieldBundleRow]
+
+
+class FieldBundleFailItem(BaseModel):
+    """실패 목록·TSV 한 행."""
+
+    report_type: str
+    rcept_no: str
+    dcm_no: str
+    fs_scope: str
+    bundle: str
+    status: str | None
+    extractor_version: str | None
+    viewer_url: str | None
+
+
+class FieldBundleFailListResponse(BaseModel):
+    """실패 목록 한 페이지."""
+
+    items: list[FieldBundleFailItem]
+    next_cursor: str | None = None

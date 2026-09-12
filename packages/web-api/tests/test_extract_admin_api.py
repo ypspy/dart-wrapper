@@ -9,14 +9,18 @@ from fastapi import FastAPI
 from app.adapters.dart_http import DartHttpClient
 from app.api.deps import get_extraction_service
 from app.db.session import create_all, create_db_engine, create_sessionmaker
-from app.errors import CatalogNotFound
+from app.errors import BadRequest, CatalogNotFound
 from app.extracting.constants import EXTRACTOR_VERSION
+from app.extracting.field_bundles import BUNDLE_KEYS, DART_DISCLOSURE_VIEW
 from app.main import create_app
 from app.models.audit_report_fact import AuditReportFact
+from app.models.disclosure import Disclosure
+from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
 from app.repositories.fact_repository import FactRepository
 from app.schemas.entry import EntryRecord
 from app.schemas.extract import ExtractJobStatusResponse
+from app.services.completeness_service import CompletenessService
 from app.services.extraction_service import ExtractionService
 
 TOKEN_HEADER = {"X-Admin-Token": "dev-admin-token"}
@@ -97,9 +101,35 @@ def _ok_fact(**overrides: object) -> AuditReportFact:
     return AuditReportFact(**values)
 
 
+def _disclosures_from_entries(entries: list[EntryRecord]) -> list[Disclosure]:
+    """완전성 집계가 쓰는 disclosures 행을 entry에서 만든다."""
+    by_rcept: dict[str, Disclosure] = {}
+    for entry in entries:
+        existing = by_rcept.get(entry.rcept_no)
+        if existing is not None:
+            existing.entry_count += 1
+            continue
+        by_rcept[entry.rcept_no] = Disclosure(
+            rcept_no=entry.rcept_no,
+            corp_code=entry.corp_code,
+            corp_name=entry.corp_name,
+            report_nm=entry.report_nm,
+            report_type=entry.report_type,
+            correction_type=entry.correction_type,
+            submitter=entry.submitter,
+            rcept_dt=entry.rcept_dt or "",
+            bsns_year=entry.bsns_year,
+            year_end=entry.year_end,
+            disclosure_url=entry.disclosure_url,
+            entry_count=1,
+        )
+    return list(by_rcept.values())
+
+
 async def _seed(sessionmaker, entries: list[EntryRecord], facts: list[AuditReportFact]) -> None:
     async with sessionmaker() as session:
         await EntryRepository(session).upsert_many(entries)
+        await DisclosureRepository(session).upsert_many(_disclosures_from_entries(entries))
         facts_repo = FactRepository(session)
         for fact in facts:
             await facts_repo.upsert(fact)
@@ -159,6 +189,58 @@ async def test_completeness_counts_unextracted_and_lists_remaining(
     assert listed["unextracted"] == 1
     assert listed["items"] == [{"rcept_no": "20200331000002", "dcm_no": "22222"}]
     assert listed["next_cursor"] is None
+
+
+async def test_completeness_stale_version_is_not_ok(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """옛 파서 ok 행은 추출 ok가 아니라 구버전(재추출 필요)이다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [
+            _entry(),
+            _entry(
+                entry_id="e-current",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=2",
+            ),
+        ],
+        [
+            _ok_fact(extractor_version="audit_opinion.v2"),
+            _ok_fact(
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                extractor_version=EXTRACTOR_VERSION,
+            ),
+        ],
+    )
+
+    async with client_factory(app) as client:
+        counts = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+        listing = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params={**COMPLETENESS_PARAMS, "status": "stale_version"},
+            headers=TOKEN_HEADER,
+        )
+
+    assert counts.status_code == 200
+    body = counts.json()
+    assert body["target"] == 2
+    assert body["ok"] == 1
+    assert body["stale_version"] == 1
+    assert body["unextracted"] == 0
+    assert body["field_partial"] == 0
+
+    assert listing.status_code == 200
+    listed = listing.json()
+    assert listed["stale_version"] == 1
+    assert listed["items"] == [{"rcept_no": "20200331000001", "dcm_no": "11111"}]
 
 
 class FakeExtractionService:
@@ -827,3 +909,247 @@ async def test_force_finish_extract_job_records_request(client_factory) -> None:
     assert ok.status_code == 202
     assert service.force_finished == ["job-extract-1"]
     assert missing.status_code == 404
+
+
+async def test_field_bundles_exclude_stale_and_fetch_failed_and_classify(
+    memory_app: tuple[FastAPI, object],
+) -> None:
+    """현재 버전 ok만 모집단. 별도 종속 NA, 4절만 없음은 제도상없음, 연결 종속 구멍은 실패."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [
+            _entry(),
+            _entry(
+                entry_id="e-stale",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=2",
+            ),
+            _entry(
+                entry_id="e-failfetch",
+                rcept_no="20200331000003",
+                dcm_no="33333",
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=3",
+            ),
+            _entry(
+                entry_id="e-cons",
+                rcept_no="20200331000004",
+                dcm_no="44444",
+                report_type="F002",
+                document_name="연결감사보고서",
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=4",
+            ),
+        ],
+        [
+            _ok_fact(
+                hours_status="ok",
+                activities_status="ok",
+                communications_status="not_found",
+                subsidiary_status="not_applicable",
+            ),
+            _ok_fact(
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                extractor_version="audit_opinion.v2",
+                opinion_status="not_found",
+            ),
+            _ok_fact(
+                rcept_no="20200331000003",
+                dcm_no="33333",
+                fetch_status="fetch_failed",
+                opinion_status="skipped",
+            ),
+            _ok_fact(
+                rcept_no="20200331000004",
+                dcm_no="44444",
+                source_report_type="F002",
+                fs_scope="consolidated",
+                subsidiary_status="not_found",
+            ),
+        ],
+    )
+    async with sessionmaker() as session:
+        summary = await CompletenessService(session).summarize_field_bundles(
+            start_date="20200301",
+            end_date="20200331",
+        )
+    by_key = {row.bundle: row for row in summary.bundles}
+    assert summary.eligible == 2
+    assert list(by_key) == list(BUNDLE_KEYS)
+    assert by_key["subsidiary"].not_applicable == 1
+    assert by_key["subsidiary"].fail == 1
+    assert by_key["subsidiary"].ok == 0
+    assert by_key["communications"].expected_missing == 1
+    assert by_key["opinion"].ok == 2
+
+
+async def test_field_bundle_fail_items_list_subsidiary_holes_only(
+    memory_app: tuple[FastAPI, object],
+) -> None:
+    """실패 목록은 현재 버전 ok 모집단의 해당 묶음 구멍만 남기고 entry viewer_url을 붙인다."""
+    _app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [
+            _entry(),
+            _entry(
+                entry_id="e-stale",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=2",
+            ),
+            _entry(
+                entry_id="e-failfetch",
+                rcept_no="20200331000003",
+                dcm_no="33333",
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=3",
+            ),
+            _entry(
+                entry_id="e-cons",
+                rcept_no="20200331000004",
+                dcm_no="44444",
+                report_type="F002",
+                document_name="연결감사보고서",
+                viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=4",
+            ),
+        ],
+        [
+            _ok_fact(
+                hours_status="ok",
+                activities_status="ok",
+                communications_status="not_found",
+                subsidiary_status="not_applicable",
+            ),
+            _ok_fact(
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                extractor_version="audit_opinion.v2",
+                opinion_status="not_found",
+            ),
+            _ok_fact(
+                rcept_no="20200331000003",
+                dcm_no="33333",
+                fetch_status="fetch_failed",
+                opinion_status="skipped",
+            ),
+            _ok_fact(
+                rcept_no="20200331000004",
+                dcm_no="44444",
+                source_report_type="F002",
+                fs_scope="consolidated",
+                subsidiary_status="not_found",
+            ),
+        ],
+    )
+    async with sessionmaker() as session:
+        service = CompletenessService(session)
+        listed = await service.list_field_bundle_fail_items(
+            start_date="20200301",
+            end_date="20200331",
+            bundle="subsidiary",
+            cursor=None,
+            limit=50,
+        )
+        comms = await service.list_field_bundle_fail_items(
+            start_date="20200301",
+            end_date="20200331",
+            bundle="communications",
+            cursor=None,
+            limit=50,
+        )
+    assert [(item.rcept_no, item.dcm_no) for item in listed.items] == [
+        ("20200331000004", "44444")
+    ]
+    item = listed.items[0]
+    assert item.report_type == "F002"
+    assert item.fs_scope == "consolidated"
+    assert item.bundle == "subsidiary"
+    assert item.status == "not_found"
+    assert item.extractor_version == EXTRACTOR_VERSION
+    assert item.viewer_url == "https://dart.fss.or.kr/report/viewer.do?rcpNo=4"
+    assert listed.next_cursor is None
+    assert comms.items == []
+
+
+async def test_field_bundle_fail_items_reject_unknown_bundle(
+    memory_app: tuple[FastAPI, object],
+) -> None:
+    """bundle이 12개 키가 아니면 BadRequest다."""
+    _app, sessionmaker = memory_app
+    async with sessionmaker() as session:
+        with pytest.raises(BadRequest, match="bundle은 12개 필드 키 중 하나여야 합니다"):
+            await CompletenessService(session).list_field_bundle_fail_items(
+                start_date="20200301",
+                end_date="20200331",
+                bundle="not-a-bundle",
+                cursor=None,
+                limit=50,
+            )
+
+
+async def test_field_bundle_fail_items_use_dart_view_when_viewer_missing(
+    memory_app: tuple[FastAPI, object],
+) -> None:
+    """entry viewer_url이 없으면 공시 뷰어 URL을 쓴다."""
+    _app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [_entry(viewer_url=None)],
+        [_ok_fact(opinion_status="not_found")],
+    )
+    async with sessionmaker() as session:
+        listed = await CompletenessService(session).list_field_bundle_fail_items(
+            start_date="20200301",
+            end_date="20200331",
+            bundle="opinion",
+            cursor=None,
+            limit=50,
+        )
+    assert listed.items[0].viewer_url == DART_DISCLOSURE_VIEW.format(
+        rcept_no="20200331000001"
+    )
+
+
+async def test_field_bundle_fail_items_paginate_by_cursor(
+    memory_app: tuple[FastAPI, object],
+) -> None:
+    """실패 목록은 rcept_no·dcm_no 순으로 limit·cursor 페이지를 잇는다."""
+    _app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [
+            _entry(entry_id="e1", rcept_no="20200331000001", dcm_no="111"),
+            _entry(entry_id="e2", rcept_no="20200331000002", dcm_no="222"),
+            _entry(entry_id="e3", rcept_no="20200331000003", dcm_no="333"),
+        ],
+        [
+            _ok_fact(rcept_no="20200331000001", dcm_no="111", opinion_status="skipped"),
+            _ok_fact(rcept_no="20200331000002", dcm_no="222", opinion_status="not_found"),
+            _ok_fact(rcept_no="20200331000003", dcm_no="333", opinion_status="skipped"),
+        ],
+    )
+    async with sessionmaker() as session:
+        service = CompletenessService(session)
+        page1 = await service.list_field_bundle_fail_items(
+            start_date="20200301",
+            end_date="20200331",
+            bundle="opinion",
+            cursor=None,
+            limit=1,
+        )
+        page2 = await service.list_field_bundle_fail_items(
+            start_date="20200301",
+            end_date="20200331",
+            bundle="opinion",
+            cursor=page1.next_cursor,
+            limit=1,
+        )
+    assert [(item.rcept_no, item.dcm_no) for item in page1.items] == [
+        ("20200331000001", "111")
+    ]
+    assert page1.next_cursor
+    assert [(item.rcept_no, item.dcm_no) for item in page2.items] == [
+        ("20200331000002", "222")
+    ]
+    assert page2.next_cursor
