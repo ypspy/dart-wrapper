@@ -9,6 +9,8 @@
     </p>
     {% if notice %}
     <p class="banner-warn" role="status">{{ notice }}</p>
+    {% elif date_notice %}
+    <p class="banner-warn" role="status">{{ date_notice }}</p>
     {% elif catalog_busy %}
     <p class="banner-warn" role="status">수집 중이니 추출을 시작할 수 없습니다.</p>
     {% elif extract_busy %}
@@ -32,9 +34,9 @@
     </form>
     <div id="extract-completeness"
          hx-get="/admin/extract/completeness-cards?start_date={{ start_date }}&amp;end_date={{ end_date }}"
-         hx-trigger="every 60s"
+         hx-trigger="load, every 60s"
          hx-swap="innerHTML">
-      {% include "admin/partials/extract_completeness.html" %}
+      <p class="muted">완전성 카드를 불러오는 중입니다.</p>
     </div>
   </section>
 
