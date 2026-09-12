@@ -1153,3 +1153,105 @@ async def test_field_bundle_fail_items_paginate_by_cursor(
         ("20200331000002", "222")
     ]
     assert page2.next_cursor
+
+
+async def test_field_bundles_api_requires_token(client_factory) -> None:
+    """필드 묶음 집계도 Admin 토큰이 필요하다."""
+    app = create_app()
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/field-bundles",
+            params={"start_date": "20200301", "end_date": "20200331"},
+        )
+    assert response.status_code == 401
+
+
+async def test_field_bundle_items_reject_unknown_bundle(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """알 수 없는 bundle은 400이다."""
+    app, _sessionmaker = memory_app
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/field-bundles/items",
+            params={
+                "start_date": "20200301",
+                "end_date": "20200331",
+                "bundle": "nope",
+                "outcome": "fail",
+            },
+            headers=TOKEN_HEADER,
+        )
+    assert response.status_code == 400
+    assert "bundle" in response.json()["detail"]
+
+
+async def test_field_bundle_export_tsv_and_fail_list(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """실패 목록과 TSV export가 동일 시드의 연결 종속 구멍을 반환한다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [
+            _entry(
+                report_type="F002",
+                document_name="연결감사보고서",
+            )
+        ],
+        [
+            _ok_fact(
+                source_report_type="F002",
+                fs_scope="consolidated",
+                subsidiary_status="not_found",
+            )
+        ],
+    )
+    params = {
+        "start_date": "20200301",
+        "end_date": "20200331",
+        "bundle": "subsidiary",
+        "outcome": "fail",
+    }
+    async with client_factory(app) as client:
+        listing = await client.get(
+            "/admin/extract/audit-opinion/field-bundles/items",
+            params=params,
+            headers=TOKEN_HEADER,
+        )
+        export = await client.get(
+            "/admin/extract/audit-opinion/field-bundles/export",
+            params=params,
+            headers=TOKEN_HEADER,
+        )
+    assert listing.status_code == 200
+    item = listing.json()["items"][0]
+    assert item["report_type"] == "F002"
+    assert item["dcm_no"] == "11111"
+    assert item["status"] == "not_found"
+    assert "viewer.do" in (item["viewer_url"] or "") or "rcpNo=" in (item["viewer_url"] or "")
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/tab-separated-values")
+    assert "report_type" in export.text.splitlines()[0]
+    assert "F002" in export.text
+
+
+async def test_field_bundle_items_reject_non_fail_outcome(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """outcome=ok는 400이다."""
+    app, _sessionmaker = memory_app
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/field-bundles/items",
+            params={
+                "start_date": "20200301",
+                "end_date": "20200331",
+                "bundle": "opinion",
+                "outcome": "ok",
+            },
+            headers=TOKEN_HEADER,
+        )
+    assert response.status_code == 400
+    assert "outcome" in response.json()["detail"]
+

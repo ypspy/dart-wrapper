@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
 
 from app.api.deps import (
     get_completeness_service,
@@ -13,6 +13,7 @@ from app.api.deps import (
 )
 from app.config import Settings
 from app.errors import BadRequest
+from app.extracting.field_bundles import EXPORT_PAGE_SIZE
 from app.schemas.extract import (
     CompletenessResponse,
     DateOverrideRequest,
@@ -20,6 +21,8 @@ from app.schemas.extract import (
     ExtractAuditRequest,
     ExtractAuditResponse,
     ExtractJobStatusResponse,
+    FieldBundleCountsResponse,
+    FieldBundleFailListResponse,
     ResolveDatesResponse,
 )
 from app.services.completeness_service import CompletenessService
@@ -119,6 +122,103 @@ async def read_completeness(
         cursor=cursor,
         limit=limit,
     )
+
+
+@router.get(
+    "/audit-opinion/field-bundles",
+    response_model=FieldBundleCountsResponse,
+    summary="추출 필드 묶음 12줄 집계",
+)
+async def read_field_bundles(
+    start_date: str = Query(pattern=r"^\d{8}$"),
+    end_date: str = Query(pattern=r"^\d{8}$"),
+    service: CompletenessService = Depends(get_completeness_service),
+) -> FieldBundleCountsResponse:
+    """현재 추출기 ok facts의 12묶음 건수를 반환한다."""
+    return await service.summarize_field_bundles(
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@router.get(
+    "/audit-opinion/field-bundles/items",
+    response_model=FieldBundleFailListResponse,
+    summary="필드 묶음 실패 문서 목록",
+)
+async def read_field_bundle_items(
+    start_date: str = Query(pattern=r"^\d{8}$"),
+    end_date: str = Query(pattern=r"^\d{8}$"),
+    bundle: str = Query(),
+    outcome: str = Query(),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=50),
+    service: CompletenessService = Depends(get_completeness_service),
+) -> FieldBundleFailListResponse:
+    """outcome=fail만 허용한다."""
+    if outcome != "fail":
+        raise BadRequest("outcome은 fail만 지원합니다. 실패 목록을 요청해 주세요.")
+    return await service.list_field_bundle_fail_items(
+        start_date=start_date,
+        end_date=end_date,
+        bundle=bundle,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/audit-opinion/field-bundles/export",
+    summary="필드 묶음 실패 TSV",
+)
+async def export_field_bundle_items(
+    start_date: str = Query(pattern=r"^\d{8}$"),
+    end_date: str = Query(pattern=r"^\d{8}$"),
+    bundle: str = Query(),
+    outcome: str = Query(),
+    cursor: str | None = Query(default=None),
+    service: CompletenessService = Depends(get_completeness_service),
+) -> Response:
+    """실패 행을 탭 구분 텍스트로 내려 준다. 최대 5000행."""
+    if outcome != "fail":
+        raise BadRequest("outcome은 fail만 지원합니다. 실패 목록을 요청해 주세요.")
+    page = await service.list_field_bundle_fail_items(
+        start_date=start_date,
+        end_date=end_date,
+        bundle=bundle,
+        cursor=cursor,
+        limit=EXPORT_PAGE_SIZE,
+    )
+    headers_row = [
+        "report_type",
+        "rcept_no",
+        "dcm_no",
+        "fs_scope",
+        "bundle",
+        "status",
+        "extractor_version",
+        "viewer_url",
+    ]
+    lines = ["\t".join(headers_row)]
+    for item in page.items:
+        lines.append(
+            "\t".join(
+                [
+                    item.report_type,
+                    item.rcept_no,
+                    item.dcm_no,
+                    item.fs_scope,
+                    item.bundle,
+                    item.status or "",
+                    item.extractor_version or "",
+                    item.viewer_url or "",
+                ]
+            )
+        )
+    headers = {"Content-Type": "text/tab-separated-values; charset=utf-8"}
+    if page.next_cursor:
+        headers["X-Next-Cursor"] = page.next_cursor
+    return Response(content="\n".join(lines) + "\n", headers=headers)
 
 
 @router.post(
