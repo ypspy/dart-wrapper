@@ -56,7 +56,7 @@ class CompletenessResponse(BaseModel):
     blocked: int
     section_missing: int
     unextracted: int
-    stale_version: int
+    stale_version: int = 0
     ambiguous_dates: int
     field_partial: int
     items: list[CompletenessItem] = Field(default_factory=list)
