@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
 import pytest
 
@@ -71,3 +73,20 @@ async def test_fetch_html_attaches_status_code_on_client_error() -> None:
             await fetcher.fetch_html("https://dart.fss.or.kr/report/viewer.do")
 
     assert exc_info.value.status_code == 403
+
+
+async def test_fetch_html_waits_min_interval_between_requests() -> None:
+    """min_interval_seconds가 있으면 다음 요청 전에 그만큼 쉰다."""
+    times: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        times.append(time.perf_counter())
+        return httpx.Response(200, text="<html></html>")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        fetcher = DartHttpClient(client, min_interval_seconds=0.05)
+        await fetcher.fetch_html("https://dart.fss.or.kr/a")
+        await fetcher.fetch_html("https://dart.fss.or.kr/b")
+
+    assert len(times) == 2
+    assert times[1] - times[0] >= 0.05
