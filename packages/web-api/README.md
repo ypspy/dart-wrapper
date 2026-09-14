@@ -99,6 +99,8 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
+추출과 Viewer 원문 GET은 같은 DART 클라이언트를 쓰며 `DART_FETCH_MIN_INTERVAL_SECONDS`(기본 1초)
+간격을 둡니다. Viewer는 섹션을 한 번에 하나 가져옵니다. 수집기 `safeGet`과 같은 간격입니다.
 날짜 LLM 해소는 DART를 쓰지 않아 수집과 병행할 수 있습니다.
 
 대상은 F001·F002와 A001 첨부 감사·연결감사입니다. 저장 단위는 문서 하나(`rcept_no`+`dcm_no`)이고,
