@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     dart_fetch_concurrency: int = 4
     dart_fetch_timeout_seconds: float = 15.0
     dart_fetch_max_retries: int = 2
+    # 수집기(safeGet delayMs=1000)와 같이 추출 원문 요청 사이에 쉰다.
+    dart_fetch_min_interval_seconds: float = 1.0
     opendart_api_key: str = ""
     opendart_concurrency: int = 2
     opendart_timeout_seconds: float = 15.0

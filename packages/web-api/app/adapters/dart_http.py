@@ -61,11 +61,28 @@ class DartHttpClient:
         timeout_seconds: float = 15.0,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.5,
+        min_interval_seconds: float = 0.0,
     ) -> None:
         self._client = client
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
+        self._min_interval_seconds = min_interval_seconds
+        self._last_request_at: float | None = None
+        self._pace_lock = asyncio.Lock()
+
+    async def _wait_interval(self) -> None:
+        """직전 DART 요청과의 최소 간격을 지킨다."""
+        if self._min_interval_seconds <= 0:
+            return
+        async with self._pace_lock:
+            now = asyncio.get_running_loop().time()
+            if self._last_request_at is not None:
+                wait = self._min_interval_seconds - (now - self._last_request_at)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                    now = asyncio.get_running_loop().time()
+            self._last_request_at = now
 
     async def fetch_html(self, url: str) -> str:
         """원문 HTML을 가져와 문자열로 반환한다.
@@ -77,6 +94,7 @@ class DartHttpClient:
         last_reason = "알 수 없는 오류"
 
         for attempt in range(self._max_retries + 1):
+            await self._wait_interval()
             try:
                 response = await self._client.get(url, timeout=self._timeout_seconds)
                 if response.status_code >= 500:

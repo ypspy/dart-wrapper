@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.dart_http import DartHttpClient
 from app.adapters.llm_date_resolver import LlmDateResolver
 from app.adapters.opendart_company import OpenDartCompanyClient
 from app.config import Settings, get_settings
@@ -70,15 +69,9 @@ def get_fact_repository(session: AsyncSession = Depends(get_session)) -> FactRep
 def get_viewer_service(
     request: Request,
     entries: EntryRepository = Depends(get_entry_repository),
-    settings: Settings = Depends(get_settings_dep),
 ) -> ViewerService:
-    """Viewer 서비스를 제공한다. httpx 클라이언트는 앱 전체에서 재사용한다."""
-    http = DartHttpClient(
-        request.app.state.http_client,
-        timeout_seconds=settings.dart_fetch_timeout_seconds,
-        max_retries=settings.dart_fetch_max_retries,
-    )
-    return ViewerService(entries, http, concurrency=settings.dart_fetch_concurrency)
+    """Viewer 서비스를 제공한다. DART GET은 앱 공유 클라이언트를 쓴다."""
+    return ViewerService(entries, request.app.state.dart_http, concurrency=1)
 
 
 def get_catalog_service(
@@ -138,18 +131,13 @@ def get_extraction_service(
     """Admin 감사 추출 서비스를 제공한다.
 
     백그라운드 작업이 요청 세션 수명에 묶이지 않도록 세션메이커를 직접 넘긴다.
-    HTTP 클라이언트를 재사용하므로 앱 상태에 인스턴스를 하나만 둔다.
+    DART HTML 클라이언트는 앱 수명 동안 하나다.
     """
     service = getattr(request.app.state, "extraction_service", None)
     if service is None:
-        http = DartHttpClient(
-            request.app.state.http_client,
-            timeout_seconds=settings.dart_fetch_timeout_seconds,
-            max_retries=settings.dart_fetch_max_retries,
-        )
         service = ExtractionService(
             request.app.state.sessionmaker,
-            http,
+            request.app.state.dart_http,
             block_streak_threshold=settings.block_streak_threshold,
             block_wait_seconds=settings.block_wait_seconds,
         )

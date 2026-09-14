@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 
+from app.adapters.dart_http import DartHttpClient
 from app.adapters.node_entry_collector import NodeEntryCollector
 from app.api.admin import catalog
 from app.api.admin import corps as admin_corps
@@ -45,6 +46,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await ensure_schema(engine)
 
     http_client = httpx.AsyncClient(headers=_DEFAULT_HEADERS, follow_redirects=True)
+    dart_http = DartHttpClient(
+        http_client,
+        timeout_seconds=settings.dart_fetch_timeout_seconds,
+        max_retries=settings.dart_fetch_max_retries,
+        min_interval_seconds=settings.dart_fetch_min_interval_seconds,
+    )
     # OpenAI 호출에는 DART Referer를 붙이지 않는다.
     llm_http_client = httpx.AsyncClient(follow_redirects=True)
     # OpenDART API 호출에도 DART 상세페이지 Referer를 붙이지 않는다.
@@ -55,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.sessionmaker = sessionmaker
     app.state.http_client = http_client
+    app.state.dart_http = dart_http
     app.state.llm_http_client = llm_http_client
     app.state.opendart_http_client = opendart_http_client
     app.state.entry_collector = NodeEntryCollector(
