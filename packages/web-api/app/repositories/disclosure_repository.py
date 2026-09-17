@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.disclosure import Disclosure
 from app.models.entry import Entry
+from app.rcept_dt import to_dotted_rcept_dt
 
 
 class DisclosureRepository:
@@ -48,6 +49,27 @@ class DisclosureRepository:
         )
         result = await self._session.execute(statement)
         return int(result.scalar_one())
+
+    async def list_rcept_nos(
+        self,
+        start: str,
+        end: str,
+        report_types: Sequence[str],
+    ) -> list[str]:
+        """기간·유형의 접수번호를 인덱스 친화적으로 반환한다."""
+        start_dt = to_dotted_rcept_dt(start)
+        end_dt = to_dotted_rcept_dt(end)
+        statement = (
+            select(Disclosure.rcept_no)
+            .where(
+                Disclosure.report_type.in_(list(report_types)),
+                Disclosure.rcept_dt >= start_dt,
+                Disclosure.rcept_dt <= end_dt,
+            )
+            .order_by(Disclosure.rcept_no)
+        )
+        result = await self._session.execute(statement)
+        return list(result.scalars().all())
 
     async def list_page(
         self,
