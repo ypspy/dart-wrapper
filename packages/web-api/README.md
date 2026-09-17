@@ -201,6 +201,7 @@ JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
 
 - 별도·unknown 문서의 종속기업 `not_applicable`은 해당없음(분모 제외)
 - 실시내용 1–3절 ok이고 4절만 `not_found`이면 커뮤니케이션은 제도상없음
+- 내부회계 `skipped`는 비상장 개별(F001)과 연결 의무 전(F002, 사업연도 ≤ 2022)만 제도상없음. 코넥스(`corp_cls=N`)는 주권상장이다. `not_found`와 A001 `skipped`는 실패
 - 구버전·미추출·fetch 실패는 이 표에 넣지 않습니다 (문서 카드)
 
 JSON: `GET /admin/extract/audit-opinion/field-bundles`, 실패 목록

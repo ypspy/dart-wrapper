@@ -305,6 +305,7 @@ async def test_completeness_cards_include_twelve_bundle_rows(
     assert "감사인" in response.text
     assert "종속기업" in response.text
     assert "제도상없음" in response.text
+    assert "비상장 개별" in response.text
     assert "field-bundles/export" in response.text
     assert completeness.bundle_calls[0]["start_date"] == "20200101"
 
