@@ -147,6 +147,33 @@ def test_omits_missing_window_bounds() -> None:
     assert iso == "2017-01-01"
 
 
+def test_trailing_letter_header_date_is_candidate_and_ok() -> None:
+    """의견근거가 없으면 재무제표에대한경 앞 머리글 날짜가 후보이고 창 1개면 ok다."""
+    text = (
+        "독립된감사인의감사보고서이케이에프제일차주식회사주주및이사회귀중"
+        "2015년12월24일우리는별첨된회사의재무제표를감사하였습니다."
+        "해당재무제표는2015년10월31일과2015년7월31일현재의재무상태표로구성되어있습니다."
+        "재무제표에대한경영진의책임경영자는대한민국의일반기업회계기준에따라이재무제표를작성합니다."
+        "이감사보고서는감사보고서일현재로유효한것입니다."
+    )
+    candidates = extract_date_candidates(text)
+    assert [c.iso for c in candidates] == [
+        "2015-12-24",
+        "2015-10-31",
+        "2015-07-31",
+    ]
+
+    iso, status, passing = pick_audit_report_date(
+        candidates,
+        period_end=date(2015, 10, 31),
+        rcept_dt=date(2016, 1, 13),
+    )
+    assert status == "ok"
+    assert iso == "2015-12-24"
+    assert len(passing) == 1
+    assert passing[0].iso == "2015-12-24"
+
+
 @pytest.mark.parametrize(
     "text",
     [
