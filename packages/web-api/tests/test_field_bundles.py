@@ -5,6 +5,9 @@ from app.extracting.field_bundles import (
     add_fact_outcomes,
     classify_outcome,
     empty_field_bundle_counts,
+    icfr_period_year,
+    is_icfr_expected_missing,
+    is_listed_for_icfr,
 )
 from app.models.audit_report_fact import AuditReportFact
 from app.extracting.constants import EXTRACTOR_VERSION
@@ -88,6 +91,115 @@ def test_consolidated_subsidiary_not_found_is_fail() -> None:
 
 def test_ok_status_is_ok() -> None:
     assert classify_outcome("opinion", fs_scope="separate", status="ok") == "ok"
+
+
+def test_f001_skipped_unlisted_is_expected_missing() -> None:
+    for corp_cls in ("E", None, ""):
+        assert (
+            classify_outcome(
+                "icfr",
+                fs_scope="separate",
+                status="skipped",
+                report_type="F001",
+                corp_cls=corp_cls,
+            )
+            == "expected_missing"
+        )
+
+
+def test_f001_skipped_listed_is_fail() -> None:
+    for corp_cls in ("Y", "K", "N"):
+        assert (
+            classify_outcome(
+                "icfr",
+                fs_scope="separate",
+                status="skipped",
+                report_type="F001",
+                corp_cls=corp_cls,
+            )
+            == "fail"
+        )
+
+
+def test_f002_skipped_before_2023_is_expected_missing() -> None:
+    assert (
+        classify_outcome(
+            "icfr",
+            fs_scope="consolidated",
+            status="skipped",
+            report_type="F002",
+            period_year=2022,
+        )
+        == "expected_missing"
+    )
+
+
+def test_f002_skipped_from_2023_is_fail() -> None:
+    assert (
+        classify_outcome(
+            "icfr",
+            fs_scope="consolidated",
+            status="skipped",
+            report_type="F002",
+            period_year=2023,
+        )
+        == "fail"
+    )
+
+
+def test_f002_skipped_unknown_year_is_fail() -> None:
+    assert (
+        classify_outcome(
+            "icfr",
+            fs_scope="consolidated",
+            status="skipped",
+            report_type="F002",
+            period_year=None,
+        )
+        == "fail"
+    )
+
+
+def test_a001_skipped_is_fail_regardless_of_listing() -> None:
+    assert (
+        classify_outcome(
+            "icfr",
+            fs_scope="separate",
+            status="skipped",
+            report_type="A001",
+            corp_cls="E",
+            period_year=2016,
+        )
+        == "fail"
+    )
+
+
+def test_icfr_not_found_is_fail() -> None:
+    assert (
+        classify_outcome(
+            "icfr",
+            fs_scope="separate",
+            status="not_found",
+            report_type="F001",
+            corp_cls="E",
+        )
+        == "fail"
+    )
+
+
+def test_icfr_ok_is_ok() -> None:
+    assert classify_outcome("icfr", fs_scope="separate", status="ok") == "ok"
+
+
+def test_icfr_period_year_prefers_year_end() -> None:
+    assert icfr_period_year("(2019.12)", "2020.03.31") == 2019
+    assert icfr_period_year(None, "2020.03.31") == 2020
+    assert icfr_period_year(None, None) is None
+
+
+def test_is_listed_for_icfr_includes_konex() -> None:
+    assert is_listed_for_icfr("N") is True
+    assert is_listed_for_icfr("E") is False
 
 
 def test_add_fact_outcomes_skips_non_ok_fetch() -> None:
