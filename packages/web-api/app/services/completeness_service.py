@@ -7,7 +7,7 @@ import json
 from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy import Integer, and_, case, cast, func, literal, or_, select
 
 from app.errors import BadRequest, CatalogNotFound
 from app.extracting.constants import EXTRACTOR_VERSION
@@ -17,11 +17,14 @@ from app.extracting.field_bundles import (
     DART_DISCLOSURE_VIEW,
     EXPORT_PAGE_SIZE,
     FIELD_BUNDLE_REPORT_TYPES,
+    ICFR_CONSOLIDATED_MANDATE_YEAR,
+    ICFR_LISTED_CORP_CLS,
     empty_field_bundle_counts,
     status_attr,
 )
-from app.extracting.selector import collect_audit_document_keys
+from app.extracting.selector import is_audit_document
 from app.models.audit_report_fact import AuditReportFact
+from app.models.corp import Corp
 from app.models.disclosure import Disclosure
 from app.models.entry import Entry
 from app.rcept_dt import to_dotted_rcept_dt
@@ -47,20 +50,21 @@ LIST_STATUSES = (
     "ambiguous_dates",
     "field_partial",
 )
-_FIELD_STATUS_ATTRS = (
-    "auditor_status",
-    "opinion_status",
-    "gaap_status",
-    "audit_report_date_status",
-    "current_period_status",
-    "hours_status",
-    "activities_status",
-    "communications_status",
-    "accounts_status",
-    "icfr_status",
-    "going_concern_status",
-)
 DocKey = tuple[str, str]
+
+
+def _collect_audit_document_keys(
+    rows: Sequence[tuple[str, str | None, str | None, str, str | None]],
+) -> list[tuple[str, str]]:
+    """후보 행에서 감사 문서 (rcept_no, dcm_no)를 등장 순·중복 없이 모은다."""
+    seen: dict[tuple[str, str], None] = {}
+    for rcept_no, dcm_no, report_type, source, document_name in rows:
+        if not dcm_no:
+            continue
+        if not is_audit_document(report_type, source, document_name):
+            continue
+        seen.setdefault((rcept_no, dcm_no), None)
+    return list(seen.keys())
 
 
 def encode_cursor(rcept_no: str, dcm_no: str) -> str:
@@ -93,17 +97,41 @@ def _sum_if(condition: object) -> object:
     return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
 
 
+def _join_facts_window(statement: object) -> object:
+    """facts–disclosures 필수, corps는 내부회계 판정용 LEFT JOIN."""
+    return statement.join(
+        Disclosure, AuditReportFact.rcept_no == Disclosure.rcept_no
+    ).outerjoin(Corp, Corp.corp_code == Disclosure.corp_code)
+
+
+def _icfr_period_year_sql() -> object:
+    """icfr_period_year와 같이 결산월 연, 없으면 접수일 연. 이상값은 NULL."""
+    year_from_end = cast(
+        func.substr(
+            Disclosure.year_end,
+            func.instr(func.coalesce(Disclosure.year_end, ""), ".") - 4,
+            4,
+        ),
+        Integer,
+    )
+    compact_rcept = func.replace(
+        func.replace(func.coalesce(Disclosure.rcept_dt, ""), ".", ""),
+        "-",
+        "",
+    )
+    year_from_rcept = cast(func.substr(compact_rcept, 1, 4), Integer)
+    year_end_usable = and_(
+        Disclosure.year_end.is_not(None),
+        Disclosure.year_end != "",
+        func.instr(Disclosure.year_end, ".") > 4,
+    )
+    raw = case((year_end_usable, year_from_end), else_=year_from_rcept)
+    return case((and_(raw >= 1900, raw <= 2100), raw), else_=None)
+
+
 def _field_partial_sql():
-    """현재 파서 ok 행의 필드 구멍을 SQL로 표현한다."""
-    holes = [
-        or_(
-            getattr(AuditReportFact, name).is_(None),
-            getattr(AuditReportFact, name) != "ok",
-        )
-        for name in _FIELD_STATUS_ATTRS
-    ]
-    holes.append(AuditReportFact.subsidiary_status.in_(("skipped", "not_found")))
-    return or_(*holes)
+    """현재 파서 ok 행의 필드 실패를 SQL로 표현한다. classify_outcome == fail과 같다."""
+    return or_(*(_fail_predicate(key) for key in BUNDLE_KEYS))
 
 
 def _bundle_predicates(bundle: str) -> tuple[object, object, object, object]:
@@ -121,6 +149,27 @@ def _bundle_predicates(bundle: str) -> tuple[object, object, object, object]:
             col == "not_found",
             AuditReportFact.hours_status == "ok",
             AuditReportFact.activities_status == "ok",
+        )
+    elif bundle == "icfr":
+        period_year = _icfr_period_year_sql()
+        unlisted = or_(
+            Corp.corp_cls.is_(None),
+            Corp.corp_cls == "",
+            ~Corp.corp_cls.in_(tuple(ICFR_LISTED_CORP_CLS)),
+        )
+        is_expected = and_(
+            col == "skipped",
+            or_(
+                and_(
+                    AuditReportFact.source_report_type == "F001",
+                    unlisted,
+                ),
+                and_(
+                    AuditReportFact.source_report_type == "F002",
+                    period_year.is_not(None),
+                    period_year < ICFR_CONSOLIDATED_MANDATE_YEAR,
+                ),
+            ),
         )
     else:
         is_expected = literal(False)
@@ -282,25 +331,30 @@ class CompletenessService:
             ),
         )
         statement = (
-            select(
-                AuditReportFact.source_report_type,
-                func.count().label("fact_rows"),
-                func.count(func.distinct(AuditReportFact.rcept_no)).label("fact_rcepts"),
-                _sum_if(ok_current).label("ok"),
-                _sum_if(stale).label("stale_version"),
-                _sum_if(AuditReportFact.fetch_status == "fetch_failed").label(
-                    "fetch_failed"
-                ),
-                _sum_if(AuditReportFact.fetch_status == "blocked").label("blocked"),
-                _sum_if(AuditReportFact.fetch_status == "section_missing").label(
-                    "section_missing"
-                ),
-                _sum_if(AuditReportFact.audit_report_date_status == "ambiguous").label(
-                    "ambiguous_dates"
-                ),
-                _sum_if(and_(ok_current, _field_partial_sql())).label("field_partial"),
+            _join_facts_window(
+                select(
+                    AuditReportFact.source_report_type,
+                    func.count().label("fact_rows"),
+                    func.count(func.distinct(AuditReportFact.rcept_no)).label(
+                        "fact_rcepts"
+                    ),
+                    _sum_if(ok_current).label("ok"),
+                    _sum_if(stale).label("stale_version"),
+                    _sum_if(AuditReportFact.fetch_status == "fetch_failed").label(
+                        "fetch_failed"
+                    ),
+                    _sum_if(AuditReportFact.fetch_status == "blocked").label("blocked"),
+                    _sum_if(AuditReportFact.fetch_status == "section_missing").label(
+                        "section_missing"
+                    ),
+                    _sum_if(
+                        AuditReportFact.audit_report_date_status == "ambiguous"
+                    ).label("ambiguous_dates"),
+                    _sum_if(and_(ok_current, _field_partial_sql())).label(
+                        "field_partial"
+                    ),
+                )
             )
-            .join(Disclosure, AuditReportFact.rcept_no == Disclosure.rcept_no)
             .where(
                 AuditReportFact.source_report_type.in_(list(report_types)),
                 Disclosure.rcept_dt >= start_dt,
@@ -363,7 +417,7 @@ class CompletenessService:
             repo = EntryRepository(self._session)
             for rcept_no in rcept_nos:
                 filing = await repo.list_by_rcept_no(rcept_no)
-                doc_keys = collect_audit_document_keys(
+                doc_keys = _collect_audit_document_keys(
                     [
                         (
                             entry.rcept_no,
@@ -401,8 +455,9 @@ class CompletenessService:
             ),
         }[status]
         statement = (
-            select(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
-            .join(Disclosure, AuditReportFact.rcept_no == Disclosure.rcept_no)
+            _join_facts_window(
+                select(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
+            )
             .where(self._fact_window(start_dt, end_dt, report_type), extra)
             .order_by(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
         )
@@ -444,12 +499,9 @@ class CompletenessService:
         """기간 안 현재 추출기 facts를 12묶음 네 칸으로 센다."""
         start_dt, end_dt = self._window(start_date, end_date)
         eligible_where = self._eligible_fact_window(start_dt, end_dt)
-        eligible_stmt = (
-            select(func.count())
-            .select_from(AuditReportFact)
-            .join(Disclosure, AuditReportFact.rcept_no == Disclosure.rcept_no)
-            .where(eligible_where)
-        )
+        eligible_stmt = _join_facts_window(
+            select(func.count()).select_from(AuditReportFact)
+        ).where(eligible_where)
         eligible = int((await self._session.execute(eligible_stmt)).scalar_one())
         counts = empty_field_bundle_counts()
         columns = []
@@ -463,12 +515,9 @@ class CompletenessService:
                     _sum_if(is_fail).label(f"{key}_fail"),
                 )
             )
-        statement = (
-            select(*columns)
-            .select_from(AuditReportFact)
-            .join(Disclosure, AuditReportFact.rcept_no == Disclosure.rcept_no)
-            .where(eligible_where)
-        )
+        statement = _join_facts_window(
+            select(*columns).select_from(AuditReportFact)
+        ).where(eligible_where)
         row = (await self._session.execute(statement)).one()
         bundles: list[FieldBundleRow] = []
         for key in BUNDLE_KEYS:
@@ -513,15 +562,16 @@ class CompletenessService:
         cursor_key = decode_cursor(cursor) if cursor else None
         status_col = getattr(AuditReportFact, status_attr(bundle))
         statement = (
-            select(
-                AuditReportFact.source_report_type,
-                AuditReportFact.rcept_no,
-                AuditReportFact.dcm_no,
-                AuditReportFact.fs_scope,
-                status_col,
-                AuditReportFact.extractor_version,
+            _join_facts_window(
+                select(
+                    AuditReportFact.source_report_type,
+                    AuditReportFact.rcept_no,
+                    AuditReportFact.dcm_no,
+                    AuditReportFact.fs_scope,
+                    status_col,
+                    AuditReportFact.extractor_version,
+                )
             )
-            .join(Disclosure, AuditReportFact.rcept_no == Disclosure.rcept_no)
             .where(
                 self._eligible_fact_window(start_dt, end_dt),
                 _fail_predicate(bundle),

@@ -16,9 +16,11 @@ from app.extracting.field_bundles import (
     DART_DISCLOSURE_VIEW,
     add_fact_outcomes,
     empty_field_bundle_counts,
+    icfr_period_year,
 )
 from app.main import create_app
 from app.models.audit_report_fact import AuditReportFact
+from app.models.corp import Corp
 from app.models.disclosure import Disclosure
 from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
@@ -138,6 +140,17 @@ async def _seed(sessionmaker, entries: list[EntryRecord], facts: list[AuditRepor
         facts_repo = FactRepository(session)
         for fact in facts:
             await facts_repo.upsert(fact)
+        await session.commit()
+
+
+async def _seed_corp(
+    sessionmaker,
+    corp_code: str = "00126380",
+    corp_cls: str | None = "Y",
+) -> None:
+    """완전성 조인에 쓸 corps 한 행."""
+    async with sessionmaker() as session:
+        session.add(Corp(corp_code=corp_code, fetch_status="ok", corp_cls=corp_cls))
         await session.commit()
 
 
@@ -511,13 +524,14 @@ async def test_completeness_field_partial_includes_accounts_skipped(
 async def test_completeness_field_partial_includes_icfr_skipped(
     client_factory, memory_app: tuple[FastAPI, object]
 ) -> None:
-    """다른 필드가 ok여도 icfr_status=skipped면 field_partial이다."""
+    """상장 F001의 icfr_status=skipped는 field_partial이다."""
     app, sessionmaker = memory_app
     await _seed(
         sessionmaker,
         [_entry()],
         [_ok_fact(icfr_status="skipped")],
     )
+    await _seed_corp(sessionmaker, corp_cls="N")
 
     async with client_factory(app) as client:
         response = await client.get(
@@ -531,6 +545,76 @@ async def test_completeness_field_partial_includes_icfr_skipped(
     assert body["target"] == 1
     assert body["ok"] == 1
     assert body["field_partial"] == 1
+
+
+async def test_completeness_unlisted_f001_icfr_skipped_is_not_field_partial(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """비상장 F001 icfr skipped는 제도상없음이며 field_partial이 아니다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [_entry()],
+        [_ok_fact(icfr_status="skipped")],
+    )
+    await _seed_corp(sessionmaker, corp_cls="E")
+
+    async with client_factory(app) as client:
+        counts = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params=COMPLETENESS_PARAMS,
+            headers=TOKEN_HEADER,
+        )
+        bundles = await client.get(
+            "/admin/extract/audit-opinion/field-bundles",
+            params={"start_date": "20200301", "end_date": "20200331"},
+            headers=TOKEN_HEADER,
+        )
+
+    assert counts.status_code == 200
+    assert counts.json()["field_partial"] == 0
+    icfr = next(row for row in bundles.json()["bundles"] if row["bundle"] == "icfr")
+    assert icfr["expected_missing"] == 1
+    assert icfr["fail"] == 0
+
+
+async def test_list_field_bundle_fail_items_skips_unlisted_f001_icfr_only(
+    memory_app: tuple[FastAPI, object],
+) -> None:
+    """비상장 F001 내부회계 skipped는 실패 목록에 없고, 코넥스는 들어간다."""
+    _app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [
+            _entry(),
+            _entry(
+                entry_id="e-listed",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                corp_code="00401731",
+            ),
+        ],
+        [
+            _ok_fact(icfr_status="skipped"),
+            _ok_fact(
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                icfr_status="skipped",
+            ),
+        ],
+    )
+    await _seed_corp(sessionmaker, corp_code="00126380", corp_cls="E")
+    await _seed_corp(sessionmaker, corp_code="00401731", corp_cls="N")
+
+    async with sessionmaker() as session:
+        listed = await CompletenessService(session).list_field_bundle_fail_items(
+            start_date="20200301",
+            end_date="20200331",
+            bundle="icfr",
+        )
+    assert [(item.rcept_no, item.dcm_no) for item in listed.items] == [
+        ("20200331000002", "22222")
+    ]
 
 
 async def test_completeness_field_partial_includes_going_concern_skipped(
@@ -607,7 +691,7 @@ async def test_completeness_subsidiary_not_found_is_field_partial(
 async def test_completeness_field_partial_includes_communications_not_found(
     client_factory, memory_app: tuple[FastAPI, object]
 ) -> None:
-    """fetch·의견 필드가 ok여도 4절 not_found면 field_partial이다."""
+    """시간·실시항목이 ok인 4절 not_found는 제도상없음이라 field_partial이 아니다."""
     app, sessionmaker = memory_app
     await _seed(
         sessionmaker,
@@ -632,7 +716,7 @@ async def test_completeness_field_partial_includes_communications_not_found(
     assert response.status_code == 200
     assert body["target"] == 1
     assert body["ok"] == 1
-    assert body["field_partial"] == 1
+    assert body["field_partial"] == 0
 
 
 async def test_completeness_counts_fetch_states_and_ambiguous_dates(
@@ -1027,6 +1111,25 @@ async def test_field_bundle_sql_counts_match_python_rules(
             dcm_no="5",
             opinion_status="ok",
         ),
+        _ok_fact(
+            rcept_no="20200331000006",
+            dcm_no="6",
+            icfr_status="skipped",
+        ),
+        _ok_fact(
+            rcept_no="20200331000007",
+            dcm_no="7",
+            source_report_type="F002",
+            fs_scope="consolidated",
+            icfr_status="skipped",
+        ),
+        _ok_fact(
+            rcept_no="20200331000008",
+            dcm_no="8",
+            source_report_type="F002",
+            fs_scope="consolidated",
+            icfr_status="skipped",
+        ),
     ]
     entries = [
         _entry(
@@ -1034,16 +1137,30 @@ async def test_field_bundle_sql_counts_match_python_rules(
             rcept_no=fact.rcept_no,
             dcm_no=fact.dcm_no,
             report_type=fact.source_report_type,
+            year_end={
+                "20200331000007": "(2022.12)",
+                "20200331000008": "(2023.12)",
+            }.get(fact.rcept_no, "(2019.12)"),
             viewer_url=f"https://dart.fss.or.kr/report/viewer.do?rcpNo={fact.rcept_no}",
         )
         for fact in facts
     ]
     await _seed(sessionmaker, entries, facts)
+    await _seed_corp(sessionmaker, corp_cls="E")
 
     expected = empty_field_bundle_counts()
+    disclosures = _disclosures_from_entries(entries)
+    by_rcept = {row.rcept_no: row for row in disclosures}
     for fact in facts:
-        if fact.fetch_status == "ok":
-            add_fact_outcomes(expected, fact)
+        if fact.fetch_status != "ok":
+            continue
+        disclosure = by_rcept[fact.rcept_no]
+        add_fact_outcomes(
+            expected,
+            fact,
+            corp_cls="E",
+            period_year=icfr_period_year(disclosure.year_end, disclosure.rcept_dt),
+        )
 
     async with sessionmaker() as session:
         summary = await CompletenessService(session).summarize_field_bundles(
