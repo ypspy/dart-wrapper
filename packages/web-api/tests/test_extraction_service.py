@@ -9,6 +9,7 @@ from app.adapters.dart_http import DartHttpClient
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.errors import CatalogConflict
 from app.models.audit_report_fact import AuditReportFact
+from app.models.corp import Corp
 from app.models.disclosure import Disclosure
 from app.models.extraction_job import ExtractionJob
 from app.repositories.disclosure_repository import DisclosureRepository
@@ -331,6 +332,27 @@ async def test_run_job_adds_field_bundle_counts_for_ok_fact(
     bundles = job.params["field_bundles"]
     assert bundles["opinion"]["ok"] == 1
     assert bundles["subsidiary"]["not_applicable"] == 1
+    assert bundles["icfr"]["expected_missing"] == 1
+    assert bundles["icfr"]["fail"] == 0
+
+
+async def test_run_job_counts_listed_icfr_skipped_as_fail(
+    sessionmaker_fixture,
+) -> None:
+    """주권상장 F001에 내부회계 leaf가 없으면 잡 카운터 icfr은 실패다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        session.add(Corp(corp_code="00126380", fetch_status="ok", corp_cls="Y"))
+        await session.commit()
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        job = await session.get(ExtractionJob, job_id)
+    bundles = job.params["field_bundles"]
+    assert bundles["icfr"]["fail"] == 1
+    assert bundles["icfr"]["expected_missing"] == 0
 
 
 async def test_start_raises_when_catalog_running(sessionmaker_fixture) -> None:

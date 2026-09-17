@@ -33,7 +33,11 @@ from app.extracting.dates import (
     parse_year_end,
     pick_audit_report_date,
 )
-from app.extracting.field_bundles import add_fact_outcomes, empty_field_bundle_counts
+from app.extracting.field_bundles import (
+    add_fact_outcomes,
+    empty_field_bundle_counts,
+    icfr_period_year,
+)
 from app.extracting.gaap import classify_gaap
 from app.extracting.going_concern import extract_going_concern
 from app.extracting.icfr import extract_icfr
@@ -56,6 +60,8 @@ from app.extracting.selector import (
 from app.extracting.subsidiaries import SubsidiaryResult, extract_subsidiaries, notes_tail
 from app.extracting.text import compact
 from app.models.audit_report_fact import AuditReportFact
+from app.models.corp import Corp
+from app.models.disclosure import Disclosure
 from app.models.entry import Entry
 from app.models.extraction_job import ExtractionJob
 from app.repositories.disclosure_repository import DisclosureRepository
@@ -472,7 +478,26 @@ class ExtractionService:
                         if fetch_status == "ok":
                             fact = await FactRepository(session).get(rcept_no, dcm_no)
                             if fact is not None:
-                                add_fact_outcomes(bundle_counts, fact)
+                                disclosure = await session.get(Disclosure, rcept_no)
+                                corp_code = (
+                                    disclosure.corp_code if disclosure is not None else None
+                                )
+                                corp = (
+                                    await session.get(Corp, corp_code) if corp_code else None
+                                )
+                                add_fact_outcomes(
+                                    bundle_counts,
+                                    fact,
+                                    corp_cls=corp.corp_cls if corp is not None else None,
+                                    period_year=icfr_period_year(
+                                        disclosure.year_end
+                                        if disclosure is not None
+                                        else None,
+                                        disclosure.rcept_dt
+                                        if disclosure is not None
+                                        else None,
+                                    ),
+                                )
                         job_row = await session.get(ExtractionJob, job_id)
                         current = dict(job_row.params or {}) if job_row is not None else {}
                         current["target_count"] = target_count
