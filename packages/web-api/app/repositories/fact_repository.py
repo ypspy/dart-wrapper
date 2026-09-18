@@ -116,6 +116,20 @@ class FactRepository:
         result = await self._session.execute(statement)
         return list(result.scalars().all())
 
+    async def list_not_found_dates(self) -> list[AuditReportFact]:
+        """감사보고서일이 not_found이고 후보가 있는 행."""
+        statement = (
+            select(AuditReportFact)
+            .where(AuditReportFact.audit_report_date_status == "not_found")
+            .order_by(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
+        )
+        result = await self._session.execute(statement)
+        return [
+            row
+            for row in result.scalars().all()
+            if row.audit_report_date_candidates
+        ]
+
     async def list_siblings(
         self,
         *,

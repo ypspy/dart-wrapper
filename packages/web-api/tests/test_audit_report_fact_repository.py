@@ -269,6 +269,47 @@ async def test_list_by_rcept_nos_batches_filings(sessionmaker_fixture) -> None:
     ]
 
 
+async def test_list_not_found_dates_skips_empty_candidates(
+    sessionmaker_fixture,
+) -> None:
+    """not_found이면서 후보가 있는 행만 반환한다."""
+    async with sessionmaker_fixture() as session:
+        repo = FactRepository(session)
+        await repo.upsert(_make_fact(dcm_no="ok-date", audit_report_date_status="ok"))
+        await repo.upsert(
+            _make_fact(
+                dcm_no="nf-empty",
+                audit_report_date=None,
+                audit_report_date_status="not_found",
+                audit_report_date_candidates=[],
+            )
+        )
+        await repo.upsert(
+            _make_fact(
+                dcm_no="nf-has",
+                audit_report_date=None,
+                audit_report_date_status="not_found",
+                audit_report_date_candidates=[{"date": "2019-03-15", "snippet": "서명"}],
+            )
+        )
+        await repo.upsert(
+            _make_fact(
+                rcept_no="20260331000002",
+                dcm_no="amb",
+                audit_report_date=None,
+                audit_report_date_status="ambiguous",
+                audit_report_date_candidates=[{"date": "2019-03-15", "snippet": "서명"}],
+            )
+        )
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        rows = await FactRepository(session).list_not_found_dates()
+
+    keys = [(row.rcept_no, row.dcm_no) for row in rows]
+    assert keys == [("20260331000001", "nf-has")]
+
+
 async def test_list_ambiguous_dates(sessionmaker_fixture) -> None:
     """감사보고서일 상태가 ambiguous인 행만 반환한다."""
     async with sessionmaker_fixture() as session:

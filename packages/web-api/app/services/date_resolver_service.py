@@ -1,4 +1,4 @@
-"""ambiguous 감사보고서일을 LLM 인덱스로 해소하는 잡."""
+"""후보가 있는 not_found 감사보고서일을 LLM 인덱스로 해소하는 잡."""
 
 from __future__ import annotations
 
@@ -10,11 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.errors import CatalogConflict
-from app.extracting.dates import (
-    date_in_auth_window,
-    parse_auth_date,
-    parse_year_end,
-)
+from app.extracting.dates import parse_auth_date, parse_year_end
 from app.models.audit_report_fact import AuditReportFact
 from app.models.extraction_job import ExtractionJob
 from app.ports.date_resolver import DateResolver
@@ -28,7 +24,7 @@ RESOLVE_DATES_EXTRACTOR_ID = "resolve_dates"
 
 
 class DateResolverService:
-    """ambiguous 날짜 행만 모아 LLM에 인덱스를 묻고 성공 시 ISO를 저장한다."""
+    """후보가 있는 not_found 날짜 행만 모아 LLM에 인덱스를 묻고 성공 시 ISO를 저장한다."""
 
     def __init__(
         self,
@@ -66,7 +62,7 @@ class DateResolverService:
         return job_id
 
     async def run(self, job_id: str) -> None:
-        """ambiguous 행을 순회하며 인덱스를 해소한다. DART는 호출하지 않는다."""
+        """not_found 행을 순회하며 인덱스를 해소한다. DART는 호출하지 않는다."""
         async with self._sessionmaker() as session:
             job = await session.get(ExtractionJob, job_id)
             if job is None:
@@ -77,7 +73,7 @@ class DateResolverService:
 
         try:
             async with self._sessionmaker() as session:
-                facts = await FactRepository(session).list_ambiguous_dates()
+                facts = await FactRepository(session).list_not_found_dates()
                 job_row = await session.get(ExtractionJob, job_id)
                 limit = None
                 if job_row is not None and isinstance(job_row.params, dict):
@@ -112,7 +108,7 @@ class DateResolverService:
                 await session.commit()
 
     async def _resolve_one(self, job_id: str, fact: AuditReportFact) -> bool:
-        """한 행을 해소한다. 성공하면 True, 그대로 ambiguous면 False."""
+        """한 행을 해소한다. 성공하면 True, 그대로 not_found면 False."""
         stored = list(fact.audit_report_date_candidates or [])
         llm_candidates = _llm_candidates(stored)
         period_end, auth_iso = await self._window_for(fact)
@@ -129,22 +125,8 @@ class DateResolverService:
             return False
 
         try:
-            period_date = date.fromisoformat(period_end) if period_end else None
+            date.fromisoformat(iso)
         except ValueError:
-            period_date = None
-        try:
-            auth_parsed = date.fromisoformat(auth_iso) if auth_iso else None
-        except ValueError:
-            auth_parsed = None
-        try:
-            iso_date = date.fromisoformat(iso)
-        except ValueError:
-            return False
-        if not date_in_auth_window(
-            iso_date,
-            period_end=period_date,
-            auth_date=auth_parsed,
-        ):
             return False
 
         raw_response = self._resolver.last_raw_response

@@ -18,7 +18,7 @@ _PROMPTS: dict[str, str] = {
         "당신은 감사보고서일 후보 중 실제 서명일(감사보고서일)을 고릅니다. "
         "JSON만 답하세요. 형식은 {\"index\": n} 또는 {\"index\": null} 입니다. "
         "새 날짜를 만들지 마세요. 고를 수 없으면 null 을 주세요. "
-        "결산일(period_end) 이후이고 인증일(auth_date) 이하인 날짜만 고려하세요."
+        "결산일(period_end)과 인증일(auth_date)은 참고만 하세요."
     ),
 }
 

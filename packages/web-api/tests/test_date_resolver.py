@@ -1,4 +1,4 @@
-"""ambiguous 감사보고서일 LLM 해소 잡 테스트. 실제 LLM은 호출하지 않는다."""
+"""not_found 감사보고서일 LLM 해소 잡 테스트. 실제 LLM은 호출하지 않는다."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _entry(**overrides: object) -> EntryRecord:
     return EntryRecord.model_validate(values)
 
 
-def _ambiguous_fact(**overrides: object) -> AuditReportFact:
+def _unresolved_fact(**overrides: object) -> AuditReportFact:
     values: dict[str, object] = {
         "rcept_no": "20200331000001",
         "dcm_no": "11111",
@@ -98,7 +98,7 @@ def _ambiguous_fact(**overrides: object) -> AuditReportFact:
         "auditor_status": "ok",
         "opinion_status": "ok",
         "gaap_status": "ok",
-        "audit_report_date_status": "ambiguous",
+        "audit_report_date_status": "not_found",
         "audit_report_date": None,
         "audit_report_date_source": None,
         "current_period_status": "ok",
@@ -144,7 +144,7 @@ async def test_run_stores_second_candidate_iso_when_resolver_returns_one(
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact()],
+        facts=[_unresolved_fact()],
     )
     resolver = FakeDateResolver(1)
     service = _service(sessionmaker_fixture, resolver)
@@ -187,7 +187,7 @@ async def test_run_maps_task7_date_key_into_llm_date_raw(
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+        facts=[_unresolved_fact(audit_report_date_candidates=stored)],
     )
     resolver = FakeDateResolver(1)
     service = _service(sessionmaker_fixture, resolver)
@@ -224,11 +224,11 @@ async def test_run_keeps_ambiguous_when_resolver_returns_invalid_index(
     sessionmaker_fixture,
     index: int | None,
 ) -> None:
-    """mock이 -1 또는 None을 주면 날짜는 ambiguous로 남는다."""
+    """mock이 -1 또는 None을 주면 날짜는 not_found로 남는다."""
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact()],
+        facts=[_unresolved_fact()],
     )
     resolver = FakeDateResolver(index, raw='{"index": null}')
     service = _service(sessionmaker_fixture, resolver)
@@ -240,13 +240,13 @@ async def test_run_keeps_ambiguous_when_resolver_returns_invalid_index(
 
     assert fact is not None
     assert fact.audit_report_date is None
-    assert fact.audit_report_date_status == "ambiguous"
+    assert fact.audit_report_date_status == "not_found"
     assert fact.audit_report_date_source is None
     assert fact.date_resolver_model is None
 
 
 async def test_run_respects_limit_of_one(sessionmaker_fixture) -> None:
-    """limit=1이면 rcept_no 순 첫 ambiguous만 llm이다."""
+    """limit=1이면 rcept_no 순 첫 not_found만 llm이다."""
     await _seed(
         sessionmaker_fixture,
         entries=[
@@ -254,8 +254,8 @@ async def test_run_respects_limit_of_one(sessionmaker_fixture) -> None:
             _entry(entry_id="e-2", rcept_no="20200331000002", dcm_no="22222"),
         ],
         facts=[
-            _ambiguous_fact(),
-            _ambiguous_fact(rcept_no="20200331000002", dcm_no="22222"),
+            _unresolved_fact(),
+            _unresolved_fact(rcept_no="20200331000002", dcm_no="22222"),
         ],
     )
     resolver = FakeDateResolver(1)
@@ -271,14 +271,14 @@ async def test_run_respects_limit_of_one(sessionmaker_fixture) -> None:
     assert job is not None
     assert job.params.get("limit") == 1
     assert first is not None and first.audit_report_date_source == "llm"
-    assert second is not None and second.audit_report_date_status == "ambiguous"
+    assert second is not None and second.audit_report_date_status == "not_found"
     assert len(resolver.calls) == 1
 
 
-async def test_run_keeps_ambiguous_when_pick_is_after_auth_date(
+async def test_run_saves_when_pick_is_after_auth_date(
     sessionmaker_fixture,
 ) -> None:
-    """인증일보다 늦은 ISO는 저장하지 않는다."""
+    """인증일보다 늦은 ISO도 저장한다."""
     stored = [
         {"date": "2020-02-01", "snippet": "머리"},
         {"date": "2020-04-01", "snippet": "뒤"},
@@ -286,7 +286,7 @@ async def test_run_keeps_ambiguous_when_pick_is_after_auth_date(
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+        facts=[_unresolved_fact(audit_report_date_candidates=stored)],
     )
     resolver = FakeDateResolver(1)
     service = _service(sessionmaker_fixture, resolver)
@@ -295,14 +295,15 @@ async def test_run_keeps_ambiguous_when_pick_is_after_auth_date(
     async with sessionmaker_fixture() as session:
         fact = await FactRepository(session).get("20200331000001", "11111")
     assert fact is not None
-    assert fact.audit_report_date_status == "ambiguous"
-    assert fact.audit_report_date is None
+    assert fact.audit_report_date == "2020-04-01"
+    assert fact.audit_report_date_status == "ok"
+    assert fact.audit_report_date_source == "llm"
 
 
 async def test_run_keeps_ambiguous_when_candidate_iso_invalid(
     sessionmaker_fixture,
 ) -> None:
-    """후보 ISO가 파싱 불가여도 잡은 succeeded, 해당 행은 ambiguous다."""
+    """후보 ISO가 파싱 불가여도 잡은 succeeded, 해당 행은 not_found다."""
     stored = [
         {"date": "not-a-date", "snippet": "잘못된 ISO"},
         {"date": "2020-03-15", "snippet": "서명 2020년3월15일"},
@@ -310,7 +311,7 @@ async def test_run_keeps_ambiguous_when_candidate_iso_invalid(
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+        facts=[_unresolved_fact(audit_report_date_candidates=stored)],
     )
     resolver = FakeDateResolver(0)
     service = _service(sessionmaker_fixture, resolver)
@@ -324,14 +325,14 @@ async def test_run_keeps_ambiguous_when_candidate_iso_invalid(
     assert job is not None and job.status == "succeeded"
     assert fact is not None
     assert fact.audit_report_date is None
-    assert fact.audit_report_date_status == "ambiguous"
+    assert fact.audit_report_date_status == "not_found"
     assert fact.audit_report_date_source is None
 
 
-async def test_run_keeps_ambiguous_when_llm_picks_out_of_window(
+async def test_run_saves_when_llm_picks_out_of_window(
     sessionmaker_fixture,
 ) -> None:
-    """창 밖 ISO를 골라도 ok로 쓰지 않고 ambiguous로 둔다."""
+    """창 밖 ISO를 골라도 저장한다."""
     stored = [
         {
             "date_raw": "2020년2월1일",
@@ -347,7 +348,7 @@ async def test_run_keeps_ambiguous_when_llm_picks_out_of_window(
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+        facts=[_unresolved_fact(audit_report_date_candidates=stored)],
     )
     resolver = FakeDateResolver(1)
     service = _service(sessionmaker_fixture, resolver)
@@ -358,10 +359,48 @@ async def test_run_keeps_ambiguous_when_llm_picks_out_of_window(
         fact = await FactRepository(session).get("20200331000001", "11111")
 
     assert fact is not None
-    assert fact.audit_report_date is None
-    assert fact.audit_report_date_status == "ambiguous"
-    assert fact.audit_report_date_source is None
-    assert fact.date_resolver_model is None
+    assert fact.audit_report_date == "2018-06-01"
+    assert fact.audit_report_date_status == "ok"
+    assert fact.audit_report_date_source == "llm"
+
+
+async def test_run_skips_ambiguous_and_empty_not_found(
+    sessionmaker_fixture,
+) -> None:
+    """ambiguous와 후보 없는 not_found는 해소하지 않는다."""
+    await _seed(
+        sessionmaker_fixture,
+        entries=[
+            _entry(),
+            _entry(entry_id="e-2", rcept_no="20200331000002", dcm_no="22222"),
+            _entry(entry_id="e-3", rcept_no="20200331000003", dcm_no="33333"),
+        ],
+        facts=[
+            _unresolved_fact(
+                rcept_no="20200331000001",
+                audit_report_date_status="ambiguous",
+            ),
+            _unresolved_fact(
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                audit_report_date_candidates=[],
+            ),
+            _unresolved_fact(rcept_no="20200331000003", dcm_no="33333"),
+        ],
+    )
+    resolver = FakeDateResolver(1)
+    service = _service(sessionmaker_fixture, resolver)
+    job_id = await service.start()
+    await service.run(job_id)
+    async with sessionmaker_fixture() as session:
+        amb = await FactRepository(session).get("20200331000001", "11111")
+        empty = await FactRepository(session).get("20200331000002", "22222")
+        filled = await FactRepository(session).get("20200331000003", "33333")
+    assert amb is not None and amb.audit_report_date_status == "ambiguous"
+    assert empty is not None and empty.audit_report_date_status == "not_found"
+    assert empty.audit_report_date is None
+    assert filled is not None and filled.audit_report_date_source == "llm"
+    assert len(resolver.calls) == 1
 
 
 async def test_start_rejects_second_active_resolve_dates_job(
@@ -373,7 +412,7 @@ async def test_start_rejects_second_active_resolve_dates_job(
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact()],
+        facts=[_unresolved_fact()],
     )
     service = _service(sessionmaker_fixture, FakeDateResolver(1))
     await service.start()
@@ -386,7 +425,7 @@ async def test_run_does_not_take_dart_lock(sessionmaker_fixture) -> None:
     await _seed(
         sessionmaker_fixture,
         entries=[_entry()],
-        facts=[_ambiguous_fact()],
+        facts=[_unresolved_fact()],
     )
     async with sessionmaker_fixture() as session:
         await JobRepository(session).create(
@@ -467,6 +506,8 @@ async def test_llm_adapter_parses_index_json() -> None:
     assert payload["model"] == "gpt-4o-mini"
     assert payload["temperature"] == 0
     assert request.headers["authorization"] == "Bearer sk-test"
+    system = payload["messages"][0]["content"]
+    assert "이하인 날짜만" not in system
     user_payload = json.loads(payload["messages"][1]["content"])
     assert user_payload["auth_date"] == "2020-03-31"
     assert "rcept_dt" not in user_payload
@@ -668,7 +709,7 @@ async def test_resolve_dates_end_to_end_with_fake_resolver(
     from app.services.date_resolver_service import DateResolverService
 
     app, sessionmaker = memory_app
-    await _seed(sessionmaker, entries=[_entry()], facts=[_ambiguous_fact()])
+    await _seed(sessionmaker, entries=[_entry()], facts=[_unresolved_fact()])
     resolver = FakeDateResolver(1)
     service = DateResolverService(
         sessionmaker, resolver, model="gpt-4o-mini", prompt_version="v1"

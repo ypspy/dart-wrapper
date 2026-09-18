@@ -8,7 +8,7 @@ DART 공시 파이프라인의 FastAPI 서비스입니다. Admin 카탈로그 �
 |--------|------|------|
 | API | `app/api` | 라우터·의존성 |
 | Service | `app/services` | 수집 오케스트레이션, Viewer 파이프라인, 감사 추출 잡 |
-| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계·계속기업·종속기업 순수 추출·해소 (`audit_opinion.v18`) |
+| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계·계속기업·종속기업 순수 추출·해소 (`audit_opinion.v19`) |
 | Port/Adapter | `app/ports`, `app/adapters` | 엔트리 수집기, DART HTTP |
 | Parsing | `app/parsing` | 본문 정제, 표 → JSON |
 | DB | `app/models`, `app/repositories`, `app/db` | 엔트리·작업 메타데이터 |
@@ -59,7 +59,7 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 | POST | `/admin/corps/jobs/{job_id}/soft-stop` | 다음 회사 경계에서 중단 |
 | POST | `/admin/corps/jobs/{job_id}/force-finish` | 강제 마감 |
 | PATCH | `/admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date` | 감사보고서일 수동 보정 |
-| POST | `/admin/extract/resolve-dates` | ambiguous 감사보고서일 LLM 해소 |
+| POST | `/admin/extract/resolve-dates` | not_found 감사보고서일 LLM 해소 |
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}` | 공시 단건 요약 |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | entry 목록 (전 feature, `all_entries`) |
@@ -95,7 +95,7 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 별도 문서(`fs_scope=separate`)의 종속기업 수는 `subsidiary_status=not_applicable`이며 카운트는 null입니다.
 연결 문서는 주석 표를 1차로 세고, 같은 접수 A001 계열회사 표에서 종속 구분 칸을 읽을 수 있을 때만 2차로
 보강합니다. 감사는 적정·부적정·거절, 검토는 거기에 한정·중요한취약점입니다. 회사 운영보고서는 읽지 않습니다.
-5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v18`입니다.
+5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v19`입니다.
 원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
 
 카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
@@ -133,7 +133,7 @@ resolved에 쓰는 것은 4순위일 때뿐입니다.
 
 **의견** — 의견서 본문이 `ok`이면 그것을 쓰고, 없으면 A001 당기 칸입니다. 둘이 달라도 코드는 의견서를 유지하고 `conflicts`만 남깁니다.
 
-**보고일** — compact 본문에서 날짜를 전수 모은 뒤, 접수번호(`rcept_no`) 앞 8자리(인증일)와 같은 날만 `ok`/`letter`. 불일치면 `ambiguous`(ISO는 null). 후보는 `{date, snippet}`. 수동 보정과 LLM 해소는 아래 API. LLM 저장 창(`period_end < iso ≤ 인증일`)은 DATE_RESOLVER 절과 같으며, 추출 확정은 인증일 일치·LLM 저장만 창을 씁니다.
+**보고일** — compact 본문에서 날짜를 전수 모은 뒤 `period_end < iso ≤` 접수번호 앞 8자리(인증일) 중 **가장 늦은 날**이 `ok`/`letter`. 창이 비면 `not_found`(ISO는 null, 후보는 저장). 목록 `rcept_dt`는 쓰지 않음. 수동 보정과 LLM 해소는 아래 API.
 
 ### 의견 서식 (v3)
 
@@ -221,9 +221,8 @@ JSON: `GET /admin/extract/audit-opinion/field-bundles`, 실패 목록
 
 ### DATE_RESOLVER
 
-ambiguous 감사보고서일은 `POST /admin/extract/resolve-dates`로 LLM이 후보 인덱스를 고릅니다.
-비교 기준은 접수번호 앞 8자리(인증일)이며, `{"limit": N}`으로 해소 건수를 자를 수 있습니다.
-LLM이 고른 ISO는 `period_end < iso ≤ 인증일`일 때만 저장합니다(추출 확정은 인증일 일치만 봅니다).
+후보가 있는 `not_found` 감사보고서일은 `POST /admin/extract/resolve-dates`로 LLM이 후보 인덱스를 고릅니다.
+저장 때 창 검사를 하지 않습니다. `{"limit": N}`으로 해소 건수를 자를 수 있습니다.
 추출 잡은 LLM을 호출하지 않습니다.
 설정은 `.env`의 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`(기본 `gpt-4o-mini`),
 `DATE_RESOLVER_PROMPT_VERSION`(기본 `v1`)입니다. API 키가 비어 있으면 400입니다.
