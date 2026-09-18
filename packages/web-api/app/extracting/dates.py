@@ -1,4 +1,4 @@
-"""감사보고서일 후보 추출과 인증일 선택."""
+"""감사보고서일 후보 추출과 창 안 최댓값 선택."""
 
 from __future__ import annotations
 
@@ -71,26 +71,28 @@ def pick_audit_report_date(
     period_end: date | None,
     auth_date: date | None,
 ) -> tuple[str | None, str, list[DateCandidate]]:
-    """인증일과 같은 후보 ISO만 보고일로 고른다.
+    """창 안 ISO 중 최댓값을 보고일로 고른다.
 
-    후보 0 → not_found. 인증일 없음·결산 이후가 아님·불일치 → ambiguous.
-    창 안 개수로 ok를 만들지 않는다.
+    후보 0·인증일 없음·창 통과 0 → not_found. ambiguous를 만들지 않는다.
     """
     if not candidates:
         return None, "not_found", []
     if auth_date is None:
-        return None, "ambiguous", []
-    if period_end is not None and not (period_end < auth_date):
-        return None, "ambiguous", []
-    target = auth_date.isoformat()
-    matching = [item for item in candidates if item.iso == target]
-    if not matching:
-        return None, "ambiguous", []
-    unique: dict[str, DateCandidate] = {}
-    for item in matching:
-        unique.setdefault(item.iso, item)
-    passing = list(unique.values())
-    return passing[0].iso, "ok", passing
+        return None, "not_found", []
+    in_window = [
+        item
+        for item in candidates
+        if date_in_auth_window(
+            date.fromisoformat(item.iso),
+            period_end=period_end,
+            auth_date=auth_date,
+        )
+    ]
+    if not in_window:
+        return None, "not_found", []
+    latest = max(item.iso for item in in_window)
+    passing = [item for item in in_window if item.iso == latest]
+    return latest, "ok", passing
 
 
 def date_in_auth_window(
