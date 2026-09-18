@@ -80,7 +80,7 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 `entry_id`로 Viewer 단건 조회에 바로 이어갈 수 있습니다.
 
 수집기는 Node entry-extractor 기본값을 따릅니다(목록 이력 포함·첨부 접수 스코프·TOC 중간 노드 포함).
-상세는 `[../entry-extractor/README.md](../entry-extractor/README.md)`를 보세요.
+상세는 [../entry-extractor/README.md](../entry-extractor/README.md)를 보세요.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
 
