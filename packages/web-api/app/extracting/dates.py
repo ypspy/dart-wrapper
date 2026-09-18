@@ -1,20 +1,25 @@
-"""D-3-3 감사보고서일 후보 추출과 창 선택."""
+"""감사보고서일 후보 추출과 인증일 선택."""
 
 from __future__ import annotations
 
 import calendar
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Sequence
 
 from app.extracting.text import compact
 
-_DATE_PATTERN = re.compile(r"[0-9]{4}년[0-9]{1,2}월[0-9]{1,2}일")
+_DATE_PATTERN = re.compile(
+    r"(?P<ymd>[0-9]{4}년[0-9]{1,2}월[0-9]{1,2}일)"
+    r"|(?P<cjk>[0-9]{4}年[0-9]{1,2}月[0-9]{1,2}日)"
+    r"|(?P<dot>[0-9]{4}[.][0-9]{1,2}[.][0-9]{1,2})"
+    r"|(?P<dash>[0-9]{4}[-][0-9]{1,2}[-][0-9]{1,2})"
+    r"|(?P<slash>[0-9]{4}[/][0-9]{1,2}[/][0-9]{1,2})"
+)
 _YEAR_END_PATTERN = re.compile(r"(\d{4})\.(\d{1,2})")
 _SNIPPET_RADIUS = 40
-_OPINION_GROUNDS = "의견근거"
-_FS_SECTION = "재무제표에대한경"
 
 
 @dataclass(frozen=True)
@@ -28,25 +33,33 @@ class DateCandidate:
 
 
 def extract_date_candidates(text: str) -> list[DateCandidate]:
-    """compact 본문에서 D-3-3 전처리 후 날짜 후보를 모두 찾는다."""
-    compact_text = compact(text)
-    scanned = _preprocess(compact_text)
+    """NFKC·compact 본문에서 날짜 후보를 모두 찾는다."""
+    normalized = unicodedata.normalize("NFKC", text)
+    scanned = compact(normalized)
     candidates: list[DateCandidate] = []
     original_from = 0
     for index, match in enumerate(_DATE_PATTERN.finditer(scanned)):
         date_raw = match.group(0)
+        iso = _raw_to_iso(date_raw)
+        if iso is None:
+            continue
         found_at = text.find(date_raw, original_from)
-        if found_at >= 0:
+        if found_at < 0:
+            found_at = normalized.find(date_raw, original_from)
+            snippet_src = normalized if found_at >= 0 else scanned
+            snippet_at = found_at if found_at >= 0 else match.start()
+            snippet = _slice_around(snippet_src, snippet_at, len(date_raw))
+            if found_at >= 0:
+                original_from = found_at + 1
+        else:
             snippet = _slice_around(text, found_at, len(date_raw))
             original_from = found_at + 1
-        else:
-            snippet = _slice_around(scanned, match.start(), len(date_raw))
         candidates.append(
             DateCandidate(
                 date_raw=date_raw,
-                iso=_to_iso(date_raw),
+                iso=iso,
                 snippet=snippet,
-                index=index,
+                index=len(candidates),
             )
         )
     return candidates
@@ -56,34 +69,55 @@ def pick_audit_report_date(
     candidates: Sequence[DateCandidate],
     *,
     period_end: date | None,
-    rcept_dt: date | None,
+    auth_date: date | None,
 ) -> tuple[str | None, str, list[DateCandidate]]:
-    """창(period_end < iso <= rcept_dt)을 통과한 후보로 보고일을 고른다.
+    """인증일과 같은 후보 ISO만 보고일로 고른다.
 
-    통과 1개면 ok, 0개면 not_found, 2개 이상이면 ambiguous(ISO는 None).
-    후반 우선은 적용하지 않는다. 한쪽 경계가 None이면 그 비교는 생략한다.
+    후보 0 → not_found. 인증일 없음·결산 이후가 아님·불일치 → ambiguous.
+    창 안 개수로 ok를 만들지 않는다.
     """
-    passing: list[DateCandidate] = []
-    for candidate in candidates:
-        iso_date = _parse_iso(candidate.iso)
-        if iso_date is None:
-            continue
-        if period_end is not None and not (period_end < iso_date):
-            continue
-        if rcept_dt is not None and not (iso_date <= rcept_dt):
-            continue
-        passing.append(candidate)
-
+    if not candidates:
+        return None, "not_found", []
+    if auth_date is None:
+        return None, "ambiguous", []
+    if period_end is not None and not (period_end < auth_date):
+        return None, "ambiguous", []
+    target = auth_date.isoformat()
+    matching = [item for item in candidates if item.iso == target]
+    if not matching:
+        return None, "ambiguous", []
     unique: dict[str, DateCandidate] = {}
-    for candidate in passing:
-        unique.setdefault(candidate.iso, candidate)
+    for item in matching:
+        unique.setdefault(item.iso, item)
     passing = list(unique.values())
+    return passing[0].iso, "ok", passing
 
-    if len(passing) == 1:
-        return passing[0].iso, "ok", passing
-    if not passing:
-        return None, "not_found", passing
-    return None, "ambiguous", passing
+
+def date_in_auth_window(
+    iso: date,
+    *,
+    period_end: date | None,
+    auth_date: date | None,
+) -> bool:
+    """period_end < iso ≤ auth_date. 한쪽 None이면 그 비교는 생략한다."""
+    if period_end is not None and not (period_end < iso):
+        return False
+    if auth_date is not None and not (iso <= auth_date):
+        return False
+    return True
+
+
+def parse_auth_date(rcept_no: str | None) -> date | None:
+    """접수번호 앞 8자리 YYYYMMDD를 인증일로 읽는다."""
+    if not rcept_no or len(rcept_no) < 8:
+        return None
+    raw = rcept_no[:8]
+    if not raw.isdigit():
+        return None
+    try:
+        return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
+    except ValueError:
+        return None
 
 
 def parse_year_end(year_end: str | None) -> date | None:
@@ -115,38 +149,29 @@ def parse_rcept_dt(rcept_dt: str | None) -> date | None:
     return None
 
 
-def _preprocess(compact_text: str) -> str:
-    """의견근거 앞(없으면 첫 재무제표에대한경 앞)과 마지막 재무제표에대한경 이후를 잇는다.
-
-    마커가 없으면 본문을 두 번 붙이지 않는다.
-    """
-    if _OPINION_GROUNDS in compact_text:
-        first_part = compact_text.split(_OPINION_GROUNDS)[0]
-    elif _FS_SECTION in compact_text:
-        first_part = compact_text.split(_FS_SECTION)[0]
+def _raw_to_iso(date_raw: str) -> str | None:
+    """매칭 원문을 ISO로 바꾼다. 달력이 아니면 None."""
+    if "년" in date_raw:
+        year_s, rest = date_raw.split("년", 1)
+        month_s, rest = rest.split("월", 1)
+        day_s = rest.removesuffix("일")
+    elif "年" in date_raw:
+        year_s, rest = date_raw.split("年", 1)
+        month_s, rest = rest.split("月", 1)
+        day_s = rest.removesuffix("日")
+    elif "." in date_raw:
+        year_s, month_s, day_s = date_raw.split(".")
+    elif "-" in date_raw:
+        year_s, month_s, day_s = date_raw.split("-")
+    elif "/" in date_raw:
+        year_s, month_s, day_s = date_raw.split("/")
     else:
-        first_part = ""
-    second_part = (
-        compact_text.split(_FS_SECTION)[-1] if _FS_SECTION in compact_text else ""
-    )
-    if first_part or second_part:
-        return first_part + second_part
-    return compact_text
-
-
-def _to_iso(date_raw: str) -> str:
-    """YYYY년M월D일을 zero-pad ISO(YYYY-MM-DD)로 바꾼다."""
-    year_s, rest = date_raw.split("년", 1)
-    month_s, rest = rest.split("월", 1)
-    day_s = rest.removesuffix("일")
-    return f"{int(year_s):04d}-{int(month_s):02d}-{int(day_s):02d}"
-
-
-def _parse_iso(iso: str) -> date | None:
+        return None
     try:
-        return date.fromisoformat(iso)
+        parsed = date(int(year_s), int(month_s), int(day_s))
     except ValueError:
         return None
+    return parsed.isoformat()
 
 
 def _slice_around(source: str, start: int, length: int) -> str:

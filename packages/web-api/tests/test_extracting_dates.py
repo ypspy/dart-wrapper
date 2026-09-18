@@ -1,90 +1,107 @@
-"""감사보고서일 후보 추출·창 선택 테스트."""
+"""감사보고서일 후보 추출·인증일 선택 테스트."""
 
 from datetime import date
 
-import pytest
-
 from app.extracting.dates import (
+    date_in_auth_window,
     extract_date_candidates,
+    parse_auth_date,
     parse_rcept_dt,
     parse_year_end,
     pick_audit_report_date,
 )
 
 
-def test_picks_single_candidate_inside_window() -> None:
-    """후보 2개 중 창을 통과하는 1개만 고른다."""
+def test_keeps_dates_between_opinion_grounds_and_fs_section() -> None:
+    """구간 전처리가 없어 중간 날짜도 후보다."""
+    text = (
+        "머리 2018년12월31일 의견근거 중간날짜 2019년1월10일 "
+        "재무제표에대한경 서명 2019년3월15일"
+    )
+    candidates = extract_date_candidates(text)
+    assert [c.iso for c in candidates] == [
+        "2018-12-31",
+        "2019-01-10",
+        "2019-03-15",
+    ]
+
+
+def test_ok_only_when_candidate_equals_auth_date() -> None:
+    """인증일과 같은 ISO만 ok다. 창 안 다른 날짜가 하나여도 고르지 않는다."""
     text = (
         "우리는 2018년12월31일로 종료되는 회계연도를 감사하였습니다. "
         "감사의견 적정. 의견근거 중간설명 "
         "재무제표에대한경영진의책임. 2019년3월15일"
     )
     candidates = extract_date_candidates(text)
-    assert [c.iso for c in candidates] == ["2018-12-31", "2019-03-15"]
-    assert candidates[0].date_raw == "2018년12월31일"
-    assert candidates[1].date_raw == "2019년3월15일"
-    assert candidates[0].index == 0
-    assert candidates[1].index == 1
-
     iso, status, passing = pick_audit_report_date(
         candidates,
         period_end=date(2018, 12, 31),
-        rcept_dt=date(2019, 3, 31),
+        auth_date=date(2019, 3, 15),
     )
     assert status == "ok"
     assert iso == "2019-03-15"
-    assert len(passing) == 1
-    assert passing[0].iso == "2019-03-15"
+    assert [c.iso for c in passing] == ["2019-03-15"]
 
-
-def test_ambiguous_when_two_candidates_pass_window() -> None:
-    """창을 둘 다 통과하면 후반 우선 없이 ambiguous이고 ISO는 None이다."""
-    text = (
-        "머리 2019년2월1일 의견근거 중간 "
-        "재무제표에대한경 서명 2019년3월15일"
-    )
-    candidates = extract_date_candidates(text)
-    assert [c.iso for c in candidates] == ["2019-02-01", "2019-03-15"]
-
-    iso, status, passing = pick_audit_report_date(
+    iso, status, _passing = pick_audit_report_date(
         candidates,
         period_end=date(2018, 12, 31),
-        rcept_dt=date(2019, 3, 31),
+        auth_date=date(2019, 3, 31),
     )
     assert status == "ambiguous"
     assert iso is None
-    assert [c.iso for c in passing] == ["2019-02-01", "2019-03-15"]
 
 
 def test_not_found_when_no_dates() -> None:
     """날짜 패턴이 없으면 not_found이다."""
     candidates = extract_date_candidates("의견근거 본문 재무제표에대한경영진의책임")
     assert candidates == []
-
     iso, status, passing = pick_audit_report_date(
         candidates,
         period_end=date(2018, 12, 31),
-        rcept_dt=date(2019, 3, 31),
+        auth_date=date(2019, 3, 31),
     )
     assert status == "not_found"
     assert iso is None
     assert passing == []
 
 
-def test_drops_dates_between_opinion_grounds_and_fs_section() -> None:
-    """의견근거와 재무제표에대한경 사이 날짜는 후보에서 뺀다."""
-    text = (
-        "머리 2018년12월31일 의견근거 중간날짜 2019년1월10일 "
-        "재무제표에대한경 서명 2019년3월15일"
+def test_ambiguous_when_auth_date_missing() -> None:
+    """후보가 있는데 인증일을 못 읽으면 ambiguous다."""
+    candidates = extract_date_candidates("서명 2019년3월15일")
+    iso, status, _passing = pick_audit_report_date(
+        candidates,
+        period_end=date(2018, 12, 31),
+        auth_date=None,
     )
-    candidates = extract_date_candidates(text)
-    assert [c.iso for c in candidates] == ["2018-12-31", "2019-03-15"]
+    assert status == "ambiguous"
+    assert iso is None
+
+
+def test_variant_date_formats_become_iso() -> None:
+    """점·대시·슬래시·年月日·전각이 ISO가 된다."""
+    cases = [
+        "머리 2016.01.22 끝",
+        "머리 2016-01-22 끝",
+        "머리 2016/1/22 끝",
+        "머리 2016年1月22日 끝",
+        "머리 ２０１６년１월２２일 끝",
+        "머리 2016년 1월 22일 끝",
+    ]
+    for text in cases:
+        candidates = extract_date_candidates(text)
+        assert [c.iso for c in candidates] == ["2016-01-22"], text
+
+
+def test_skips_invalid_calendar_and_hanja_numerals() -> None:
+    """달력에 없는 날과 한자 숫자는 후보가 아니다."""
+    assert extract_date_candidates("2016년13월1일 이십년") == []
+    assert extract_date_candidates("二〇一六年一月二十二일") == []
 
 
 def test_zero_pads_iso_and_reads_compact_dates() -> None:
     """공백을 제거한 뒤 매칭하고 ISO는 zero-pad한다."""
-    text = "머리 2019년 3월 5일 의견근거 중간 재무제표에대한경"
-    candidates = extract_date_candidates(text)
+    candidates = extract_date_candidates("머리 2019년 3월 5일")
     assert len(candidates) == 1
     assert candidates[0].date_raw == "2019년3월5일"
     assert candidates[0].iso == "2019-03-05"
@@ -94,10 +111,10 @@ def test_snippet_uses_original_text_around_match() -> None:
     """snippet은 원문 매칭 전후 40자를 쓴다."""
     prefix = "가" * 10
     suffix = "나" * 10
-    text = f"{prefix}2019년3월15일{suffix} 의견근거 중간 재무제표에대한경"
+    text = f"{prefix}2019년3월15일{suffix}"
     candidates = extract_date_candidates(text)
     assert len(candidates) == 1
-    assert candidates[0].snippet == f"{prefix}2019년3월15일{suffix} 의견근거 중간 재무제표에대한경"
+    assert candidates[0].snippet == text
 
 
 def test_snippet_is_capped_at_forty_chars_each_side() -> None:
@@ -110,45 +127,8 @@ def test_snippet_is_capped_at_forty_chars_each_side() -> None:
     assert candidates[0].snippet == ("가" * 40) + "2019년3월15일" + ("나" * 40)
 
 
-def test_snippet_uses_later_occurrence_of_the_same_date() -> None:
-    """같은 날짜가 두 번이면 두 번째 snippet은 뒤 매칭을 기준으로 한다."""
-    first = ("가" * 40) + "2019년3월15일" + ("나" * 40)
-    second = ("다" * 40) + "2019년3월15일" + ("라" * 40)
-    candidates = extract_date_candidates(first + "중간" + second)
-    assert [c.iso for c in candidates] == ["2019-03-15", "2019-03-15"]
-    assert candidates[0].snippet == first
-    assert candidates[1].snippet == second
-
-
-def test_same_day_rcept_dt_is_allowed() -> None:
-    """접수 당일 날짜는 창을 통과한다."""
-    text = "서명 2019년3월31일 의견근거 중간 재무제표에대한경"
-    candidates = extract_date_candidates(text)
-    iso, status, passing = pick_audit_report_date(
-        candidates,
-        period_end=date(2018, 12, 31),
-        rcept_dt=date(2019, 3, 31),
-    )
-    assert status == "ok"
-    assert iso == "2019-03-31"
-    assert len(passing) == 1
-
-
-def test_omits_missing_window_bounds() -> None:
-    """period_end·rcept_dt가 None이면 그 쪽 비교를 생략한다."""
-    text = "머리 2017년1월1일 의견근거 중간 재무제표에대한경"
-    candidates = extract_date_candidates(text)
-    iso, status, _passing = pick_audit_report_date(
-        candidates,
-        period_end=None,
-        rcept_dt=None,
-    )
-    assert status == "ok"
-    assert iso == "2017-01-01"
-
-
-def test_trailing_letter_header_date_is_candidate_and_ok() -> None:
-    """의견근거가 없으면 재무제표에대한경 앞 머리글 날짜가 후보이고 창 1개면 ok다."""
+def test_trailing_header_is_candidate() -> None:
+    """후행형 머리글 날짜가 후보다. 인증일이 다르면 ambiguous다."""
     text = (
         "독립된감사인의감사보고서이케이에프제일차주식회사주주및이사회귀중"
         "2015년12월24일우리는별첨된회사의재무제표를감사하였습니다."
@@ -162,40 +142,54 @@ def test_trailing_letter_header_date_is_candidate_and_ok() -> None:
         "2015-10-31",
         "2015-07-31",
     ]
-
     iso, status, passing = pick_audit_report_date(
         candidates,
         period_end=date(2015, 10, 31),
-        rcept_dt=date(2016, 1, 13),
+        auth_date=date(2015, 12, 24),
     )
     assert status == "ok"
     assert iso == "2015-12-24"
-    assert len(passing) == 1
-    assert passing[0].iso == "2015-12-24"
+    assert [c.iso for c in passing] == ["2015-12-24"]
 
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "우리는 감사를 수행하였습니다. 2020년2월20일",
-        "머리 2020년2월20일 의견근거 중간설명만",
-        "머리 재무제표에대한경 서명 2020년2월20일",
-    ],
-)
-def test_single_in_window_date_ok_when_markers_missing_or_partial(text: str) -> None:
-    """마커가 없거나 하나만 있어도 창 안 날짜 1개는 ok이고 중복 후보가 아니다."""
-    candidates = extract_date_candidates(text)
-    assert [c.iso for c in candidates] == ["2020-02-20"]
-
-    iso, status, passing = pick_audit_report_date(
+    iso, status, _passing = pick_audit_report_date(
         candidates,
-        period_end=date(2019, 12, 31),
-        rcept_dt=date(2020, 3, 31),
+        period_end=date(2015, 10, 31),
+        auth_date=date(2016, 1, 13),
     )
-    assert status == "ok"
-    assert iso == "2020-02-20"
-    assert len(passing) == 1
-    assert passing[0].iso == "2020-02-20"
+    assert status == "ambiguous"
+    assert iso is None
+
+
+def test_parse_auth_date_from_rcept_no() -> None:
+    """접수번호 앞 8자리가 인증일이다."""
+    assert parse_auth_date("20160122000020") == date(2016, 1, 22)
+    assert parse_auth_date("20160230xxxxxx") is None
+    assert parse_auth_date("short") is None
+    assert parse_auth_date(None) is None
+
+
+def test_date_in_auth_window() -> None:
+    """LLM 저장 전 창은 결산 초과·인증일 이하다."""
+    assert date_in_auth_window(
+        date(2019, 3, 15),
+        period_end=date(2018, 12, 31),
+        auth_date=date(2019, 3, 31),
+    )
+    assert date_in_auth_window(
+        date(2019, 3, 31),
+        period_end=date(2018, 12, 31),
+        auth_date=date(2019, 3, 31),
+    )
+    assert not date_in_auth_window(
+        date(2018, 12, 31),
+        period_end=date(2018, 12, 31),
+        auth_date=date(2019, 3, 31),
+    )
+    assert not date_in_auth_window(
+        date(2019, 4, 1),
+        period_end=date(2018, 12, 31),
+        auth_date=date(2019, 3, 31),
+    )
 
 
 def test_parse_year_end_and_rcept_dt() -> None:
