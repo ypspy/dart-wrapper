@@ -153,7 +153,7 @@ def _make_fact(**overrides: object) -> AuditReportFact:
 
 def test_extractor_version_constant() -> None:
     """추출기 버전 상수는 계획에 적힌 값을 쓴다."""
-    assert EXTRACTOR_VERSION == "audit_opinion.v18"
+    assert EXTRACTOR_VERSION == "audit_opinion.v19"
 
 
 def test_audit_report_fact_has_all_spec_columns() -> None:
