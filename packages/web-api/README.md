@@ -26,14 +26,14 @@ PostgreSQL로 배포할 때는 `.venv\Scripts\python.exe -m pip install -e ".[po
 
 ## 실행
 
-`packages/web-api` 디렉터리에서 실행합니다. PowerShell은 `.\.venv\...`처럼 **`.\` 접두사**가 필요합니다.
+`packages/web-api` 디렉터리에서 실행합니다. PowerShell은 `.\.venv\...`처럼 `.\` **접두사**가 필요합니다.
 
 ```powershell
 cd packages/web-api
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-문서: http://127.0.0.1:8000/docs
+문서: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 ## 엔드포인트
 
@@ -80,7 +80,7 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 `entry_id`로 Viewer 단건 조회에 바로 이어갈 수 있습니다.
 
 수집기는 Node entry-extractor 기본값을 따릅니다(목록 이력 포함·첨부 접수 스코프·TOC 중간 노드 포함).
-상세는 [`../entry-extractor/README.md`](../entry-extractor/README.md)를 보세요.
+상세는 `[../entry-extractor/README.md](../entry-extractor/README.md)`를 보세요.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
 
@@ -108,13 +108,16 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 
 ### 버전과 재추출
 
-| 모드 | 동작 |
-|------|------|
-| `extract` / `resume` | 같은 버전이고 `fetch_status=ok`인 행은 건너뜁니다 |
-| `reparse` | `fetch_status=ok`여도 필드가 `not_found`이면 다시 fetch합니다. override·LLM 보고일은 유지합니다 |
+
+| 모드                   | 동작                                                                         |
+| -------------------- | -------------------------------------------------------------------------- |
+| `extract` / `resume` | 같은 버전이고 `fetch_status=ok`인 행은 건너뜁니다                                        |
+| `reparse`            | `fetch_status=ok`여도 필드가 `not_found`이면 문서 전체를 다시 fetch합니다. override·LLM 보고일은 유지합니다 |
+| `patch`              | 현재 추출기 `ok` 행 중 12묶음 실패가 있는 문서만 다시 fetch합니다. 미추출·fetch 실패는 넣지 않습니다 |
+
 
 버전을 올리지 않은 규칙 변경(아래 목록 감사인 최후 해소 등)은 `extract`만으로는 기존 `ok` 행에
-반영되지 않습니다. 감사인만 비어 있는 행은 `reparse`로 다시 넣습니다.
+반영되지 않습니다. `skipped` 칸을 고친 뒤에는 `patch`로 그 문서만 다시 넣습니다.
 
 ### 필드 해소
 
@@ -161,7 +164,8 @@ JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
 }
 ```
 
-`mode`는 `extract`(신규), `resume`(행 없음·fetch 실패 재시도), `reparse`(필드 `not_found` 재파싱)입니다.
+`mode`는 `extract`(신규), `resume`(행 없음·fetch 실패 재시도), `reparse`(필드 `not_found` 재파싱),
+`patch`(12묶음 실패 문서만 재추출)입니다.
 바로 `job_id`를 돌려주고 실제 추출은 백그라운드에서 진행됩니다.
 현황은 `GET /admin/extract/status?job_id=`로 봅니다.
 워커가 살아 있으면 `POST /admin/extract/jobs/{job_id}/soft-stop`으로 다음 접수에서 멈춥니다.
@@ -174,19 +178,24 @@ JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
 
 `GET /admin/extract/audit-opinion/completeness?start_date=&end_date=&report_type=`
 한 유형의 기간 집계입니다. 문서 단위는 `rcept_no`+`dcm_no`입니다.
+F001/F002 본문과 A001 첨부 감사·연결감사만 대상입니다. F001/F002의 `기업개황자료` 첨부는 제외합니다.
 문서 카드의 대상/미추출과 잡 `처리 N / 대상 M`의 대상은 접수 수이다. 한 접수에 첨부 감사문서가 둘이면 한쪽만 추출돼도 미추출이 0일 수 있다.
 
-| 키 | 의미 |
-|----|------|
-| `target` | selector가 고른 대상 문서 수 |
-| `ok` | `fetch_status=ok` |
-| `fetch_failed` / `blocked` / `section_missing` | 해당 fetch 상태 |
-| `unextracted` | 대상인데 facts 행이 없음 |
-| `ambiguous_dates` | `audit_report_date_status=ambiguous` |
-| `field_partial` | fetch는 됐지만 핵심 필드(의견 5필드·실시내용 3상태·`accounts_status`·`icfr_status`·`going_concern_status`) 중 `ok`가 아닌 것이 있음. 연결 문서의 `subsidiary_status`는 `skipped`/`not_found`만 부분실패이며 `not_applicable`은 아님 |
+
+| 키                                              | 의미                                                                                                                                                                                        |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`                                       | selector가 고른 대상 문서 수                                                                                                                                                                      |
+| `ok`                                           | `fetch_status=ok` 이고 `extractor_version`이 현재 추출기(`audit_opinion.v19`)와 같음. 12칸 만점이 아님                                                                                                                                 |
+| `all_success`                                  | `ok`이면서 12묶음 실패가 0. 해당없음·제도상없음은 실패가 아님                                                                                                                                                              |
+| `stale_version`                                | `fetch_status=ok` 인데 추출기 버전이 다름. `extract`/`resume`가 덮어 씀                                                                                                                                              |
+| `fetch_failed` / `blocked` / `section_missing` | 해당 fetch 상태                                                                                                                                                                               |
+| `unextracted`                                  | 대상인데 facts 행이 없음                                                                                                                                                                          |
+| `ambiguous_dates`                              | `audit_report_date_status=ambiguous`                                                                                                                                                      |
+| `field_partial`                                | `ok` 행 중 12묶음 `classify_outcome`이 fail인 건. `ok = all_success + field_partial`                                                                                                              |
+
 
 같은 경로에 `status`와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 받습니다.
-4절이 없는 옛 공시는 의견 필드가 `ok`여도 `communications_status=not_found`라 `field_partial`입니다.
+실시내용 1–3절이 ok이고 4절만 `not_found`이면 커뮤니케이션은 제도상없음이며 `field_partial`에 넣지 않습니다.
 첨부 제표에서는 E-4 연구 계정 8개(자산총계·자본총계·당기순손익·재고·매출채권·장기매출채권·계약자산·미청구공사)와
 유동자산·유동부채·부채총계(`total_liability`)의 당기·전기 금액을 읽으며, `제N기` 비교열 헤더는 큰 기수를 당기·작은 기수를 전기로 해석합니다.
 `당기순손실` 과목은 칸 괄호가 없어도 음수로 읽습니다.
@@ -247,13 +256,26 @@ JSON: `GET /admin/extract/audit-opinion/field-bundles`, 실패 목록
 
 공시 HTML 수집·감사 추출과 달리, 회사 마스터 보강만 [OpenDART 기업개황 API](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019002)
 (`GET /api/company.json`)를 씁니다. `.env`의 `OPENDART_API_KEY`가 없으면 잡을 시작하지 않습니다.
+일일 한도(`020`)가 차면 `OPENDART_API_KEY_2`(또는 같은 변수에 쉼표로 이은 키)로 자동 전환하고,
+한도 난 회사는 새 키로 다시 조회합니다. 모든 키가 한도면 그날 잡을 멈춥니다.
 대상은 `disclosures`에 있는 distinct `corp_code`이며, `fetch_status=ok`인 회사는 건너뜁니다.
 수집·감사 추출의 `dart_job_lock`과 **공유하지 않아** 동시에 돌릴 수 있습니다.
+
+호출 속도는 TCP 차단을 피하려고 `OPENDART_MAX_PER_MINUTE`(기본 200)로 HTTP 시작을
+간격 제한하고, `OPENDART_CONCURRENCY`(기본 2)만 동시에 진행합니다.
+재시도도 같은 분당 한도에 포함됩니다. OpenDART 안내의 분당 1,000회는 상한이 아니라
+그 이상이면 제한될 수 있다는 경고입니다.
 
 `POST /admin/corps/enrich`로 잡을 등록하면 202와 `job_id`를 받고, 현황은
 `GET /admin/corps/status?job_id=`·집계는 `GET /admin/corps/summary`로 확인합니다.
 운영 화면 `/admin` 오른쪽 **회사 업종** 칸에서 공시 회사 수·완료·잔여와 「빠진 회사 채우기」 버튼을 제공합니다.
 HTML 폼은 `POST /admin/corps/start`(303)이고, JSON API와 경로를 나눕니다.
+
+업종 이름은 OpenDART가 아니라 저장소의 KSIC JSON에서 붙입니다.
+조회는 **제11차(`ksic11.json`)에 코드가 있으면 그 표만**, 없으면 제10차(`ksic10.json`)입니다.
+같은 코드를 두 표에서 이어 붙이지 않습니다(10·11차에서 의미가 다를 수 있음).
+11차 JSON은 연계표 엑셀을 `scripts/build_ksic11.py`에, 10차는 `scripts/build_ksic10.py`에 넘깁니다.
+이미 `ok`인 회사는 `scripts/remap_corp_ksic_names.py`로 OpenDART 없이 이름만 다시 채웁니다.
 
 ## 본문 정제 (blocks)
 
@@ -283,8 +305,8 @@ DART는 차단·점검·지연으로 수집이 자주 끊깁니다. 그래서 �
 - **왼쪽(완전성 탐색)**: 연도 요약 바 → 선택 연도의 일별 히트맵 → 선택 연도 슬라이스 요약
 - **오른쪽(실행 컨트롤)**: 최근 작업 상태 카드(항상 표시) → **회사 업종** 패널(공시 distinct 회사 수·완료·잔여, 「빠진 회사 채우기」) → 수집 폼(기본 접힘) → 로그
 - **상단 유형 칩**: `HEATMAP_REPORT_TYPES`(기본 `A001,A002,A003,F001,F002,F004`)를 눌러 보고서 유형을 전환합니다.
-  칩에는 코드와 한국어 명칭(A001 사업보고서, A002 반기보고서, A003 분기보고서, F001 감사보고서,
-  F002 연결감사보고서, F004 회계법인사업보고서)이 함께 나옵니다.
+칩에는 코드와 한국어 명칭(A001 사업보고서, A002 반기보고서, A003 분기보고서, F001 감사보고서,
+F002 연결감사보고서, F004 회계법인사업보고서)이 함께 나옵니다.
 
 창이 좁으면(1100px 미만) 두 열이 세로로 쌓입니다.
 
@@ -349,11 +371,12 @@ HTMX가 작업 카드·로그·슬라이스 요약·히트맵은 5초, 연도 �
 
 `.env.example`을 참고해 `.env`를 만듭니다. 개발은 SQLite, 배포는 Neon PostgreSQL을 쓰며 `DATABASE_URL`만 교체하면 됩니다.
 
-Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`, `HEATMAP_REPORT_TYPES`입니다.
+Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`, `HEATMAP_REPORT_TYPES`, `DART_FETCH_MIN_INTERVAL_SECONDS`입니다.
 `HEATMAP_REPORT_TYPES`는 히트맵·유형 토글에 고정 표시할 보고서 유형(쉼표 구분, 기본 `A001,A002,A003,F001,F002,F004`)입니다.
 코드별 한국어 명칭은 `app/report_types.py`에 있으며, 목록에 없는 코드는 코드 그대로 표시합니다.
 
 감사보고서일 LLM 해소는 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`, `DATE_RESOLVER_PROMPT_VERSION`입니다.
 키가 비어 있으면 `POST /admin/extract/resolve-dates`는 시작하지 않습니다.
 
-회사 업종 보강은 `OPENDART_API_KEY`입니다. 키가 비어 있으면 `POST /admin/corps/enrich`와 Admin 「빠진 회사 채우기」가 시작되지 않습니다.
+회사 업종 보강은 `OPENDART_API_KEY`와 선택인 `OPENDART_API_KEY_2`입니다. 키가 모두 비어 있으면 `POST /admin/corps/enrich`와 Admin 「빠진 회사 채우기」가 시작되지 않습니다. 첫 키 한도가 차면 둘째 키로 이어 갑니다.
+속도는 `OPENDART_MAX_PER_MINUTE`(기본 200)·`OPENDART_CONCURRENCY`(기본 2)입니다.
