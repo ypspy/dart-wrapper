@@ -29,7 +29,7 @@ from app.extracting.cover import (
 )
 from app.extracting.dates import (
     extract_date_candidates,
-    parse_rcept_dt,
+    parse_auth_date,
     parse_year_end,
     pick_audit_report_date,
 )
@@ -775,7 +775,7 @@ class ExtractionService:
             date_iso, date_status, _passing = pick_audit_report_date(
                 date_candidates,
                 period_end=parse_year_end(sample.year_end),
-                rcept_dt=parse_rcept_dt(sample.rcept_dt),
+                auth_date=parse_auth_date(sample.rcept_no),
             )
             body_auditor = extract_body_auditor(opinion_text, self._auditor_names)
             date_raw = " ".join(item.date_raw for item in date_candidates) or None

@@ -63,7 +63,7 @@ OPINION_HTML = """
 <p>감사의견</p>
 <p>우리는 첨부된 재무제표를 감사하였습니다.</p>
 <p>한국채택국제회계기준에따라 작성되었습니다.</p>
-<p>2020년 2월 20일</p>
+<p>2020년 3월 31일</p>
 </body></html>
 """
 
@@ -73,7 +73,7 @@ QUALIFIED_OPINION_HTML = """
 <p>감사의견</p>
 <p>한정의견근거단락에기술된사항이미치는영향을제외하고 적정합니다.</p>
 <p>한국채택국제회계기준에따라 작성되었습니다.</p>
-<p>2020년 2월 20일</p>
+<p>2020년 3월 31일</p>
 </body></html>
 """
 
@@ -299,7 +299,7 @@ async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
     assert fact.fetch_status == "ok"
     assert fact.opinion_code == "unqualified"
     assert fact.opinion_status == "ok"
-    assert fact.extractor_version == "audit_opinion.v17"
+    assert fact.extractor_version == "audit_opinion.v18"
     assert fact.hours_status == "skipped"
     assert fact.activities_status == "skipped"
     assert fact.communications_status == "skipped"
@@ -1535,7 +1535,7 @@ async def test_extract_refetches_when_extractor_version_differs(
 
     assert fact is not None
     assert fact.opinion_code == "unqualified"
-    assert fact.extractor_version == "audit_opinion.v17"
+    assert fact.extractor_version == "audit_opinion.v18"
 
 
 async def test_reparse_refetches_when_field_is_not_found(
