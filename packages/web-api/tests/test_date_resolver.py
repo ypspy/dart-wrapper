@@ -56,13 +56,13 @@ class FakeDateResolver:
         *,
         candidates: list[dict],
         period_end: str,
-        rcept_dt: str,
+        auth_date: str,
     ) -> int | None:
         self.calls.append(
             {
                 "candidates": candidates,
                 "period_end": period_end,
-                "rcept_dt": rcept_dt,
+                "auth_date": auth_date,
             }
         )
         return self._index
@@ -171,7 +171,7 @@ async def test_run_stores_second_candidate_iso_when_resolver_returns_one(
                 {"date_raw": "2020년3월15일", "snippet": "서명 2020년3월15일"},
             ],
             "period_end": "2019-12-31",
-            "rcept_dt": "2020-03-31",
+            "auth_date": "2020-03-31",
         }
     ]
 
@@ -243,6 +243,60 @@ async def test_run_keeps_ambiguous_when_resolver_returns_invalid_index(
     assert fact.audit_report_date_status == "ambiguous"
     assert fact.audit_report_date_source is None
     assert fact.date_resolver_model is None
+
+
+async def test_run_respects_limit_of_one(sessionmaker_fixture) -> None:
+    """limit=1이면 rcept_no 순 첫 ambiguous만 llm이다."""
+    await _seed(
+        sessionmaker_fixture,
+        entries=[
+            _entry(),
+            _entry(entry_id="e-2", rcept_no="20200331000002", dcm_no="22222"),
+        ],
+        facts=[
+            _ambiguous_fact(),
+            _ambiguous_fact(rcept_no="20200331000002", dcm_no="22222"),
+        ],
+    )
+    resolver = FakeDateResolver(1)
+    service = _service(sessionmaker_fixture, resolver)
+    job_id = await service.start(limit=1)
+    await service.run(job_id)
+
+    async with sessionmaker_fixture() as session:
+        first = await FactRepository(session).get("20200331000001", "11111")
+        second = await FactRepository(session).get("20200331000002", "22222")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert job is not None
+    assert job.params.get("limit") == 1
+    assert first is not None and first.audit_report_date_source == "llm"
+    assert second is not None and second.audit_report_date_status == "ambiguous"
+    assert len(resolver.calls) == 1
+
+
+async def test_run_keeps_ambiguous_when_pick_is_after_auth_date(
+    sessionmaker_fixture,
+) -> None:
+    """인증일보다 늦은 ISO는 저장하지 않는다."""
+    stored = [
+        {"date": "2020-02-01", "snippet": "머리"},
+        {"date": "2020-04-01", "snippet": "뒤"},
+    ]
+    await _seed(
+        sessionmaker_fixture,
+        entries=[_entry()],
+        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+    )
+    resolver = FakeDateResolver(1)
+    service = _service(sessionmaker_fixture, resolver)
+    job_id = await service.start()
+    await service.run(job_id)
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+    assert fact is not None
+    assert fact.audit_report_date_status == "ambiguous"
+    assert fact.audit_report_date is None
 
 
 async def test_run_keeps_ambiguous_when_llm_picks_out_of_window(
@@ -366,7 +420,7 @@ async def _parse_index(content: str, candidate_count: int = 2) -> int | None:
                 {"date_raw": "2020년3월15일", "snippet": "서명"},
             ][:candidate_count],
             period_end="2019-12-31",
-            rcept_dt="2020-03-31",
+            auth_date="2020-03-31",
         )
     return index, captured, adapter
 
@@ -384,6 +438,9 @@ async def test_llm_adapter_parses_index_json() -> None:
     assert payload["model"] == "gpt-4o-mini"
     assert payload["temperature"] == 0
     assert request.headers["authorization"] == "Bearer sk-test"
+    user_payload = json.loads(payload["messages"][1]["content"])
+    assert user_payload["auth_date"] == "2020-03-31"
+    assert "rcept_dt" not in user_payload
 
 
 async def test_llm_adapter_null_index_returns_none() -> None:
@@ -429,7 +486,7 @@ async def test_llm_adapter_posts_with_longer_timeout() -> None:
         await adapter.pick_index(
             candidates=[{"date_raw": "2020-03-15", "snippet": "서명"}],
             period_end="2019-12-31",
-            rcept_dt="2020-03-31",
+            auth_date="2020-03-31",
         )
 
     assert captured
@@ -450,7 +507,7 @@ async def test_llm_adapter_http_error_returns_none() -> None:
         index = await adapter.pick_index(
             candidates=[{"date_raw": "2020년2월1일", "snippet": "머리"}],
             period_end="2019-12-31",
-            rcept_dt="2020-03-31",
+            auth_date="2020-03-31",
         )
 
     assert index is None
@@ -463,7 +520,7 @@ class FakeDateResolverService:
         self.started = 0
         self.executed: list[str] = []
 
-    async def start(self) -> str:
+    async def start(self, limit: int | None = None) -> str:
         self.started += 1
         return "job-dates-1"
 
@@ -509,6 +566,20 @@ async def test_resolve_dates_rejects_missing_api_key(client_factory) -> None:
     assert service.started == 0
 
 
+async def test_resolve_dates_limit_zero_returns_400(client_factory) -> None:
+    """limit=0은 잡을 만들지 않고 400이다."""
+    service = FakeDateResolverService()
+    async with client_factory(_app_with_resolver(service)) as client:
+        response = await client.post(
+            "/admin/extract/resolve-dates",
+            headers=TOKEN_HEADER,
+            json={"limit": 0},
+        )
+    assert response.status_code == 400
+    assert "limit" in response.json()["detail"]
+    assert service.started == 0
+
+
 async def test_resolve_dates_accepts_request_and_schedules_job(
     client_factory,
 ) -> None:
@@ -532,7 +603,7 @@ async def test_resolve_dates_conflict_returns_409(client_factory) -> None:
     from app.errors import CatalogConflict
 
     class BusyDateResolverService:
-        async def start(self) -> str:
+        async def start(self, limit: int | None = None) -> str:
             raise CatalogConflict("날짜 해소 작업이 이미 진행 중입니다.")
 
         async def run(self, job_id: str) -> None:

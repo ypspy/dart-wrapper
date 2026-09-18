@@ -11,10 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.errors import CatalogConflict
 from app.extracting.dates import (
-    DateCandidate,
-    parse_rcept_dt,
+    date_in_auth_window,
+    parse_auth_date,
     parse_year_end,
-    pick_audit_report_date,
 )
 from app.models.audit_report_fact import AuditReportFact
 from app.models.extraction_job import ExtractionJob
@@ -44,7 +43,7 @@ class DateResolverService:
         self._model = model
         self._prompt_version = prompt_version
 
-    async def start(self) -> str:
+    async def start(self, limit: int | None = None) -> str:
         """DART 잠금 없이 해소 잡을 등록한다. 실행은 호출측에서 run으로 돌린다."""
         async with self._sessionmaker() as session:
             jobs = ExtractionJobRepository(session)
@@ -58,7 +57,10 @@ class DateResolverService:
                     "다시 시작해 주세요."
                 )
             job_id = uuid.uuid4().hex
-            await jobs.create(job_id, RESOLVE_DATES_EXTRACTOR_ID, {})
+            params: dict[str, Any] = {}
+            if limit is not None:
+                params["limit"] = limit
+            await jobs.create(job_id, RESOLVE_DATES_EXTRACTOR_ID, params)
             await jobs.add_log(job_id, "info", "날짜 해소 작업을 등록했습니다.")
             await session.commit()
         return job_id
@@ -76,6 +78,14 @@ class DateResolverService:
         try:
             async with self._sessionmaker() as session:
                 facts = await FactRepository(session).list_ambiguous_dates()
+                job_row = await session.get(ExtractionJob, job_id)
+                limit = None
+                if job_row is not None and isinstance(job_row.params, dict):
+                    raw_limit = job_row.params.get("limit")
+                    if isinstance(raw_limit, int):
+                        limit = raw_limit
+                if limit is not None:
+                    facts = facts[:limit]
 
             resolved = 0
             for fact in facts:
@@ -105,12 +115,12 @@ class DateResolverService:
         """한 행을 해소한다. 성공하면 True, 그대로 ambiguous면 False."""
         stored = list(fact.audit_report_date_candidates or [])
         llm_candidates = _llm_candidates(stored)
-        period_end, rcept_dt = await self._window_for(fact)
+        period_end, auth_iso = await self._window_for(fact)
 
         index = await self._resolver.pick_index(
             candidates=llm_candidates,
             period_end=period_end,
-            rcept_dt=rcept_dt,
+            auth_date=auth_iso,
         )
         if index is None or index < 0 or index >= len(stored):
             return False
@@ -119,14 +129,13 @@ class DateResolverService:
             return False
 
         period_date = date.fromisoformat(period_end) if period_end else None
-        received_date = date.fromisoformat(rcept_dt) if rcept_dt else None
-        chosen = DateCandidate(date_raw=iso, iso=iso, snippet="", index=index)
-        _picked, window_status, _passing = pick_audit_report_date(
-            [chosen],
+        auth_parsed = date.fromisoformat(auth_iso) if auth_iso else None
+        iso_date = date.fromisoformat(iso)
+        if not date_in_auth_window(
+            iso_date,
             period_end=period_date,
-            rcept_dt=received_date,
-        )
-        if window_status != "ok":
+            auth_date=auth_parsed,
+        ):
             return False
 
         raw_response = self._resolver.last_raw_response
@@ -151,7 +160,7 @@ class DateResolverService:
         return True
 
     async def _window_for(self, fact: AuditReportFact) -> tuple[str, str]:
-        """목록 year_end·rcept_dt를 ISO 문자열로 바꾼다. 없으면 빈 문자열."""
+        """목록 year_end·접수번호 인증일을 ISO 문자열로 바꾼다. 없으면 빈 문자열."""
         async with self._sessionmaker() as session:
             entries = await EntryRepository(session).list_by_rcept_no(fact.rcept_no)
         sample = next((item for item in entries if item.dcm_no == fact.dcm_no), None)
@@ -160,10 +169,10 @@ class DateResolverService:
         if sample is None:
             return "", ""
         period = parse_year_end(sample.year_end)
-        received = parse_rcept_dt(sample.rcept_dt)
+        auth = parse_auth_date(sample.rcept_no)
         return (
             period.isoformat() if period else "",
-            received.isoformat() if received else "",
+            auth.isoformat() if auth else "",
         )
 
 

@@ -18,7 +18,7 @@ _PROMPTS: dict[str, str] = {
         "당신은 감사보고서일 후보 중 실제 서명일(감사보고서일)을 고릅니다. "
         "JSON만 답하세요. 형식은 {\"index\": n} 또는 {\"index\": null} 입니다. "
         "새 날짜를 만들지 마세요. 고를 수 없으면 null 을 주세요. "
-        "결산일(period_end) 이후이고 접수일(rcept_dt) 이하인 날짜만 고려하세요."
+        "결산일(period_end) 이후이고 인증일(auth_date) 이하인 날짜만 고려하세요."
     ),
 }
 
@@ -45,7 +45,7 @@ class LlmDateResolver:
         *,
         candidates: list[dict],
         period_end: str,
-        rcept_dt: str,
+        auth_date: str,
     ) -> int | None:
         """Chat Completions를 호출하고 index만 반환한다. 오류 시 None."""
         self.last_raw_response = None
@@ -53,7 +53,7 @@ class LlmDateResolver:
             response = await self._client.post(
                 _CHAT_URL,
                 headers={"Authorization": f"Bearer {self._api_key}"},
-                json=self._payload(candidates, period_end, rcept_dt),
+                json=self._payload(candidates, period_end, auth_date),
                 timeout=_LLM_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
@@ -72,14 +72,14 @@ class LlmDateResolver:
         self,
         candidates: list[dict],
         period_end: str,
-        rcept_dt: str,
+        auth_date: str,
     ) -> dict[str, Any]:
         """temperature 0 JSON 요청 본문을 만든다."""
         system = _PROMPTS.get(self._prompt_version, _PROMPTS["v1"])
         user = json.dumps(
             {
                 "period_end": period_end,
-                "rcept_dt": rcept_dt,
+                "auth_date": auth_date,
                 "candidates": candidates,
             },
             ensure_ascii=False,

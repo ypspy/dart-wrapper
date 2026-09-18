@@ -222,6 +222,8 @@ JSON: `GET /admin/extract/audit-opinion/field-bundles`, 실패 목록
 ### DATE_RESOLVER
 
 ambiguous 감사보고서일은 `POST /admin/extract/resolve-dates`로 LLM이 후보 인덱스를 고릅니다.
+비교 기준은 접수번호 앞 8자리(인증일)이며, `{"limit": N}`으로 해소 건수를 자를 수 있습니다.
+추출 잡은 LLM을 호출하지 않습니다.
 설정은 `.env`의 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`(기본 `gpt-4o-mini`),
 `DATE_RESOLVER_PROMPT_VERSION`(기본 `v1`)입니다. API 키가 비어 있으면 400입니다.
 

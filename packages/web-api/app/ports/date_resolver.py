@@ -15,7 +15,7 @@ class DateResolver(Protocol):
         *,
         candidates: list[dict],
         period_end: str,
-        rcept_dt: str,
+        auth_date: str,
     ) -> int | None:
         """후보 목록에서 감사보고서일 인덱스를 반환한다."""
         ...

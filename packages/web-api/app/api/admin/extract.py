@@ -23,6 +23,7 @@ from app.schemas.extract import (
     ExtractJobStatusResponse,
     FieldBundleCountsResponse,
     FieldBundleFailListResponse,
+    ResolveDatesRequest,
     ResolveDatesResponse,
 )
 from app.services.completeness_service import CompletenessService
@@ -231,6 +232,7 @@ async def resolve_dates(
     background_tasks: BackgroundTasks,
     settings: Settings = Depends(get_settings_dep),
     service: DateResolverService = Depends(get_date_resolver_service),
+    payload: ResolveDatesRequest = ResolveDatesRequest(),
 ) -> ResolveDatesResponse:
     """ambiguous 날짜를 LLM 인덱스로 고른다. DART는 호출하지 않는다."""
     if not settings.date_resolver_api_key:
@@ -238,7 +240,10 @@ async def resolve_dates(
             "날짜 해소용 API 키가 설정되어 있지 않습니다. "
             "DATE_RESOLVER_API_KEY를 확인한 뒤 다시 시도해 주세요."
         )
-    job_id = await service.start()
+    limit = payload.limit
+    if limit is not None and limit < 1:
+        raise BadRequest("limit는 1 이상의 정수여야 합니다.")
+    job_id = await service.start(limit=limit)
     background_tasks.add_task(service.run, job_id)
     return ResolveDatesResponse(job_id=job_id, status="pending")
 

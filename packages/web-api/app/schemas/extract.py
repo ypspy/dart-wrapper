@@ -63,6 +63,12 @@ class CompletenessResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class ResolveDatesRequest(BaseModel):
+    """ambiguous 날짜 LLM 해소 요청. limit 생략 시 대기 행 전량."""
+
+    limit: int | None = None
+
+
 class ResolveDatesResponse(BaseModel):
     """날짜 LLM 해소 트리거 응답. 즉시 반환된다."""
 
