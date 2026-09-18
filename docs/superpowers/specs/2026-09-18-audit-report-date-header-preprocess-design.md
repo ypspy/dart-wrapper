@@ -1,7 +1,8 @@
 # 감사보고서일 후행형 머리글 전처리 설계
 
 날짜: 2026-09-18  
-상태: 초안 (브레인스토밍 승인 반영)  
+상태: 대체됨 — 구현하지 않는다.  
+후속: [전수 후보·인증일 일치](2026-09-18-audit-report-date-all-candidates-auth-match-design.md).  
 범위: `packages/web-api` — `app/extracting/dates.py`의 `_preprocess`와
 `tests/test_extracting_dates.py`만.
 창 선택, 날짜 정규식, facts 스키마, 추출기 버전, Admin 모드, LLM 해소 잡은 바꾸지 않는다.
