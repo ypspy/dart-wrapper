@@ -2,6 +2,13 @@
 
 DART 공시 소스를 **재가공해 제공**하기 위한 모노레포입니다.
 
+저장소: https://github.com/ypspy/dart-wrapper
+라이선스: [MIT](./LICENSE)
+
+클론 (PowerShell): git clone https://github.com/ypspy/dart-wrapper.git
+
+`.env`와 카탈로그 DB(`packages/web-api/*.db`)는 커밋하지 않습니다. DART HTML을 치므로 요청 간격을 지키세요. Admin은 `ADMIN_TOKEN`이 필요합니다.
+
 원문 HTML/PDF는 장기 저장하지 않고, 추출한 **entry(메타·주소)** 를 저장한 뒤 필요할 때 소스를 가져와 변환·제공합니다.
 
 ## 기본 흐름
@@ -10,7 +17,8 @@ DART 공시 소스를 **재가공해 제공**하기 위한 모노레포입니다
    (목록은 정정 전·후 접수 모두, 첨부는 현재 접수 `rcpNo`만—타 접수는 해당 행에서 입수, TOC 중간 노드 포함)
 2. **탐색** — Catalog HTML(/catalog)·Facts HTML(/facts) 또는 Public API로 공시·entry 표/JSON 조회
 3. **열람** — Viewer API가 `viewer_url`로 원문을 Lazy Retrieval·정제 (JSON)
-4. **감사 추출** — 카탈로그 주소로 감사인·의견·보고일·GAAP·당기를 `audit_report_facts`에 저장 (원문 HTML은 저장하지 않음)
+4. **감사 추출** — 카탈로그 주소로 감사인·의견·보고일·GAAP·당기 등 12묶음을 `audit_report_facts`에 저장 (원문 HTML은 저장하지 않음)
+5. **회사 업종 보강** — 공시 distinct 회사에 OpenDART **기업개황만** 호출하고, KSIC 이름은 저장소 JSON으로 붙임 (목록·본문 HTML과는 별 잡)
 
 ## 구조
 
@@ -26,7 +34,17 @@ dart-wrapper/
 | 패키지 | 역할 |
 |--------|------|
 | [`@dart-wrapper/entry-extractor`](./packages/entry-extractor) | 목록·목차 파싱 후 저장용 flat entry 생성 |
-| [`web-api`](./packages/web-api) | 수집 트리거, Catalog/Viewer, 감사 표지·의견 추출 |
+| [`web-api`](./packages/web-api) | 수집 트리거, Catalog/Viewer, 감사 추출, 회사 업종 |
+
+| 문서 | 내용 |
+|------|------|
+| packages/entry-extractor/README.md | 수집 정책 |
+| packages/web-api/README.md | API·Admin·추출 규칙 |
+| docs/paper/variable-measurement.md | 논문용 측정 선택 |
+| docs/superpowers/README.md | spec/plan 색인 (당시 버전일 수 있음) |
+| docs/github-repo.md | GitHub 리포 생성 런북 |
+| PRD.md | 제품 범위 |
+| AGENTS.md | 에이전트 규칙 |
 
 추출 정책(이력 목록·첨부 접수 스코프·`leafOnly` 등)은 [`packages/entry-extractor/README.md`](./packages/entry-extractor/README.md)를 보세요.  
 API·Admin·감사 추출 규칙은 [`packages/web-api/README.md`](./packages/web-api/README.md)를 보세요.
@@ -79,4 +97,4 @@ venv는 루트가 아니라 `packages/web-api/.venv`에 있습니다.
 | GET | `/api/v1/viewer/{rcp_no}` | 공시 전체 원문 정제 |
 | GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 섹션 단건 원문 정제 |
 
-Admin API는 `X-Admin-Token`이 필요합니다. 재개·슬라이스 엔드포인트는 [`packages/web-api/README.md`](./packages/web-api/README.md)를 보세요.
+Admin API는 `X-Admin-Token`이 필요합니다. 재개·슬라이스·추출 모드는 [`packages/web-api/README.md`](./packages/web-api/README.md)를 보세요.
