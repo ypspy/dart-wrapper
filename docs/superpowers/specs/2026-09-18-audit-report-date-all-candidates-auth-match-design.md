@@ -1,7 +1,9 @@
 # 감사보고서일 전수 후보·인증일 일치 설계
 
 날짜: 2026-09-18  
-상태: 초안 (브레인스토밍 승인 반영)  
+상태: 대체됨 — 선택 규칙·해소 대상은
+[창 안 최댓값](2026-09-18-audit-report-date-window-latest-design.md)을 따른다.
+전수 후보·인증일 파싱·`limit` 게이트는 그 문서가 이 스펙을 이어 받는다.  
 범위: `packages/web-api` — 의견 본문 날짜 후보 추출·선택 규칙,
 `EXTRACTOR_VERSION`, 날짜 LLM 잡의 `limit`과 창 오른쪽 끝(인증일).  
 facts 스키마·selector·의견/GAAP·완전성 SQL·Admin 추출 화면은 바꾸지 않는다.
