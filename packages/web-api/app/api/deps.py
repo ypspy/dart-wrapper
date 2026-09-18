@@ -11,7 +11,7 @@ from app.adapters.llm_date_resolver import LlmDateResolver
 from app.adapters.opendart_company import OpenDartCompanyClient
 from app.config import Settings, get_settings
 from app.errors import Unauthorized
-from app.ksic import load_ksic_table
+from app.ksic import load_ksic_tables
 from app.repositories.disclosure_repository import DisclosureRepository
 from app.repositories.entry_repository import EntryRepository
 from app.repositories.fact_repository import FactRepository
@@ -163,12 +163,13 @@ def get_corp_industry_service(
             request.app.state.opendart_http_client,
             timeout_seconds=settings.opendart_timeout_seconds,
             max_retries=settings.opendart_max_retries,
+            max_per_minute=settings.opendart_max_per_minute,
         )
         service = CorpIndustryService(
             request.app.state.sessionmaker,
             client,
-            load_ksic_table(),
-            api_key=settings.opendart_api_key,
+            load_ksic_tables(),
+            api_keys=settings.opendart_api_keys,
             concurrency=settings.opendart_concurrency,
         )
         request.app.state.corp_industry_service = service

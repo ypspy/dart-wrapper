@@ -31,9 +31,12 @@ class Settings(BaseSettings):
     # 수집기(safeGet delayMs=1000)와 같이 추출 원문 요청 사이에 쉰다.
     dart_fetch_min_interval_seconds: float = 1.0
     opendart_api_key: str = ""
+    opendart_api_key_2: str = ""
     opendart_concurrency: int = 2
     opendart_timeout_seconds: float = 15.0
     opendart_max_retries: int = 2
+    # TCP 차단을 피하려고 분당 1,000보다 여유 있게 200으로 둔다.
+    opendart_max_per_minute: int = 200
 
     # Admin 운영: 1인 운영을 전제로 공유 토큰 하나만 사용한다.
     admin_token: str = "dev-admin-token"
@@ -61,6 +64,22 @@ class Settings(BaseSettings):
                 if item.strip()
             )
         )
+
+    @property
+    def opendart_api_keys(self) -> tuple[str, ...]:
+        """OpenDART 인증키를 우선순위대로 모은다. 한도가 차면 다음 키를 쓴다."""
+        return parse_opendart_api_keys(self.opendart_api_key, self.opendart_api_key_2)
+
+
+def parse_opendart_api_keys(*raw: str) -> tuple[str, ...]:
+    """쉼표·세미콜론으로 나눈 키를 중복 없이 순서대로 반환한다."""
+    keys: list[str] = []
+    for blob in raw:
+        for item in blob.replace(";", ",").split(","):
+            key = item.strip()
+            if key and key not in keys:
+                keys.append(key)
+    return tuple(keys)
 
 
 @lru_cache

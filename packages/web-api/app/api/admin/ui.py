@@ -294,7 +294,7 @@ async def _corp_panel_context(
             job is not None
             and job.job_id in getattr(service, "_stop_requested", set())
         ),
-        "opendart_ready": bool(settings.opendart_api_key.strip()),
+        "opendart_ready": bool(settings.opendart_api_keys),
     }
 
 
@@ -418,13 +418,17 @@ async def extract_completeness_cards(
     request: Request,
     start_date: str | None = None,
     end_date: str | None = None,
+    board_type: str | None = None,
     settings: Settings = Depends(get_settings_dep),
     completeness: CompletenessService = Depends(get_completeness_service),
 ) -> HTMLResponse:
-    """세 유형 완전성 카드를 한 partial로 반환한다. 60초 폴링용."""
+    """세 유형 입수 현황을 한 partial로 반환한다. 60초 폴링용."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
 
+    selected = (board_type or "F001").strip().upper()
+    if selected not in RESEARCH_EXTRACT_REPORT_TYPES:
+        selected = "F001"
     resolved_start, resolved_end, date_notice, rows, field_bundles = (
         await _extract_completeness_page(completeness, start_date, end_date)
     )
@@ -437,6 +441,7 @@ async def extract_completeness_cards(
             "date_notice": date_notice,
             "completeness_rows": rows,
             "field_bundles": field_bundles,
+            "board_type": selected,
         },
     )
 
@@ -717,7 +722,7 @@ async def start_corps(
     """빠진 회사 업종 채움 작업을 시작하고 대시보드로 돌아간다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
-    if not settings.opendart_api_key.strip():
+    if not settings.opendart_api_keys:
         return RedirectResponse("/admin", status_code=303)
 
     try:

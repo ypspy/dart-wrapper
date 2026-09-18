@@ -38,9 +38,10 @@ async def enrich_corps(
     service: CorpIndustryService = Depends(get_corp_industry_service),
 ) -> CorpEnrichResponse:
     """누락된 회사 업종 작업을 등록하고 백그라운드에서 실행한다."""
-    if not settings.opendart_api_key:
+    if not settings.opendart_api_keys:
         raise BadRequest(
-            "OpenDART 인증키가 없습니다. OPENDART_API_KEY를 설정한 뒤 다시 시작해 주세요."
+            "OpenDART 인증키가 없습니다. "
+            "OPENDART_API_KEY(와 필요하면 OPENDART_API_KEY_2)를 설정한 뒤 다시 시작해 주세요."
         )
     job_id = await service.start()
     background_tasks.add_task(service.run_job, job_id)

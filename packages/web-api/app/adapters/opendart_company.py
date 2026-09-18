@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -64,6 +65,27 @@ def parse_company_payload(payload: dict[str, object]) -> CompanyOverview:
     )
 
 
+class OpenDartRateLimiter:
+    """네트워크 요청 시작을 분당 한도 바로 아래로 직렬화한다."""
+
+    def __init__(self, max_per_minute: int) -> None:
+        self._max_per_minute = max_per_minute
+        self._lock = asyncio.Lock()
+        self._next_at = 0.0
+
+    async def acquire(self) -> None:
+        """다음 허용 시각까지 기다린 뒤 한 슬롯을 쓴다."""
+        if self._max_per_minute <= 0:
+            return
+        interval = 60.0 / self._max_per_minute
+        async with self._lock:
+            now = time.monotonic()
+            wait = self._next_at - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._next_at = time.monotonic() + interval
+
+
 class OpenDartCompanyClient:
     """인증키와 고유번호로 기업개황 JSON을 가져온다."""
 
@@ -74,16 +96,19 @@ class OpenDartCompanyClient:
         timeout_seconds: float = 15.0,
         max_retries: int = 2,
         retry_backoff_seconds: float = 0.5,
+        max_per_minute: int = 200,
     ) -> None:
         self._client = client
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
+        self._rate_limiter = OpenDartRateLimiter(max_per_minute)
 
     async def fetch(self, corp_code: str, api_key: str) -> CompanyOverview:
         """company.json 1건. HTTP 실패만 재시도한다."""
         last_reason = "알 수 없는 오류"
         for attempt in range(self._max_retries + 1):
+            await self._rate_limiter.acquire()
             try:
                 response = await self._client.get(
                     COMPANY_URL,

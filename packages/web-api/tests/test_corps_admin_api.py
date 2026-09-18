@@ -90,7 +90,9 @@ def _app_with_corps(
     """회사 업종 서비스와 설정을 주입한 앱을 만든다."""
     app = create_app()
     app.dependency_overrides[get_corp_industry_service] = lambda: service
-    app.dependency_overrides[get_settings_dep] = lambda: Settings(opendart_api_key=api_key)
+    app.dependency_overrides[get_settings_dep] = lambda: Settings(
+        opendart_api_key=api_key, opendart_api_key_2=""
+    )
     return app
 
 

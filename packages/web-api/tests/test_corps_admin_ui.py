@@ -100,7 +100,9 @@ def _app(
     app.dependency_overrides[get_catalog_service] = lambda: FakeCatalogService()
     app.dependency_overrides[get_slice_query_service] = lambda: FakeSliceQueryService()
     app.dependency_overrides[get_corp_industry_service] = lambda: corps
-    app.dependency_overrides[get_settings_dep] = lambda: Settings(opendart_api_key=api_key)
+    app.dependency_overrides[get_settings_dep] = lambda: Settings(
+        opendart_api_key=api_key, opendart_api_key_2=""
+    )
     return app
 
 

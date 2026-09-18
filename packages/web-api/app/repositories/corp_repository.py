@@ -29,3 +29,8 @@ class CorpRepository:
         statement = select(func.count()).select_from(Corp).where(Corp.fetch_status == "ok")
         result = await self._session.execute(statement)
         return int(result.scalar_one())
+
+    async def list_all(self) -> list[Corp]:
+        """저장된 회사 행을 모두 읽는다."""
+        result = await self._session.execute(select(Corp))
+        return list(result.scalars().all())

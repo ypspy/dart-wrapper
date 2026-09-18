@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 import httpx
 import pytest
 
@@ -18,6 +21,7 @@ def _client(handler: object, max_retries: int = 0) -> OpenDartCompanyClient:
         httpx.AsyncClient(transport=transport),
         timeout_seconds=1.0,
         max_retries=max_retries,
+        max_per_minute=0,
     )
 
 
@@ -137,3 +141,25 @@ async def test_fetch_json_array_does_not_retry() -> None:
     with pytest.raises(OpenDartHttpError, match="객체가 아닙니다"):
         await _client(handler, max_retries=2).fetch("00126380", "key")
     assert attempts["n"] == 1
+
+
+async def test_fetch_spaces_starts_under_per_minute_cap() -> None:
+    """HTTP 시작은 분당 한도 바로 아래 간격으로 직렬화한다."""
+    started: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        started.append(time.monotonic())
+        return httpx.Response(200, json={"status": "000", "message": "정상"})
+
+    transport = httpx.MockTransport(handler)
+    client = OpenDartCompanyClient(
+        httpx.AsyncClient(transport=transport),
+        timeout_seconds=1.0,
+        max_retries=0,
+        max_per_minute=1200,
+    )
+    await asyncio.gather(*(client.fetch(f"00{i}", "key") for i in range(3)))
+    started.sort()
+    interval = 60.0 / 1200
+    assert started[1] - started[0] >= interval * 0.9
+    assert started[2] - started[0] >= interval * 1.8

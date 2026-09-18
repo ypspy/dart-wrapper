@@ -6,6 +6,7 @@ import asyncio
 import logging
 import uuid
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -17,7 +18,7 @@ from app.adapters.opendart_company import (
     OpenDartHttpError,
 )
 from app.errors import BadRequest, CatalogConflict, CatalogNotFound
-from app.ksic import KsicEntry, names_for
+from app.ksic import KsicEntry, KsicNames, names_for_preferred
 from app.models.corp import Corp
 from app.models.extraction_job import ExtractionJob, ExtractionJobLog
 from app.repositories.corp_repository import CorpRepository
@@ -29,7 +30,39 @@ logger = logging.getLogger(__name__)
 CORP_INDUSTRY_EXTRACTOR_ID = "corp_industry"
 FILL_MISSING_MODE = "fill_missing"
 FATAL_OPENDART_STATUSES = frozenset({"010", "011", "012", "020", "800", "901"})
+QUOTA_OPENDART_STATUS = "020"
 STALE_RUNNING_SECONDS = 3600
+
+
+class OpenDartKeyPool:
+    """한도(020)가 난 키를 건너뛰고 남은 키를 준다."""
+
+    def __init__(self, keys: tuple[str, ...]) -> None:
+        self._keys = keys
+        self._exhausted: set[int] = set()
+        self._index = 0
+        self._lock = asyncio.Lock()
+
+    async def current(self) -> str | None:
+        """한도가 남은 키를 반환한다. 없으면 None."""
+        async with self._lock:
+            for index, key in enumerate(self._keys):
+                if index not in self._exhausted:
+                    self._index = index
+                    return key
+            return None
+
+    async def rotate_after_quota(self, failed_key: str) -> tuple[str | None, int | None]:
+        """한도 난 키를 폐기하고 (다음 키, 1부터의 순번)을 준다. 없으면 (None, None)."""
+        async with self._lock:
+            for index, key in enumerate(self._keys):
+                if key == failed_key:
+                    self._exhausted.add(index)
+            for index, key in enumerate(self._keys):
+                if index not in self._exhausted:
+                    self._index = index
+                    return key, index + 1
+            return None, None
 
 
 @dataclass(frozen=True)
@@ -76,15 +109,17 @@ class CorpIndustryService:
         self,
         sessionmaker: async_sessionmaker[AsyncSession],
         client: OpenDartCompanyClient,
-        ksic: dict[str, KsicEntry],
+        ksic: dict[str, KsicEntry] | Sequence[dict[str, KsicEntry]],
         *,
-        api_key: str,
+        api_keys: tuple[str, ...],
         concurrency: int = 2,
     ) -> None:
         self._sessionmaker = sessionmaker
         self._client = client
-        self._ksic = ksic
-        self._api_key = api_key
+        self._ksic_tables: tuple[dict[str, KsicEntry], ...] = (
+            (ksic,) if isinstance(ksic, dict) else tuple(ksic)
+        )
+        self._api_keys = api_keys
         self._concurrency = max(1, concurrency)
         self._stop_requested: set[str] = set()
         self._start_lock = asyncio.Lock()
@@ -92,9 +127,10 @@ class CorpIndustryService:
     async def start(self) -> str:
         """동일 추출기의 활성 잡만 확인하고 새 잡을 등록한다."""
         async with self._start_lock:
-            if not self._api_key.strip():
+            if not self._api_keys:
                 raise BadRequest(
-                    "OpenDART 인증키가 없습니다. OPENDART_API_KEY를 설정한 뒤 다시 시작해 주세요."
+                    "OpenDART 인증키가 없습니다. "
+                    "OPENDART_API_KEY(와 필요하면 OPENDART_API_KEY_2)를 설정한 뒤 다시 시작해 주세요."
                 )
 
             async with self._sessionmaker() as session:
@@ -154,6 +190,7 @@ class CorpIndustryService:
             queue = deque(missing)
             claim_lock = asyncio.Lock()
             progress_lock = asyncio.Lock()
+            key_pool = OpenDartKeyPool(self._api_keys)
             semaphore = asyncio.Semaphore(self._concurrency)
             fatal_event = asyncio.Event()
             processed = 0
@@ -170,37 +207,62 @@ class CorpIndustryService:
                         await jobs.add_log(job_id, level, message)
                         await session.commit()
 
+            async def log_warning(message: str) -> None:
+                """진행 카운터를 올리지 않고 로그만 남긴다."""
+                async with progress_lock:
+                    async with self._sessionmaker() as session:
+                        await ExtractionJobRepository(session).add_log(
+                            job_id, "warning", message
+                        )
+                        await session.commit()
+
             async def process_one(corp_code: str) -> None:
-                try:
-                    async with semaphore:
-                        overview = await self._client.fetch(corp_code, self._api_key)
-                except OpenDartHttpError as exc:
-                    await save_result(
-                        self._http_error_corp(corp_code),
-                        f"{corp_code} api_error · {exc}",
-                        "warning",
+                while True:
+                    api_key = await key_pool.current()
+                    if api_key is None:
+                        raise OpenDartFatalError(_fatal_message(QUOTA_OPENDART_STATUS))
+                    try:
+                        async with semaphore:
+                            overview = await self._client.fetch(corp_code, api_key)
+                    except OpenDartHttpError as exc:
+                        await save_result(
+                            self._http_error_corp(corp_code),
+                            f"{corp_code} api_error · {exc}",
+                            "warning",
+                        )
+                        return
+
+                    if overview.status == QUOTA_OPENDART_STATUS:
+                        next_key, next_ordinal = await key_pool.rotate_after_quota(api_key)
+                        if next_key is None:
+                            raise OpenDartFatalError(_fatal_message(overview.status))
+                        await log_warning(
+                            "OpenDART 인증키 한도에 닿아 다음 키"
+                            f"({next_ordinal}번째)로 바꿉니다. 한도 난 회사는 다시 조회합니다."
+                        )
+                        continue
+
+                    if overview.status in FATAL_OPENDART_STATUSES:
+                        raise OpenDartFatalError(_fatal_message(overview.status))
+
+                    fetch_status = (
+                        "ok"
+                        if overview.status == "000"
+                        else "not_found" if overview.status == "013" else "api_error"
                     )
+                    corp = self._overview_corp(corp_code, overview, fetch_status)
+                    if fetch_status == "ok":
+                        class_name = corp.induty_name_class or ""
+                        message = f"{corp_code} ok · {overview.induty_code or ''} {class_name}"
+                        level = "info"
+                    else:
+                        message = (
+                            f"{corp_code} {fetch_status} · {overview.status} "
+                            f"{overview.message}"
+                        )
+                        level = "warning"
+                    await save_result(corp, message, level)
                     return
-
-                if overview.status in FATAL_OPENDART_STATUSES:
-                    raise OpenDartFatalError(_fatal_message(overview.status))
-
-                fetch_status = (
-                    "ok"
-                    if overview.status == "000"
-                    else "not_found" if overview.status == "013" else "api_error"
-                )
-                corp = self._overview_corp(corp_code, overview, fetch_status)
-                if fetch_status == "ok":
-                    class_name = corp.induty_name_class or ""
-                    message = f"{corp_code} ok · {overview.induty_code or ''} {class_name}"
-                    level = "info"
-                else:
-                    message = (
-                        f"{corp_code} {fetch_status} · {overview.status} " f"{overview.message}"
-                    )
-                    level = "warning"
-                await save_result(corp, message, level)
 
             async def worker() -> Exception | None:
                 while True:
@@ -303,6 +365,39 @@ class CorpIndustryService:
             remaining_count=max(0, disclosure_corps - ok_count),
         )
 
+    def _names_for(self, code: str | None) -> KsicNames:
+        """11차 표가 있으면 우선하고, 없으면 다음 표로 이름을 붙인다."""
+        return names_for_preferred(code, *self._ksic_tables)
+
+    async def remap_ksic_names(self) -> tuple[int, int]:
+        """OpenDART를 치지 않고 저장된 업종코드에 이름을 다시 붙인다."""
+        updated = 0
+        unmatched = 0
+        async with self._sessionmaker() as session:
+            corps = await CorpRepository(session).list_all()
+            for corp in corps:
+                code = (corp.induty_code or "").strip()
+                if not code:
+                    continue
+                names = self._names_for(code)
+                corp.induty_name_div = names.induty_name_div
+                corp.induty_name_group = names.induty_name_group
+                corp.induty_name_class = names.induty_name_class
+                corp.induty_name_subclass = names.induty_name_subclass
+                corp.induty_name_item = names.induty_name_item
+                if (
+                    names.induty_name_div is None
+                    and names.induty_name_group is None
+                    and names.induty_name_class is None
+                    and names.induty_name_subclass is None
+                    and names.induty_name_item is None
+                ):
+                    unmatched += 1
+                else:
+                    updated += 1
+            await session.commit()
+        return updated, unmatched
+
     def _overview_corp(
         self,
         corp_code: str,
@@ -310,7 +405,7 @@ class CorpIndustryService:
         fetch_status: str,
     ) -> Corp:
         """기업개황과 KSIC 이름으로 저장 행을 만든다."""
-        names = names_for(overview.induty_code, self._ksic)
+        names = self._names_for(overview.induty_code)
         return Corp(
             corp_code=corp_code,
             corp_name=overview.corp_name,
