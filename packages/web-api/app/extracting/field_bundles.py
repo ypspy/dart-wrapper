@@ -32,6 +32,9 @@ BUNDLE_LABELS: dict[str, str] = {row[0]: row[2] for row in _BUNDLE_ROWS}
 FIELD_BUNDLE_REPORT_TYPES: tuple[str, ...] = ("F001", "F002", "A001")
 EXPORT_PAGE_SIZE = 5000
 DART_DISCLOSURE_VIEW = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
+DART_DOCUMENT_VIEW = (
+    "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}&dcmNo={dcm_no}"
+)
 
 
 def status_attr(bundle: str) -> str:

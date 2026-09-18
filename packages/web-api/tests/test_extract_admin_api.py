@@ -13,7 +13,7 @@ from app.errors import BadRequest, CatalogNotFound
 from app.extracting.constants import EXTRACTOR_VERSION
 from app.extracting.field_bundles import (
     BUNDLE_KEYS,
-    DART_DISCLOSURE_VIEW,
+    DART_DOCUMENT_VIEW,
     add_fact_outcomes,
     empty_field_bundle_counts,
     icfr_period_year,
@@ -424,7 +424,7 @@ async def test_extract_status_reads_job_registered_by_start(
 
 async def test_extract_accepts_resume_and_reparse_modes(client_factory) -> None:
     """resume·reparse 모드도 202으로 등록한다."""
-    for mode in ("resume", "reparse"):
+    for mode in ("resume", "reparse", "patch"):
         service = FakeExtractionService()
         payload = {**EXTRACT_PAYLOAD, "mode": mode}
 
@@ -469,6 +469,7 @@ async def test_completeness_fully_ok_row_is_not_field_partial(
     assert body["target"] == 1
     assert body["ok"] == 1
     assert body["field_partial"] == 0
+    assert body["all_success"] == 1
 
 
 async def test_completeness_field_partial_includes_skipped(
@@ -545,6 +546,7 @@ async def test_completeness_field_partial_includes_icfr_skipped(
     assert body["target"] == 1
     assert body["ok"] == 1
     assert body["field_partial"] == 1
+    assert body["all_success"] == 0
 
 
 async def test_completeness_unlisted_f001_icfr_skipped_is_not_field_partial(
@@ -573,6 +575,7 @@ async def test_completeness_unlisted_f001_icfr_skipped_is_not_field_partial(
 
     assert counts.status_code == 200
     assert counts.json()["field_partial"] == 0
+    assert counts.json()["all_success"] == 1
     icfr = next(row for row in bundles.json()["bundles"] if row["bundle"] == "icfr")
     assert icfr["expected_missing"] == 1
     assert icfr["fail"] == 0
@@ -691,7 +694,7 @@ async def test_completeness_subsidiary_not_found_is_field_partial(
 async def test_completeness_field_partial_includes_communications_not_found(
     client_factory, memory_app: tuple[FastAPI, object]
 ) -> None:
-    """시간·실시항목이 ok인 4절 not_found는 제도상없음이라 field_partial이 아니다."""
+    """실시내용 1–3절 ok이고 4절만 not_found면 제도상없음이라 부분실패가 아니다."""
     app, sessionmaker = memory_app
     await _seed(
         sessionmaker,
@@ -717,6 +720,7 @@ async def test_completeness_field_partial_includes_communications_not_found(
     assert body["target"] == 1
     assert body["ok"] == 1
     assert body["field_partial"] == 0
+    assert body["all_success"] == 1
 
 
 async def test_completeness_counts_fetch_states_and_ambiguous_dates(
@@ -761,7 +765,51 @@ async def test_completeness_counts_fetch_states_and_ambiguous_dates(
     assert body["ok"] == 1
     assert body["ambiguous_dates"] == 1
     assert body["field_partial"] == 1
+    assert body["all_success"] == 0
     assert body["unextracted"] == 0
+
+
+async def test_completeness_ignores_f001_company_overview_attachment(
+    client_factory, memory_app: tuple[FastAPI, object]
+) -> None:
+    """F001 기업개황자료 첨부 facts는 대상·시도 실패에 넣지 않는다."""
+    app, sessionmaker = memory_app
+    await _seed(
+        sessionmaker,
+        [
+            _entry(),
+            _entry(
+                entry_id="e-overview",
+                dcm_no="99999",
+                source="attachment",
+                document_name="기업개황자료",
+                section_name="기업개황자료",
+                path=["기업개황자료"],
+            ),
+        ],
+        [
+            _ok_fact(),
+            _ok_fact(
+                rcept_no="20200331000001",
+                dcm_no="99999",
+                fetch_status="section_missing",
+            ),
+        ],
+    )
+
+    async with client_factory(app) as client:
+        response = await client.get(
+            "/admin/extract/audit-opinion/completeness",
+            params={**COMPLETENESS_PARAMS, "status": "section_missing"},
+            headers=TOKEN_HEADER,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["target"] == 1
+    assert body["ok"] == 1
+    assert body["section_missing"] == 0
+    assert body["items"] == []
 
 
 async def test_completeness_counts_same_document_leaves_once(
@@ -1267,7 +1315,9 @@ async def test_field_bundle_fail_items_list_subsidiary_holes_only(
     assert item.bundle == "subsidiary"
     assert item.status == "not_found"
     assert item.extractor_version == EXTRACTOR_VERSION
-    assert item.viewer_url == "https://dart.fss.or.kr/report/viewer.do?rcpNo=4"
+    assert item.viewer_url == DART_DOCUMENT_VIEW.format(
+        rcept_no="20200331000004", dcm_no="44444"
+    )
     assert listed.next_cursor is None
     assert comms.items == []
 
@@ -1288,10 +1338,10 @@ async def test_field_bundle_fail_items_reject_unknown_bundle(
             )
 
 
-async def test_field_bundle_fail_items_use_dart_view_when_viewer_missing(
+async def test_field_bundle_fail_items_use_document_main_view(
     memory_app: tuple[FastAPI, object],
 ) -> None:
-    """entry viewer_url이 없으면 공시 뷰어 URL을 쓴다."""
+    """원문 링크는 섹션 viewer.do가 아니라 문서 전체 main.do다."""
     _app, sessionmaker = memory_app
     await _seed(
         sessionmaker,
@@ -1306,8 +1356,9 @@ async def test_field_bundle_fail_items_use_dart_view_when_viewer_missing(
             cursor=None,
             limit=50,
         )
-    assert listed.items[0].viewer_url == DART_DISCLOSURE_VIEW.format(
-        rcept_no="20200331000001"
+    assert listed.items[0].viewer_url == DART_DOCUMENT_VIEW.format(
+        rcept_no="20200331000001",
+        dcm_no="11111",
     )
 
 

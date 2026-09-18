@@ -69,6 +69,62 @@ async def test_list_by_rcept_no_and_get_by_entry_id(sessionmaker_fixture) -> Non
     assert missing is None
 
 
+async def test_list_extraction_document_rows_is_one_query_candidates(
+    sessionmaker_fixture,
+) -> None:
+    """기간·유형 문서 후보를 접수마다 다시 읽지 않고 한 번에 돌려준다."""
+    async with sessionmaker_fixture() as session:
+        repository = EntryRepository(session)
+        await repository.upsert_many(
+            [
+                EntryRecord(
+                    entry_id="f1-cover",
+                    rcept_no="20200331000001",
+                    report_type="F001",
+                    rcept_dt="2020.03.31",
+                    source="body",
+                    dcm_no="11111",
+                    document_name="감사보고서",
+                    section_name="표지",
+                    path=["감사보고서", "표지"],
+                ),
+                EntryRecord(
+                    entry_id="f1-opinion",
+                    rcept_no="20200331000001",
+                    report_type="F001",
+                    rcept_dt="2020.03.31",
+                    source="body",
+                    dcm_no="11111",
+                    document_name="감사보고서",
+                    section_name="의견",
+                    path=["감사보고서", "의견"],
+                ),
+                EntryRecord(
+                    entry_id="a1-other",
+                    rcept_no="20200331000002",
+                    report_type="A001",
+                    rcept_dt="2020.03.31",
+                    source="attachment",
+                    dcm_no="22222",
+                    document_name="정관",
+                    section_name="정관",
+                    path=["정관"],
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        repository = EntryRepository(session)
+        rows = await repository.list_extraction_document_rows(
+            "20200301", "20200331", ["F001", "A001"]
+        )
+
+    pairs = {(row[0], row[1], row[4]) for row in rows}
+    assert ("20200331000001", "11111", "감사보고서") in pairs
+    assert ("20200331000002", "22222", "정관") in pairs
+
+
 async def test_list_toc_orders_by_ordinal(sessionmaker_fixture) -> None:
     async with sessionmaker_fixture() as session:
         repository = EntryRepository(session)

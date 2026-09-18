@@ -7,14 +7,14 @@ import json
 from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import Integer, and_, case, cast, func, literal, or_, select
+from sqlalchemy import Integer, and_, case, cast, exists, func, literal, or_, select
 
 from app.errors import BadRequest, CatalogNotFound
 from app.extracting.constants import EXTRACTOR_VERSION
 from app.extracting.field_bundles import (
     BUNDLE_KEYS,
     BUNDLE_LABELS,
-    DART_DISCLOSURE_VIEW,
+    DART_DOCUMENT_VIEW,
     EXPORT_PAGE_SIZE,
     FIELD_BUNDLE_REPORT_TYPES,
     ICFR_CONSOLIDATED_MANDATE_YEAR,
@@ -22,7 +22,11 @@ from app.extracting.field_bundles import (
     empty_field_bundle_counts,
     status_attr,
 )
-from app.extracting.selector import is_audit_document
+from app.extracting.selector import (
+    AUDIT_ATTACHMENT_DOC_NAMES,
+    AUDIT_DOC_EXCLUDE_MARKERS,
+    collect_audit_document_keys,
+)
 from app.models.audit_report_fact import AuditReportFact
 from app.models.corp import Corp
 from app.models.disclosure import Disclosure
@@ -51,20 +55,6 @@ LIST_STATUSES = (
     "field_partial",
 )
 DocKey = tuple[str, str]
-
-
-def _collect_audit_document_keys(
-    rows: Sequence[tuple[str, str | None, str | None, str, str | None]],
-) -> list[tuple[str, str]]:
-    """후보 행에서 감사 문서 (rcept_no, dcm_no)를 등장 순·중복 없이 모은다."""
-    seen: dict[tuple[str, str], None] = {}
-    for rcept_no, dcm_no, report_type, source, document_name in rows:
-        if not dcm_no:
-            continue
-        if not is_audit_document(report_type, source, document_name):
-            continue
-        seen.setdefault((rcept_no, dcm_no), None)
-    return list(seen.keys())
 
 
 def encode_cursor(rcept_no: str, dcm_no: str) -> str:
@@ -130,7 +120,12 @@ def _icfr_period_year_sql() -> object:
 
 
 def _field_partial_sql():
-    """현재 파서 ok 행의 필드 실패를 SQL로 표현한다. classify_outcome == fail과 같다."""
+    """현재 파서 ok 행에서 12묶음 실패가 하나라도 있는 조건."""
+    return any_bundle_fail_clause()
+
+
+def any_bundle_fail_clause() -> object:
+    """한 행에 묶음 실패가 하나라도 있으면 참."""
     return or_(*(_fail_predicate(key) for key in BUNDLE_KEYS))
 
 
@@ -182,6 +177,44 @@ def _fail_predicate(bundle: str) -> object:
     """eligible 행에서 해당 묶음이 실패인 조건. 집계와 목록이 공유한다."""
     _is_na, _is_expected, _is_ok, is_fail = _bundle_predicates(bundle)
     return is_fail
+
+
+def _compact_sql(column: object) -> object:
+    """SQL에서 compact()와 같이 공백을 뺀다."""
+    return func.replace(
+        func.replace(func.replace(func.coalesce(column, ""), " ", ""), "\t", ""),
+        "\n",
+        "",
+    )
+
+
+def _audit_document_exists() -> object:
+    """is_audit_document와 같은 대상 문서만 facts에 남긴다."""
+    compacted = _compact_sql(Entry.document_name)
+    excluded = or_(
+        *[compacted.contains(marker) for marker in AUDIT_DOC_EXCLUDE_MARKERS]
+    )
+    named_attachment = and_(
+        Entry.source == "attachment",
+        compacted.in_(tuple(AUDIT_ATTACHMENT_DOC_NAMES)),
+    )
+    return exists(
+        select(literal(1)).where(
+            Entry.rcept_no == AuditReportFact.rcept_no,
+            Entry.dcm_no == AuditReportFact.dcm_no,
+            ~excluded,
+            or_(
+                and_(
+                    Entry.report_type.in_(("F001", "F002")),
+                    Entry.source != "attachment",
+                ),
+                and_(
+                    Entry.report_type.in_(("F001", "F002", "A001")),
+                    named_attachment,
+                ),
+            ),
+        )
+    )
 
 
 class CompletenessService:
@@ -284,6 +317,7 @@ class CompletenessService:
                 stale_version=int(group.get("stale_version", 0)),
                 ambiguous_dates=int(group.get("ambiguous_dates", 0)),
                 field_partial=int(group.get("field_partial", 0)),
+                all_success=int(group.get("all_success", 0)),
                 items=[],
                 next_cursor=None,
             )
@@ -353,12 +387,16 @@ class CompletenessService:
                     _sum_if(and_(ok_current, _field_partial_sql())).label(
                         "field_partial"
                     ),
+                    _sum_if(and_(ok_current, ~any_bundle_fail_clause())).label(
+                        "all_success"
+                    ),
                 )
             )
             .where(
                 AuditReportFact.source_report_type.in_(list(report_types)),
                 Disclosure.rcept_dt >= start_dt,
                 Disclosure.rcept_dt <= end_dt,
+                _audit_document_exists(),
             )
             .group_by(AuditReportFact.source_report_type)
         )
@@ -375,6 +413,7 @@ class CompletenessService:
                 "section_missing": int(row.section_missing or 0),
                 "ambiguous_dates": int(row.ambiguous_dates or 0),
                 "field_partial": int(row.field_partial or 0),
+                "all_success": int(row.all_success or 0),
             }
         return grouped
 
@@ -417,7 +456,7 @@ class CompletenessService:
             repo = EntryRepository(self._session)
             for rcept_no in rcept_nos:
                 filing = await repo.list_by_rcept_no(rcept_no)
-                doc_keys = _collect_audit_document_keys(
+                doc_keys = collect_audit_document_keys(
                     [
                         (
                             entry.rcept_no,
@@ -458,7 +497,11 @@ class CompletenessService:
             _join_facts_window(
                 select(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
             )
-            .where(self._fact_window(start_dt, end_dt, report_type), extra)
+            .where(
+                self._fact_window(start_dt, end_dt, report_type),
+                extra,
+                _audit_document_exists(),
+            )
             .order_by(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
         )
         if cursor_key is not None:
@@ -488,7 +531,33 @@ class CompletenessService:
             AuditReportFact.source_report_type.in_(list(FIELD_BUNDLE_REPORT_TYPES)),
             Disclosure.rcept_dt >= start_dt,
             Disclosure.rcept_dt <= end_dt,
+            _audit_document_exists(),
         )
+
+    async def list_patch_document_keys(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        report_types: Sequence[str],
+    ) -> list[tuple[str, str]]:
+        """칸 실패가 있는 현재 추출기 ok 문서의 (rcept_no, dcm_no)."""
+        if not report_types:
+            return []
+        start_dt, end_dt = self._window(start_date, end_date)
+        statement = (
+            _join_facts_window(
+                select(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
+            )
+            .where(
+                self._eligible_fact_window(start_dt, end_dt),
+                AuditReportFact.source_report_type.in_(list(report_types)),
+                any_bundle_fail_clause(),
+            )
+            .order_by(AuditReportFact.rcept_no, AuditReportFact.dcm_no)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [(str(rcept_no), str(dcm_no)) for rcept_no, dcm_no in rows]
 
     async def summarize_field_bundles(
         self,
@@ -619,20 +688,8 @@ class CompletenessService:
         return FieldBundleFailListResponse(items=items, next_cursor=next_cursor)
 
     async def _viewer_url_for(self, rcept_no: str, dcm_no: str) -> str:
-        """같은 문서 entry의 viewer_url, 없으면 공시 뷰어 URL."""
-        statement = (
-            select(Entry.viewer_url)
-            .where(
-                Entry.rcept_no == rcept_no,
-                Entry.dcm_no == dcm_no,
-                Entry.viewer_url.is_not(None),
-            )
-            .limit(1)
-        )
-        found = (await self._session.execute(statement)).scalar_one_or_none()
-        if found:
-            return str(found)
-        return DART_DISCLOSURE_VIEW.format(rcept_no=rcept_no)
+        """실패 검토용 원문. leaf viewer.do가 아니라 문서 전체 목차(main.do)다."""
+        return DART_DOCUMENT_VIEW.format(rcept_no=rcept_no, dcm_no=dcm_no)
 
     async def override_audit_report_date(
         self,

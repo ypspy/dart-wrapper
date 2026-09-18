@@ -58,6 +58,7 @@ class FakeCompletenessService:
             stale_version=4,
             ambiguous_dates=1,
             field_partial=3,
+            all_success=4,
             items=items,
         )
 
@@ -114,7 +115,10 @@ class FakeCompletenessService:
                     bundle=str(kwargs.get("bundle", "opinion")),
                     status="not_found",
                     extractor_version=EXTRACTOR_VERSION,
-                    viewer_url="https://dart.fss.or.kr/report/viewer.do?rcpNo=1",
+                    viewer_url=(
+                        "https://dart.fss.or.kr/dsaf001/main.do"
+                        "?rcpNo=20200331000001&dcmNo=11111"
+                    ),
                 )
             ]
         )
@@ -235,6 +239,7 @@ async def test_extract_page_defaults_research_window(
     assert "추출 · 완전성" in response.text
     assert 'href="/admin/extract"' in response.text
     assert ">추출</a>" in response.text or "추출</a>" in response.text
+    assert "칸 실패만" in response.text
 
 
 async def test_extract_job_card_shows_progress(
@@ -285,10 +290,11 @@ async def test_completeness_cards_query_uses_requested_dates(
     assert types == ["F001", "F002", "A001"]
     assert all(call["start_date"] == "20200101" for call in completeness.calls)
     assert "대상 10" in response.text
-    assert "미추출 2" in response.text
-    assert "구버전 4" in response.text
-    assert "재추출 필요" in response.text
-    assert "ok 중 구멍" in response.text or "부분실패 3" in response.text
+    assert "아직 안 함" in response.text
+    assert "입수율" in response.text
+    assert "구버전 4" in response.text or ">4</td>" in response.text
+    assert "칸 실패 3" in response.text
+    assert "부분실패 3" not in response.text
 
 
 async def test_completeness_cards_include_twelve_bundle_rows(
@@ -322,7 +328,8 @@ async def test_field_bundle_items_partial_lists_fail_row(
         )
     assert response.status_code == 200
     assert "20200331000001" in response.text
-    assert "viewer.do" in response.text
+    assert "dsaf001/main.do" in response.text
+    assert "dcmNo=11111" in response.text
 
 
 async def test_completeness_items_lists_documents(

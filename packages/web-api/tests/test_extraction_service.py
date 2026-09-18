@@ -8,6 +8,7 @@ import pytest
 from app.adapters.dart_http import DartHttpClient
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.errors import CatalogConflict
+from app.extracting.constants import EXTRACTOR_VERSION
 from app.models.audit_report_fact import AuditReportFact
 from app.models.corp import Corp
 from app.models.disclosure import Disclosure
@@ -274,6 +275,34 @@ async def _seed_entries(sessionmaker, records: list[EntryRecord]) -> None:
         await EntryRepository(session).upsert_many(records)
         await DisclosureRepository(session).upsert_many(_disclosures_from_entries(records))
         await session.commit()
+
+
+def _complete_ok_fact(**overrides: object) -> AuditReportFact:
+    """12묶음이 실패가 아닌 입수 행."""
+    values: dict[str, object] = {
+        "rcept_no": "20200331000001",
+        "dcm_no": "11111",
+        "source_report_type": "F001",
+        "fs_scope": "separate",
+        "auditor_status": "ok",
+        "opinion_status": "ok",
+        "gaap_status": "ok",
+        "audit_report_date_status": "ok",
+        "current_period_status": "ok",
+        "hours_status": "ok",
+        "activities_status": "ok",
+        "communications_status": "ok",
+        "accounts_status": "ok",
+        "icfr_status": "ok",
+        "going_concern_status": "ok",
+        "subsidiary_status": "not_applicable",
+        "fetch_status": "ok",
+        "conflicts": [],
+        "audit_report_date_candidates": [],
+        "extractor_version": EXTRACTOR_VERSION,
+    }
+    values.update(overrides)
+    return AuditReportFact(**values)
 
 
 async def test_extract_f001_cover_and_opinion_saves_unqualified_fact(
@@ -1464,6 +1493,40 @@ async def test_section_missing_when_cover_and_opinion_leaves_absent(
     assert fact.fetch_status == "section_missing"
 
 
+async def test_extract_skips_f001_company_overview_attachment(
+    sessionmaker_fixture,
+) -> None:
+    """F001 기업개황자료 첨부는 추출하지 않고 본문 감사보고서만 처리한다."""
+    overview_url = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=overview"
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-overview",
+                dcm_no="99999",
+                source="attachment",
+                document_name="기업개황자료",
+                section_name="기업개황자료",
+                path=["기업개황자료"],
+                viewer_url=overview_url,
+            ),
+        ],
+    )
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        body = await FactRepository(session).get("20200331000001", "11111")
+        overview = await FactRepository(session).get("20200331000001", "99999")
+
+    assert body is not None
+    assert body.fetch_status == "ok"
+    assert overview is None
+
+
 async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
     """같은 버전의 ok 행은 resume에서 다시 fetch하지 않는다."""
     await _seed_entries(sessionmaker_fixture, _f001_leaves())
@@ -1501,6 +1564,80 @@ async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
         logs = await ExtractionJobRepository(session).recent_logs(job_id)
     assert job is not None and job.status == "succeeded"
     assert any("문서 0건" in log.message for log in logs)
+
+
+async def test_patch_refetches_only_bundle_fail_documents(
+    sessionmaker_fixture,
+) -> None:
+    """patch는 칸 실패 문서만 GET하고 전부 성공·미추출은 건드리지 않는다."""
+    ok_cover = COVER_URL
+    fail_cover = "https://dart.fss.or.kr/report/viewer.do?rcpNo=fail&eleId=cover"
+    fail_opinion = "https://dart.fss.or.kr/report/viewer.do?rcpNo=fail&eleId=opinion"
+    missing_cover = "https://dart.fss.or.kr/report/viewer.do?rcpNo=miss&eleId=cover"
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="e-fail-cover",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                viewer_url=fail_cover,
+            ),
+            _entry(
+                entry_id="e-fail-opinion",
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                section_name="독립된 감사인의 감사보고서",
+                path=["독립된 감사인의 감사보고서"],
+                viewer_url=fail_opinion,
+            ),
+            _entry(
+                entry_id="e-miss-cover",
+                rcept_no="20200331000003",
+                dcm_no="33333",
+                viewer_url=missing_cover,
+            ),
+        ],
+    )
+    async with sessionmaker_fixture() as session:
+        facts = FactRepository(session)
+        await facts.upsert(_complete_ok_fact())
+        await facts.upsert(
+            _complete_ok_fact(
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                icfr_status="skipped",
+            )
+        )
+        session.add(Corp(corp_code="00126380", fetch_status="ok", corp_cls="Y"))
+        await session.commit()
+
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        url = str(request.url)
+        if url == fail_opinion:
+            return httpx.Response(200, text=OPINION_HTML)
+        return httpx.Response(200, text=COVER_HTML)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        http = DartHttpClient(client, max_retries=0, retry_backoff_seconds=0.0)
+        service = ExtractionService(sessionmaker_fixture, http)
+        job_id = await service.start("20200301", "20200331", ["F001"], "patch")
+        await service.run_job(job_id)
+
+    assert ok_cover not in calls
+    assert missing_cover not in calls
+    assert any("rcpNo=fail" in url for url in calls)
+    async with sessionmaker_fixture() as session:
+        job = await session.get(ExtractionJob, job_id)
+        assert job is not None
+        assert job.status == "succeeded"
+        assert job.params["target_count"] == 1
+        leftover = await FactRepository(session).get("20200331000003", "33333")
+        assert leftover is None
 
 
 async def test_extract_refetches_when_extractor_version_differs(

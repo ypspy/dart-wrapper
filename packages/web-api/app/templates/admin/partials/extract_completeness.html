@@ -1,54 +1,137 @@
 {% if date_notice %}
 <p class="banner-warn" role="status">{{ date_notice }}</p>
 {% endif %}
-<div class="extract-completeness-cards">
-  {% for report_type, summary in completeness_rows %}
+{% set type_names = {"F001": "감사보고서", "F002": "연결감사보고서", "A001": "사업보고서"} %}
+<input type="hidden" id="extract-board-type" name="board_type" value="{{ board_type }}">
+<div class="extract-intake">
+  <h3>유형별 문서 입수</h3>
+  <p class="muted">
+    한 줄로 세 유형을 비교합니다. 칸이 비었는지는 아래 12묶음 표입니다.
+  </p>
+  <table class="extract-intake-table" aria-label="유형별 문서 입수">
+    <thead>
+      <tr>
+        <th>유형</th>
+        <th>입수됨</th>
+        <th>입수율</th>
+        <th>아직 안 함</th>
+        <th>시도 실패</th>
+        <th>구버전</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for report_type, summary in completeness_rows %}
+      {% set fail_total = summary.fetch_failed + summary.blocked + summary.section_missing %}
+      <tr>
+        <th scope="row">{{ report_type }} {{ type_names.get(report_type, "") }}</th>
+        <td>{{ summary.ok }}</td>
+        <td>{% if summary.target %}{{ "%.1f"|format(summary.ok * 100 / summary.target) }}%{% else %}—{% endif %}</td>
+        <td>{{ summary.unextracted }}</td>
+        <td>{{ fail_total }}</td>
+        <td>{{ summary.stale_version }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="extract-type-pills" role="tablist" aria-label="입수 현황 유형">
+    {% for report_type, summary in completeness_rows %}
+    <button type="button"
+            class="btn btn-sm{% if report_type == board_type %} btn-primary{% endif %}"
+            hx-get="/admin/extract/completeness-cards?start_date={{ start_date }}&amp;end_date={{ end_date }}&amp;board_type={{ report_type }}"
+            hx-target="#extract-completeness"
+            hx-swap="innerHTML">{{ report_type }}</button>
+    {% endfor %}
+  </div>
+  {% for report_type, summary in completeness_rows if report_type == board_type %}
   {% set fail_total = summary.fetch_failed + summary.blocked + summary.section_missing %}
   {% set items_base = "/admin/extract/completeness-items?start_date=" ~ start_date ~ "&end_date=" ~ end_date ~ "&report_type=" ~ report_type ~ "&status=" %}
-  <article class="extract-card" aria-label="{{ report_type }} 완전성">
-    <h3>{{ report_type }}</h3>
-    <p>대상 {{ summary.target }}</p>
-    <p>추출 ok {{ summary.ok }}</p>
-    <p>
-      <a href="{{ items_base }}unextracted"
-         hx-get="{{ items_base }}unextracted"
-         hx-target="#extract-items-{{ report_type }}"
-         hx-swap="innerHTML">미추출 {{ summary.unextracted }}</a>
+  <article class="extract-card" aria-label="{{ report_type }} 입수 현황">
+    <h3>{{ report_type }} · {{ type_names.get(report_type, "") }}</h3>
+    <p class="muted">대상 {{ summary.target }}건은 감사 문서 수입니다. 접수 수와 다를 수 있습니다.</p>
+    <p class="extract-intake-stat">
+      입수율 {% if summary.target %}{{ "%.1f"|format(summary.ok * 100 / summary.target) }}%{% else %}—{% endif %}
+      · 입수됨 {{ summary.ok }}
+      · 전부 성공 {{ summary.all_success }}
     </p>
-    <p>
-      <a href="{{ items_base }}stale_version"
-         hx-get="{{ items_base }}stale_version"
-         hx-target="#extract-items-{{ report_type }}"
-         hx-swap="innerHTML">구버전 {{ summary.stale_version }}</a>
-      <span class="muted">재추출 필요</span>
-    </p>
-    <p>실패 {{ fail_total }}</p>
-    <p class="extract-card-fail-links">
-      <a href="{{ items_base }}fetch_failed"
-         hx-get="{{ items_base }}fetch_failed"
-         hx-target="#extract-items-{{ report_type }}"
-         hx-swap="innerHTML">fetch_failed {{ summary.fetch_failed }}</a>
-      <a href="{{ items_base }}blocked"
-         hx-get="{{ items_base }}blocked"
-         hx-target="#extract-items-{{ report_type }}"
-         hx-swap="innerHTML">blocked {{ summary.blocked }}</a>
-      <a href="{{ items_base }}section_missing"
-         hx-get="{{ items_base }}section_missing"
-         hx-target="#extract-items-{{ report_type }}"
-         hx-swap="innerHTML">section_missing {{ summary.section_missing }}</a>
-    </p>
-    <p>
-      <a href="{{ items_base }}field_partial"
-         hx-get="{{ items_base }}field_partial"
-         hx-target="#extract-items-{{ report_type }}"
-         hx-swap="innerHTML">부분실패 {{ summary.field_partial }}</a>
-      <span class="muted">ok 중 구멍</span>
-    </p>
-    <p>
+    {% if summary.target %}
+    <div class="extract-intake-bar" aria-hidden="true">
+      <span class="extract-seg-ok" style="width: {{ (summary.ok * 100 / summary.target)|round(2) }}%"></span>
+      <span class="extract-seg-stale" style="width: {{ (summary.stale_version * 100 / summary.target)|round(2) }}%"></span>
+      <span class="extract-seg-fail" style="width: {{ (fail_total * 100 / summary.target)|round(2) }}%"></span>
+      <span class="extract-seg-todo" style="width: {{ (summary.unextracted * 100 / summary.target)|round(2) }}%"></span>
+    </div>
+    {% endif %}
+    <table class="extract-intake-steps" aria-label="{{ report_type }} 단계">
+      <thead>
+        <tr>
+          <th>단계</th>
+          <th>건수</th>
+          <th>다음에</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">아직 안 함</th>
+          <td>
+            <a href="{{ items_base }}unextracted"
+               hx-get="{{ items_base }}unextracted"
+               hx-target="#extract-items-{{ report_type }}"
+               hx-swap="innerHTML">{{ summary.unextracted }}</a>
+          </td>
+          <td>resume</td>
+        </tr>
+        <tr>
+          <th scope="row">시도 실패</th>
+          <td>{{ fail_total }}</td>
+          <td>
+            <a href="{{ items_base }}fetch_failed"
+               hx-get="{{ items_base }}fetch_failed"
+               hx-target="#extract-items-{{ report_type }}"
+               hx-swap="innerHTML">fetch {{ summary.fetch_failed }}</a>
+            ·
+            <a href="{{ items_base }}section_missing"
+               hx-get="{{ items_base }}section_missing"
+               hx-target="#extract-items-{{ report_type }}"
+               hx-swap="innerHTML">섹션 없음 {{ summary.section_missing }}</a>
+            ·
+            <a href="{{ items_base }}blocked"
+               hx-get="{{ items_base }}blocked"
+               hx-target="#extract-items-{{ report_type }}"
+               hx-swap="innerHTML">차단 {{ summary.blocked }}</a>
+          </td>
+        </tr>
+        <tr>
+          <th scope="row">구버전</th>
+          <td>
+            <a href="{{ items_base }}stale_version"
+               hx-get="{{ items_base }}stale_version"
+               hx-target="#extract-items-{{ report_type }}"
+               hx-swap="innerHTML">{{ summary.stale_version }}</a>
+          </td>
+          <td>extract / resume</td>
+        </tr>
+        <tr>
+          <th scope="row">입수됨</th>
+          <td>{{ summary.ok }}</td>
+          <td>
+            전부 성공 {{ summary.all_success }}
+            ·
+            <a href="{{ items_base }}field_partial"
+               hx-get="{{ items_base }}field_partial"
+               hx-target="#extract-items-{{ report_type }}"
+               hx-swap="innerHTML">칸 실패 {{ summary.field_partial }}</a>
+            → 아래 12묶음 또는 patch
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="muted">
+      날짜 모호
       <a href="{{ items_base }}ambiguous_dates"
          hx-get="{{ items_base }}ambiguous_dates"
          hx-target="#extract-items-{{ report_type }}"
-         hx-swap="innerHTML">날짜 모호 {{ summary.ambiguous_dates }}</a>
+         hx-swap="innerHTML">{{ summary.ambiguous_dates }}</a>
+      건은 입수됨 안의 보고일 후보입니다. 추출 재시도가 아니라 날짜 해소입니다.
     </p>
     <div id="extract-items-{{ report_type }}"></div>
   </article>

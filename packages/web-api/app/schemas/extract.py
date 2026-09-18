@@ -16,7 +16,7 @@ class ExtractAuditRequest(BaseModel):
     start_date: str = Field(pattern=r"^\d{8}$")
     end_date: str = Field(pattern=r"^\d{8}$")
     report_types: list[str] = Field(min_length=1)
-    mode: Literal["extract", "resume", "reparse"] = "extract"
+    mode: Literal["extract", "resume", "reparse", "patch"] = "extract"
 
 
 class ExtractAuditResponse(BaseModel):
@@ -59,6 +59,7 @@ class CompletenessResponse(BaseModel):
     stale_version: int = 0
     ambiguous_dates: int
     field_partial: int
+    all_success: int = 0
     items: list[CompletenessItem] = Field(default_factory=list)
     next_cursor: str | None = None
 

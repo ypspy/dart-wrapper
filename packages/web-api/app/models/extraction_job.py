@@ -25,7 +25,7 @@ class ExtractionJob(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
     # audit_opinion: 표지·의견 추출, resolve_dates: ambiguous 날짜 LLM 해소
     extractor_id: Mapped[str] = mapped_column(String(32), nullable=False)
-    # extract: 신규, resume: 미추출·실패분 재개, reparse: not_found 필드 재fetch
+    # extract: 신규, resume: 미추출·fetch 실패, reparse: not_found 재fetch, patch: 칸 실패만
     mode: Mapped[str] = mapped_column(String(16), default="extract", nullable=False)
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text)

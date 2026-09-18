@@ -70,6 +70,7 @@ from app.repositories.extraction_job_repository import ExtractionJobRepository
 from app.repositories.fact_repository import FactRepository
 from app.schemas.catalog import JobLogItem
 from app.schemas.extract import ExtractJobStatusResponse
+from app.services.completeness_service import CompletenessService
 from app.services.dart_job_lock import DART_EXTRACTOR_ID, assert_dart_idle
 
 logger = logging.getLogger(__name__)
@@ -194,8 +195,13 @@ def _has_not_found_field(fact: AuditReportFact) -> bool:
 
 
 def _should_skip(fact: AuditReportFact | None, mode: str) -> bool:
-    """같은 버전의 성공 행은 건너뛰고, reparse는 not_found가 있을 때만 다시 가져온다."""
+    """같은 버전의 성공 행은 건너뛰고, reparse는 not_found가 있을 때만 다시 가져온다.
+
+    patch는 호출측이 칸 실패 키만 넘기므로 여기서 건너뛰지 않는다.
+    """
     if fact is None:
+        return False
+    if mode == "patch":
         return False
     if mode == "reparse":
         return not _has_not_found_field(fact)
@@ -424,103 +430,21 @@ class ExtractionService:
         report_types = list(params.get("report_types") or [])
 
         try:
-            async with self._sessionmaker() as session:
-                rcept_nos = await DisclosureRepository(session).list_rcept_nos(
-                    start_date, end_date, report_types
+            if mode == "patch":
+                await self._run_patch_loop(
+                    job_id,
+                    start_date,
+                    end_date,
+                    report_types,
                 )
-            # 대상은 접수 수, processed_count는 문서 방문 수이다.
-            target_count = len(rcept_nos)
-
-            visited = 0
-            processed = 0
-            bundle_counts = empty_field_bundle_counts()
-            async with self._sessionmaker() as session:
-                job_row = await session.get(ExtractionJob, job_id)
-                params = dict(job_row.params or {}) if job_row is not None else dict(params)
-                params["target_count"] = target_count
-                params["processed_count"] = 0
-                params["field_bundles"] = bundle_counts
-                await ExtractionJobRepository(session).update_params(job_id, params)
-                await session.commit()
-
-            block_streak = 0
-            for rcept_no in rcept_nos:
-                if job_id in self._stop_requested:
-                    await self._finish_partial(job_id, processed)
-                    return
-                async with self._sessionmaker() as session:
-                    filing = await EntryRepository(session).list_by_rcept_no(rcept_no)
-                audit_selectors: list[SelectorEntry] = []
-                for entry in filing:
-                    selector = _to_selector(entry)
-                    if selector is None:
-                        continue
-                    if is_audit_document(
-                        selector.report_type, selector.source, selector.document_name
-                    ):
-                        audit_selectors.append(selector)
-                for dcm_no in group_by_dcm(audit_selectors):
-                    try:
-                        fetch_status = await self._process_document(job_id, filing, dcm_no, mode)
-                    except Exception as exc:
-                        sample = next(
-                            (entry for entry in filing if entry.dcm_no == dcm_no),
-                            None,
-                        )
-                        if sample is None:
-                            raise
-                        await self._mark_document_failed(job_id, sample, exc)
-                        fetch_status = "fetch_failed"
-                    visited += 1
-                    if fetch_status is not None:
-                        processed += 1
-                    async with self._sessionmaker() as session:
-                        if fetch_status == "ok":
-                            fact = await FactRepository(session).get(rcept_no, dcm_no)
-                            if fact is not None:
-                                disclosure = await session.get(Disclosure, rcept_no)
-                                corp_code = (
-                                    disclosure.corp_code if disclosure is not None else None
-                                )
-                                corp = (
-                                    await session.get(Corp, corp_code) if corp_code else None
-                                )
-                                add_fact_outcomes(
-                                    bundle_counts,
-                                    fact,
-                                    corp_cls=corp.corp_cls if corp is not None else None,
-                                    period_year=icfr_period_year(
-                                        disclosure.year_end
-                                        if disclosure is not None
-                                        else None,
-                                        disclosure.rcept_dt
-                                        if disclosure is not None
-                                        else None,
-                                    ),
-                                )
-                        job_row = await session.get(ExtractionJob, job_id)
-                        current = dict(job_row.params or {}) if job_row is not None else {}
-                        current["target_count"] = target_count
-                        current["processed_count"] = visited
-                        current["field_bundles"] = bundle_counts
-                        await ExtractionJobRepository(session).update_params(job_id, current)
-                        await session.commit()
-                    if fetch_status == "blocked":
-                        block_streak += 1
-                        if block_streak >= self._block_streak_threshold:
-                            if self._block_wait_seconds > 0:
-                                await asyncio.sleep(self._block_wait_seconds)
-                            raise _BlockStreakExceeded(
-                                "추출이 차단된 것으로 보여 중단합니다. " "재개로 이어서 처리하세요."
-                            )
-                    else:
-                        block_streak = 0
-
-            async with self._sessionmaker() as session:
-                jobs = ExtractionJobRepository(session)
-                await jobs.set_status(job_id, "succeeded")
-                await jobs.add_log(job_id, "info", f"추출 작업을 마쳤습니다. 문서 {processed}건.")
-                await session.commit()
+            else:
+                await self._run_window_loop(
+                    job_id,
+                    start_date,
+                    end_date,
+                    report_types,
+                    mode,
+                )
         except _BlockStreakExceeded as exc:
             logger.warning("추출 작업이 차단으로 중단되었습니다: %s", job_id)
             async with self._sessionmaker() as session:
@@ -535,6 +459,195 @@ class ExtractionService:
                 await jobs.set_status(job_id, "failed", error_message=str(exc))
                 await jobs.add_log(job_id, "error", f"추출 작업이 중단되었습니다: {exc}")
                 await session.commit()
+
+    async def _init_job_counters(
+        self,
+        job_id: str,
+        target_count: int,
+        bundle_counts: dict[str, dict[str, int]],
+    ) -> None:
+        """잡 params에 대상 건수와 묶음 카운터를 넣는다."""
+        async with self._sessionmaker() as session:
+            job_row = await session.get(ExtractionJob, job_id)
+            params = dict(job_row.params or {}) if job_row is not None else {}
+            params["target_count"] = target_count
+            params["processed_count"] = 0
+            params["field_bundles"] = bundle_counts
+            await ExtractionJobRepository(session).update_params(job_id, params)
+            await session.commit()
+
+    async def _record_document_progress(
+        self,
+        job_id: str,
+        *,
+        rcept_no: str,
+        dcm_no: str,
+        fetch_status: str | None,
+        target_count: int,
+        visited: int,
+        bundle_counts: dict[str, dict[str, int]],
+    ) -> None:
+        """한 문서 처리 후 카운터를 저장한다."""
+        async with self._sessionmaker() as session:
+            if fetch_status == "ok":
+                fact = await FactRepository(session).get(rcept_no, dcm_no)
+                if fact is not None:
+                    disclosure = await session.get(Disclosure, rcept_no)
+                    corp_code = (
+                        disclosure.corp_code if disclosure is not None else None
+                    )
+                    corp = await session.get(Corp, corp_code) if corp_code else None
+                    add_fact_outcomes(
+                        bundle_counts,
+                        fact,
+                        corp_cls=corp.corp_cls if corp is not None else None,
+                        period_year=icfr_period_year(
+                            disclosure.year_end if disclosure is not None else None,
+                            disclosure.rcept_dt if disclosure is not None else None,
+                        ),
+                    )
+            job_row = await session.get(ExtractionJob, job_id)
+            current = dict(job_row.params or {}) if job_row is not None else {}
+            current["target_count"] = target_count
+            current["processed_count"] = visited
+            current["field_bundles"] = bundle_counts
+            await ExtractionJobRepository(session).update_params(job_id, current)
+            await session.commit()
+
+    async def _finish_success(self, job_id: str, processed: int) -> None:
+        """잡을 완료로 표시한다."""
+        async with self._sessionmaker() as session:
+            jobs = ExtractionJobRepository(session)
+            await jobs.set_status(job_id, "succeeded")
+            await jobs.add_log(job_id, "info", f"추출 작업을 마쳤습니다. 문서 {processed}건.")
+            await session.commit()
+
+    async def _apply_block_streak(self, fetch_status: str | None, streak: int) -> int:
+        """차단 연속 횟수를 갱신하고 한도를 넘으면 중단한다."""
+        if fetch_status == "blocked":
+            streak += 1
+            if streak >= self._block_streak_threshold:
+                if self._block_wait_seconds > 0:
+                    await asyncio.sleep(self._block_wait_seconds)
+                raise _BlockStreakExceeded(
+                    "추출이 차단된 것으로 보여 중단합니다. 재개로 이어서 처리하세요."
+                )
+            return streak
+        return 0
+
+    async def _extract_one_audit_document(
+        self,
+        job_id: str,
+        filing: list[Entry],
+        dcm_no: str,
+        mode: str,
+    ) -> str | None:
+        """문서 하나를 처리한다. 예외는 fetch_failed로 남긴다."""
+        try:
+            return await self._process_document(job_id, filing, dcm_no, mode)
+        except Exception as exc:
+            sample = next((entry for entry in filing if entry.dcm_no == dcm_no), None)
+            if sample is None:
+                raise
+            await self._mark_document_failed(job_id, sample, exc)
+            return "fetch_failed"
+
+    async def _run_window_loop(
+        self,
+        job_id: str,
+        start_date: str,
+        end_date: str,
+        report_types: list[str],
+        mode: str,
+    ) -> None:
+        """기간 안 접수 전체를 순회한다."""
+        async with self._sessionmaker() as session:
+            rcept_nos = await DisclosureRepository(session).list_rcept_nos(
+                start_date, end_date, report_types
+            )
+        target_count = len(rcept_nos)
+        visited = 0
+        processed = 0
+        bundle_counts = empty_field_bundle_counts()
+        await self._init_job_counters(job_id, target_count, bundle_counts)
+        block_streak = 0
+        for rcept_no in rcept_nos:
+            if job_id in self._stop_requested:
+                await self._finish_partial(job_id, processed)
+                return
+            async with self._sessionmaker() as session:
+                filing = await EntryRepository(session).list_by_rcept_no(rcept_no)
+            audit_selectors: list[SelectorEntry] = []
+            for entry in filing:
+                selector = _to_selector(entry)
+                if selector is None:
+                    continue
+                if is_audit_document(
+                    selector.report_type, selector.source, selector.document_name
+                ):
+                    audit_selectors.append(selector)
+            for dcm_no in group_by_dcm(audit_selectors):
+                fetch_status = await self._extract_one_audit_document(
+                    job_id, filing, dcm_no, mode
+                )
+                visited += 1
+                if fetch_status is not None:
+                    processed += 1
+                await self._record_document_progress(
+                    job_id,
+                    rcept_no=rcept_no,
+                    dcm_no=dcm_no,
+                    fetch_status=fetch_status,
+                    target_count=target_count,
+                    visited=visited,
+                    bundle_counts=bundle_counts,
+                )
+                block_streak = await self._apply_block_streak(fetch_status, block_streak)
+        await self._finish_success(job_id, processed)
+
+    async def _run_patch_loop(
+        self,
+        job_id: str,
+        start_date: str,
+        end_date: str,
+        report_types: list[str],
+    ) -> None:
+        """칸 실패 문서만 다시 추출한다."""
+        async with self._sessionmaker() as session:
+            keys = await CompletenessService(session).list_patch_document_keys(
+                start_date=start_date,
+                end_date=end_date,
+                report_types=report_types,
+            )
+        target_count = len(keys)
+        visited = 0
+        processed = 0
+        bundle_counts = empty_field_bundle_counts()
+        await self._init_job_counters(job_id, target_count, bundle_counts)
+        block_streak = 0
+        for rcept_no, dcm_no in keys:
+            if job_id in self._stop_requested:
+                await self._finish_partial(job_id, processed)
+                return
+            async with self._sessionmaker() as session:
+                filing = await EntryRepository(session).list_by_rcept_no(rcept_no)
+            fetch_status = await self._extract_one_audit_document(
+                job_id, filing, dcm_no, "patch"
+            )
+            visited += 1
+            if fetch_status is not None:
+                processed += 1
+            await self._record_document_progress(
+                job_id,
+                rcept_no=rcept_no,
+                dcm_no=dcm_no,
+                fetch_status=fetch_status,
+                target_count=target_count,
+                visited=visited,
+                bundle_counts=bundle_counts,
+            )
+            block_streak = await self._apply_block_streak(fetch_status, block_streak)
+        await self._finish_success(job_id, processed)
 
     async def _finish_partial(self, job_id: str, processed: int) -> None:
         """soft-stop으로 중간 종료한다."""

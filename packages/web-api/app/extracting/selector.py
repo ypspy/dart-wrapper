@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from app.extracting.text import compact
 
-_AUDIT_DOC_EXCLUDE_MARKERS = ("내부회계", "내부감시장치", "감사의감사보고서")
-_A001_ATTACHMENT_DOC_NAMES = frozenset({"감사보고서", "연결감사보고서"})
+AUDIT_DOC_EXCLUDE_MARKERS = ("내부회계", "내부감시장치", "감사의감사보고서")
+AUDIT_ATTACHMENT_DOC_NAMES = frozenset({"감사보고서", "연결감사보고서"})
 _OPINION_SECTION_NAMES = frozenset(
     {"독립된감사인의감사보고서", "외부감사인의감사보고서"}
 )
@@ -51,18 +52,39 @@ def is_audit_document(
     source: str,
     document_name: str | None,
 ) -> bool:
-    """감사보고서 추출 대상 문서인지 판별한다."""
+    """감사보고서 추출 대상 문서인지 판별한다.
+
+    F001/F002 본문은 그대로 포함하고, 첨부는 A001과 같이
+    문서명이 감사보고서·연결감사보고서일 때만 포함한다.
+    기업개황자료 같은 비감사 첨부는 제외한다.
+    """
+    compact_name = compact(document_name)
+    if any(marker in compact_name for marker in AUDIT_DOC_EXCLUDE_MARKERS):
+        return False
+
     if report_type in ("F001", "F002"):
-        return True
+        if source != "attachment":
+            return True
+        return compact_name in AUDIT_ATTACHMENT_DOC_NAMES
 
     if report_type != "A001" or source != "attachment":
         return False
 
-    compact_name = compact(document_name)
-    if compact_name not in _A001_ATTACHMENT_DOC_NAMES:
-        return False
+    return compact_name in AUDIT_ATTACHMENT_DOC_NAMES
 
-    return not any(marker in compact_name for marker in _AUDIT_DOC_EXCLUDE_MARKERS)
+
+def collect_audit_document_keys(
+    rows: Sequence[tuple[str, str | None, str | None, str, str | None]],
+) -> list[tuple[str, str]]:
+    """후보 행에서 감사 문서 (rcept_no, dcm_no)를 등장 순·중복 없이 모은다."""
+    seen: dict[tuple[str, str], None] = {}
+    for rcept_no, dcm_no, report_type, source, document_name in rows:
+        if not dcm_no:
+            continue
+        if not is_audit_document(report_type, source, document_name):
+            continue
+        seen.setdefault((rcept_no, dcm_no), None)
+    return list(seen.keys())
 
 
 def fs_scope_for(report_type: str, document_name: str | None) -> str:

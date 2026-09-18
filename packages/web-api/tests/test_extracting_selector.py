@@ -28,6 +28,15 @@ def test_accepts_f001_and_a001_attachment() -> None:
     assert not is_audit_document("A001", "body", "사업보고서")
 
 
+def test_rejects_f001_company_overview_attachment() -> None:
+    """F001/F002 첨부는 감사·연결감사 문서명만 대상이다. 기업개황자료는 뺀다."""
+    assert not is_audit_document("F001", "attachment", "기업개황자료")
+    assert not is_audit_document("F001", "attachment", "[정정] 기업개황자료")
+    assert not is_audit_document("F002", "attachment", "기업개황자료")
+    assert is_audit_document("F001", "attachment", "감사보고서")
+    assert is_audit_document("F002", "attachment", "연결감사보고서")
+
+
 def test_select_leaves_f001() -> None:
     rows = [
         SelectorEntry("c", "r", "d", "F001", "body", "감사보고서", "감사보고서"),

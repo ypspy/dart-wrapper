@@ -81,6 +81,32 @@ class EntryRepository:
         result = await self._session.execute(statement)
         return list(result.scalars().all())
 
+    async def list_extraction_document_rows(
+        self,
+        start: str,
+        end: str,
+        report_types: Sequence[str],
+    ) -> list[tuple[str, str | None, str | None, str, str | None]]:
+        """기간·유형의 문서 후보를 한 번의 조회로 반환한다.
+
+        접수마다 leaf 전체를 다시 읽지 않는다. selector는 호출측에서 적용한다.
+        """
+        filters = self._extraction_filters(start, end, report_types)
+        statement = (
+            select(
+                Entry.rcept_no,
+                Entry.dcm_no,
+                Entry.report_type,
+                Entry.source,
+                Entry.document_name,
+            )
+            .where(*filters, Entry.dcm_no.is_not(None), Entry.dcm_no != "")
+            .distinct()
+            .order_by(Entry.rcept_no, Entry.dcm_no)
+        )
+        result = await self._session.execute(statement)
+        return [(row[0], row[1], row[2], row[3], row[4]) for row in result.all()]
+
     async def list_for_extraction(
         self,
         start: str,

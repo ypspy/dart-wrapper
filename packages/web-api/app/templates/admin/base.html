@@ -473,6 +473,46 @@
       gap: var(--space-3);
       margin-top: var(--space-4);
     }
+    .extract-intake { margin-top: var(--space-4); }
+    .extract-intake h3 { margin: 0 0 var(--space-2); }
+    .extract-intake-table,
+    .extract-intake-steps {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+      font-size: var(--fs-sm);
+    }
+    .extract-intake-table th,
+    .extract-intake-table td,
+    .extract-intake-steps th,
+    .extract-intake-steps td {
+      border-bottom: 1px solid var(--border-soft);
+      padding: var(--space-2) var(--space-3);
+      text-align: right;
+    }
+    .extract-intake-table th:first-child,
+    .extract-intake-steps th:first-child,
+    .extract-intake-table td:first-child,
+    .extract-intake-steps td:first-child { text-align: left; }
+    .extract-type-pills {
+      display: flex;
+      gap: var(--space-2);
+      margin: var(--space-3) 0;
+    }
+    .extract-intake-stat { font-variant-numeric: tabular-nums; }
+    .extract-intake-bar {
+      display: flex;
+      height: 8px;
+      background: var(--missing);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      margin: 0 0 var(--space-3);
+    }
+    .extract-intake-bar span { display: block; height: 100%; }
+    .extract-seg-ok { background: var(--ok); }
+    .extract-seg-stale { background: var(--warn); }
+    .extract-seg-fail { background: var(--danger); }
+    .extract-seg-todo { background: var(--border); }
     .extract-card {
       padding: var(--space-3) var(--space-4);
       border: 1px solid var(--border);
