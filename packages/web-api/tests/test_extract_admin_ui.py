@@ -289,7 +289,9 @@ async def test_completeness_cards_query_uses_requested_dates(
     types = [call["report_type"] for call in completeness.calls]
     assert types == ["F001", "F002", "A001"]
     assert all(call["start_date"] == "20200101" for call in completeness.calls)
-    assert "대상 10" in response.text
+    assert "대상 10건·미추출 2건은 접수 단위입니다" in response.text
+    assert "한 접수에 감사 DCM이 둘이면 한쪽만 fact여도 미추출이 0일 수 있습니다" in response.text
+    assert "감사 문서 수" not in response.text
     assert "아직 안 함" in response.text
     assert "입수율" in response.text
     assert "구버전 4" in response.text or ">4</td>" in response.text

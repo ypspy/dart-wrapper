@@ -47,7 +47,7 @@
   {% set items_base = "/admin/extract/completeness-items?start_date=" ~ start_date ~ "&end_date=" ~ end_date ~ "&report_type=" ~ report_type ~ "&status=" %}
   <article class="extract-card" aria-label="{{ report_type }} 입수 현황">
     <h3>{{ report_type }} · {{ type_names.get(report_type, "") }}</h3>
-    <p class="muted">대상 {{ summary.target }}건은 감사 문서 수입니다. 접수 수와 다를 수 있습니다.</p>
+    <p class="muted">대상 {{ summary.target }}건·미추출 {{ summary.unextracted }}건은 접수 단위입니다. 한 접수에 감사 DCM이 둘이면 한쪽만 fact여도 미추출이 0일 수 있습니다.</p>
     <p class="extract-intake-stat">
       입수율 {% if summary.target %}{{ "%.1f"|format(summary.ok * 100 / summary.target) }}%{% else %}—{% endif %}
       · 입수됨 {{ summary.ok }}
