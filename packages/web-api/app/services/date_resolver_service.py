@@ -128,9 +128,18 @@ class DateResolverService:
         if not iso:
             return False
 
-        period_date = date.fromisoformat(period_end) if period_end else None
-        auth_parsed = date.fromisoformat(auth_iso) if auth_iso else None
-        iso_date = date.fromisoformat(iso)
+        try:
+            period_date = date.fromisoformat(period_end) if period_end else None
+        except ValueError:
+            period_date = None
+        try:
+            auth_parsed = date.fromisoformat(auth_iso) if auth_iso else None
+        except ValueError:
+            auth_parsed = None
+        try:
+            iso_date = date.fromisoformat(iso)
+        except ValueError:
+            return False
         if not date_in_auth_window(
             iso_date,
             period_end=period_date,

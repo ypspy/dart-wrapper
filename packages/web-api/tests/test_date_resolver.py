@@ -299,6 +299,35 @@ async def test_run_keeps_ambiguous_when_pick_is_after_auth_date(
     assert fact.audit_report_date is None
 
 
+async def test_run_keeps_ambiguous_when_candidate_iso_invalid(
+    sessionmaker_fixture,
+) -> None:
+    """후보 ISO가 파싱 불가여도 잡은 succeeded, 해당 행은 ambiguous다."""
+    stored = [
+        {"date": "not-a-date", "snippet": "잘못된 ISO"},
+        {"date": "2020-03-15", "snippet": "서명 2020년3월15일"},
+    ]
+    await _seed(
+        sessionmaker_fixture,
+        entries=[_entry()],
+        facts=[_ambiguous_fact(audit_report_date_candidates=stored)],
+    )
+    resolver = FakeDateResolver(0)
+    service = _service(sessionmaker_fixture, resolver)
+    job_id = await service.start()
+    await service.run(job_id)
+
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+        job = await session.get(ExtractionJob, job_id)
+
+    assert job is not None and job.status == "succeeded"
+    assert fact is not None
+    assert fact.audit_report_date is None
+    assert fact.audit_report_date_status == "ambiguous"
+    assert fact.audit_report_date_source is None
+
+
 async def test_run_keeps_ambiguous_when_llm_picks_out_of_window(
     sessionmaker_fixture,
 ) -> None:
