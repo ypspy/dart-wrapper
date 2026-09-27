@@ -7,6 +7,7 @@ from app.models.corp import Corp
 from app.models.disclosure import Disclosure
 from app.models.entry import Entry
 from app.models.extraction_job import ExtractionJob, ExtractionJobLog
+from app.models.extraction_review import ExtractionReview
 from app.models.slice_progress import DisclosureAttempt, SliceProgress
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "Entry",
     "ExtractionJob",
     "ExtractionJobLog",
+    "ExtractionReview",
     "SliceProgress",
 ]
