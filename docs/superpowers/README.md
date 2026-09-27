@@ -43,6 +43,7 @@
 | 2026-09-18 | [감사보고서일 후행형 머리글 전처리 설계](specs/2026-09-18-audit-report-date-header-preprocess-design.md) | spec |
 | 2026-09-18 | [감사보고서일 창 안 최댓값 선택 설계](specs/2026-09-18-audit-report-date-window-latest-design.md) | spec |
 | 2026-09-19 | [살아 있는 문서 정렬과 GitHub 공개 리포 설계](specs/2026-09-19-docs-and-github-repo-design.md) | spec |
+| 2026-09-28 | [추출 12묶음 진단 설계](specs/2026-09-28-extraction-review-diagnosis-design.md) | spec |
 
 ## Plans
 
