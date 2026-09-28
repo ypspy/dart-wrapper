@@ -22,6 +22,7 @@
     hx-post="/admin/reviews/verdict?page={{ page }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}"
     hx-target="#review-detail"
     hx-swap="outerHTML"
+    hx-select="#review-detail"
   >
     <input type="hidden" name="rcept_no" value="{{ selected.rcept_no }}">
     <input type="hidden" name="dcm_no" value="{{ selected.dcm_no }}">
@@ -41,15 +42,18 @@
       <option value="other" {% if form_tag == "other" %}selected{% endif %}>other</option>
     </select>
     <textarea name="note">{{ form_note }}</textarea>
+    <button type="submit">저장</button>
   </form>
   {% elif rcept_no is not none %}
   <p>이 행은 기본 검토 목록에 없습니다.</p>
   {% else %}
   <p>왼쪽에서 한 건을 고르세요.</p>
   {% endif %}
-  {% if oob_row %}
-  {% with row=oob_row, oob=true %}
-  {% include "admin/partials/review_list_row.html" %}
-  {% endwith %}
-  {% endif %}
 </section>
+{% if oob_row %}
+<table><tbody>
+{% with row=oob_row, oob=true %}
+{% include "admin/partials/review_list_row.html" %}
+{% endwith %}
+</tbody></table>
+{% endif %}

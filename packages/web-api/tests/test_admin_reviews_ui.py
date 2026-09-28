@@ -24,6 +24,23 @@ from app.services.extraction_review_service import REVIEW_PAGE_SIZE
 ClientFactory = Callable[[FastAPI], httpx.AsyncClient]
 
 
+def _assert_verdict_form_controls(text: str) -> None:
+    assert 'hx-select="#review-detail"' in text
+    assert re.search(
+        r'id="review-verdict-form"[\s\S]*<button type="submit">저장</button>[\s\S]*</form>',
+        text,
+    )
+
+
+def _assert_oob_row_after_section(text: str) -> None:
+    assert 'hx-swap-oob="outerHTML"' in text
+    section_end = text.index("</section>")
+    after_section = text[section_end:]
+    assert "<table>" in after_section
+    assert "<tbody>" in after_section
+    assert re.search(r"<tbody>[\s\S]*<tr[\s\S]*hx-swap-oob", after_section)
+
+
 def _review(**overrides: object) -> ExtractionReview:
     values: dict[str, object] = {
         "rcept_no": "20200331000001",
@@ -167,6 +184,8 @@ async def test_reviews_page_opens_default_row_and_rejects_queue_six(
             },
         )
     assert "이전 판정=source" in opened.text
+    _assert_verdict_form_controls(opened.text)
+    _assert_verdict_form_controls(partial.text)
     assert (
         "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200331000001&amp;dcmNo=11111" in opened.text
     )
@@ -378,7 +397,8 @@ async def test_verdict_saves_three_fields_and_empty_tag(client_factory: ClientFa
             },
         )
     assert response.status_code == 200
-    assert "hx-swap-oob" in response.text
+    _assert_verdict_form_controls(response.text)
+    _assert_oob_row_after_section(response.text)
     assert (
         'value="source" selected' in response.text
         or 'value="source" selected="selected"' in response.text
