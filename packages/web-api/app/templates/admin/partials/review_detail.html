@@ -1,3 +1,37 @@
 <section id="review-detail">
+  {% if selected %}
+  <dl>
+    <dt>접수번호</dt><dd>{{ selected.rcept_no }}</dd>
+    <dt>문서번호</dt><dd>{{ selected.dcm_no }}</dd>
+    <dt>묶음</dt><dd>{{ selected.bundle }}</dd>
+    <dt>신호</dt><dd>{{ selected.signal }}</dd>
+    <dt>과목</dt><dd>{{ selected.subject }}</dd>
+    <dt>연구 패널</dt><dd>{{ "예" if selected.in_research_panel else "아니오" }}</dd>
+    <dt>층</dt><dd>{{ selected.stratum }}</dd>
+    <dt>꼬리</dt><dd>{{ selected.tail }}</dd>
+    <dt>순번</dt><dd>{{ selected.queue_order if selected.queue_order is not none else "" }}</dd>
+    <dt>원시값</dt><dd>{{ selected.raw_value }}</dd>
+    <dt>추출기</dt><dd>{{ selected.extractor_version }}</dd>
+  </dl>
+  <p><a href="{{ viewer_url }}" target="_blank" rel="noreferrer">원문</a></p>
+  <form id="review-verdict-form">
+    <select name="verdict">
+      <option value="hold" {% if selected.verdict == "hold" %}selected{% endif %}>hold</option>
+      <option value="source" {% if selected.verdict == "source" %}selected{% endif %}>source</option>
+      <option value="logic" {% if selected.verdict == "logic" %}selected{% endif %}>logic</option>
+    </select>
+    <select name="tag">
+      <option value="" {% if selected.tag == "" %}selected{% endif %}></option>
+      <option value="as_written" {% if selected.tag == "as_written" %}selected{% endif %}>as_written</option>
+      <option value="real_magnitude" {% if selected.tag == "real_magnitude" %}selected{% endif %}>real_magnitude</option>
+      <option value="rare_but_valid" {% if selected.tag == "rare_but_valid" %}selected{% endif %}>rare_but_valid</option>
+      <option value="other" {% if selected.tag == "other" %}selected{% endif %}>other</option>
+    </select>
+    <textarea name="note">{{ selected.note }}</textarea>
+  </form>
+  {% elif rcept_no is not none %}
+  <p>이 행은 기본 검토 목록에 없습니다.</p>
+  {% else %}
   <p>왼쪽에서 한 건을 고르세요.</p>
+  {% endif %}
 </section>

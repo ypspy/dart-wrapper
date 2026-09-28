@@ -115,3 +115,54 @@ async def test_reviews_page_filters_and_pages(client_factory: ClientFactory) -> 
     assert f"20200331{REVIEW_PAGE_SIZE:06d}" in page2.text
     assert "20200331000000" not in page2.text
     assert "20200331000000" in ignored.text
+
+
+async def test_reviews_page_opens_default_row_and_rejects_queue_six(
+    client_factory: ClientFactory,
+) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_review(raw_value="10", note="이전 판정=source\n유지"))
+        session.add(_review(rcept_no="20200331000006", queue_order=6, subject="total_equity"))
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        opened = await client.get(
+            "/admin/reviews",
+            params={
+                "rcept_no": "20200331000001",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_asset",
+            },
+        )
+        partial = await client.get(
+            "/admin/reviews",
+            params={
+                "rcept_no": "20200331000001",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_asset",
+            },
+            headers={"HX-Request": "true"},
+        )
+        missing = await client.get(
+            "/admin/reviews",
+            params={
+                "rcept_no": "20200331000006",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_equity",
+            },
+        )
+    assert "이전 판정=source" in opened.text
+    assert "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200331000001&amp;dcmNo=11111" in opened.text
+    assert 'target="_blank"' in opened.text
+    assert "DART 수집 운영" not in partial.text
+    assert "10" in partial.text
+    assert "이 행은 기본 검토 목록에 없습니다." in missing.text
+    assert "20200331000006" not in missing.text
+    assert "total_equity" not in missing.text

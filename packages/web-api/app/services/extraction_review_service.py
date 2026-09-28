@@ -278,6 +278,28 @@ def _review_sort_key(row: ExtractionReview) -> tuple[int, int, int, str, str, st
     )
 
 
+async def get_default_review(
+    session: AsyncSession,
+    *,
+    rcept_no: str,
+    dcm_no: str,
+    bundle: str,
+    signal: str,
+    subject: str,
+) -> ExtractionReview | None:
+    """활성 기본 집합의 한 행. 없으면 None."""
+    stored = await _load_active_reviews(session)
+    return next(
+        (
+            item
+            for item in stored
+            if _review_key(item) == (rcept_no, dcm_no, bundle, signal, subject)
+            and _in_default_slice(item)
+        ),
+        None,
+    )
+
+
 async def list_default_reviews(
     session: AsyncSession,
     *,
@@ -319,15 +341,13 @@ async def save_review_form(
         )
     if verdict in _TAG_BLOCKING_VERDICTS and tag != "":
         raise ExtractionReviewError("logic 또는 hold 판정에는 태그를 적을 수 없습니다.")
-    stored = await _load_active_reviews(session)
-    row = next(
-        (
-            item
-            for item in stored
-            if _review_key(item) == (rcept_no, dcm_no, bundle, signal, subject)
-            and _in_default_slice(item)
-        ),
-        None,
+    row = await get_default_review(
+        session,
+        rcept_no=rcept_no,
+        dcm_no=dcm_no,
+        bundle=bundle,
+        signal=signal,
+        subject=subject,
     )
     if row is None:
         raise ExtractionReviewError("해당하는 검토 행이 없습니다.")
