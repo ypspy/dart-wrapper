@@ -8,6 +8,7 @@ from app.reviewing.candidates import (
     FactView,
     numeric_candidates,
     quartile_bounds,
+    select_panel_ids,
 )
 
 
@@ -211,3 +212,73 @@ def test_panel_queue_order_is_extreme_five() -> None:
     ]
     assert outsider[0].queue_order is None
     assert outsider[0].in_research_panel is False
+
+
+def test_panel_prefers_consolidated_then_f_then_latest() -> None:
+    rows = [
+        view(
+            1,
+            corp_code="C",
+            year_end="2019.12",
+            rcept_dt="20200301",
+            fs_scope="separate",
+            source_report_type="F001",
+        ),
+        view(
+            2,
+            corp_code="C",
+            year_end="2019.12",
+            rcept_dt="20200302",
+            fs_scope="consolidated",
+            source_report_type="A001",
+        ),
+        view(
+            3,
+            corp_code="C",
+            year_end="2019.12",
+            rcept_dt="20200303",
+            fs_scope="consolidated",
+            source_report_type="F002",
+        ),
+        view(
+            4,
+            corp_code="C",
+            year_end="2019.12",
+            rcept_dt="20200304",
+            fs_scope="consolidated",
+            source_report_type="F002",
+        ),
+        view(
+            5,
+            corp_code=None,
+            year_end="2019.12",
+            rcept_dt="20200304",
+            fs_scope="separate",
+            source_report_type="F001",
+        ),
+        view(
+            6,
+            corp_code="D",
+            year_end="2015.12",
+            rcept_dt="20160115",
+            fs_scope="separate",
+            source_report_type="F001",
+        ),
+        view(
+            7,
+            corp_code="E",
+            year_end="2020.12",
+            rcept_dt="20261001",
+            fs_scope="separate",
+            source_report_type="F001",
+        ),
+        view(
+            8,
+            corp_code="F",
+            year_end="2020.06",
+            rcept_dt="20200701",
+            fs_scope="unknown",
+            source_report_type="F001",
+        ),
+    ]
+    assert select_panel_ids(rows) == {("20200300000004", "1")}

@@ -25,6 +25,11 @@ _SKIP_KEYS = (
     "accounts_not_list",
     "lag_skipped",
 )
+_PANEL_YEAR_MIN = date(2016, 1, 31)
+_PANEL_YEAR_MAX = date(2025, 12, 31)
+_RCEPT_MIN = "20160101"
+_RCEPT_MAX = "20260909"
+_FINANCIAL_REPORTS = frozenset({"F001", "F002"})
 
 
 @dataclass(frozen=True)
@@ -131,6 +136,58 @@ class _ScalePoint:
     raw_value: str
     scale: float
     in_panel: bool
+
+
+def select_panel_ids(facts: Sequence[FactView]) -> set[tuple[str, str]]:
+    """기업–연도마다 연구 패널 문서 하나를 고른다."""
+    grouped: dict[tuple[str, str], list[FactView]] = {}
+    for fact in facts:
+        year_end = _panel_year_end(fact)
+        if year_end is None or not fact.corp_code:
+            continue
+        grouped.setdefault((fact.corp_code, year_end.isoformat()), []).append(fact)
+
+    chosen: set[tuple[str, str]] = set()
+    for rows in grouped.values():
+        picked = _pick_panel_row(rows)
+        if picked is not None:
+            chosen.add((picked.rcept_no, picked.dcm_no))
+    return chosen
+
+
+def _panel_year_end(fact: FactView) -> date | None:
+    """패널 창에 드는 결산일이면 그 날짜를 돌려준다."""
+    if fact.fetch_status != "ok" or not fact.corp_code:
+        return None
+    if fact.fs_scope not in {"consolidated", "separate"}:
+        return None
+    if not _rcept_in_panel_window(fact.rcept_dt):
+        return None
+    year_end = parse_year_end(fact.year_end)
+    if year_end is None or year_end < _PANEL_YEAR_MIN or year_end > _PANEL_YEAR_MAX:
+        return None
+    return year_end
+
+
+def _rcept_in_panel_window(rcept_dt: str) -> bool:
+    """접수일이 8자리 숫자이고 20160101 이상 20260909 이하인지 본다."""
+    if len(rcept_dt) != 8 or not rcept_dt.isdigit():
+        return False
+    return _RCEPT_MIN <= rcept_dt <= _RCEPT_MAX
+
+
+def _pick_panel_row(rows: list[FactView]) -> FactView | None:
+    """연결을 우선하고, F001·F002가 있으면 A001을 뺀 뒤 가장 늦은 접수를 고른다."""
+    consolidated = [row for row in rows if row.fs_scope == "consolidated"]
+    if consolidated:
+        pool = consolidated
+    else:
+        pool = [row for row in rows if row.fs_scope == "separate"]
+    if not pool:
+        return None
+    if any(row.source_report_type in _FINANCIAL_REPORTS for row in pool):
+        pool = [row for row in pool if row.source_report_type != "A001"]
+    return max(pool, key=lambda row: (row.rcept_dt, row.rcept_no, row.dcm_no))
 
 
 def quartile_bounds(
