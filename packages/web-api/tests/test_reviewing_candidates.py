@@ -6,8 +6,10 @@ import math
 
 from app.reviewing.candidates import (
     FactView,
+    build_candidates,
     categorical_candidates,
     failure_candidates,
+    format_summary,
     numeric_candidates,
     quartile_bounds,
     select_panel_ids,
@@ -411,3 +413,24 @@ def test_failure_uses_non_panel_when_panel_is_empty() -> None:
     opinion = [item for item in candidates if item.bundle == "opinion" and item.signal == "fail"]
     assert len(opinion) == 5
     assert all(item.in_research_panel is False for item in opinion)
+
+
+def test_build_candidates_marks_panel_and_formats_korean() -> None:
+    fact = view(
+        1,
+        corp_code="C",
+        year_end="2019.12",
+        rcept_dt="20200331",
+        fs_scope="separate",
+        source_report_type="F001",
+        hours_status="not_found",
+        activity_entry_id=None,
+        conflicts=[],
+    )
+    candidates, summary = build_candidates([fact])
+    fails = [item for item in candidates if item.signal == "fail" and item.bundle == "hours"]
+    assert len(fails) == 1
+    assert fails[0].in_research_panel is True
+    text = "\n".join(format_summary(row) for row in summary)
+    assert "실패" in text
+    assert "hours" in text

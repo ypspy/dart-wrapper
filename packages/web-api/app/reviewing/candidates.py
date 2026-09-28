@@ -890,3 +890,30 @@ def _failure_subject(status: str | None, missing: int, flag: int) -> str:
     """상태·섹션 없음·conflicts 유무를 한 키로 잇는다."""
     label = "None" if status is None else status
     return f"{label}|missing={missing}|conflicts={flag}"
+
+
+def build_candidates(
+    facts: Sequence[FactView],
+) -> tuple[list[ReviewCandidate], list[SummaryRow]]:
+    """패널을 고른 뒤 숫자·범주·실패 후보와 요약을 그 순서로 잇는다."""
+    panel = select_panel_ids(facts)
+    number_rows, number_summary = numeric_candidates(facts, panel)
+    category_rows, category_summary = categorical_candidates(facts, panel)
+    failure_rows, failure_summary = failure_candidates(facts, panel)
+    return (
+        [*number_rows, *category_rows, *failure_rows],
+        [*number_summary, *category_summary, *failure_summary],
+    )
+
+
+def format_summary(row: SummaryRow) -> str:
+    """요약 한 줄을 한글로 적는다."""
+    if row.section == "stratum":
+        return f"층 {row.key} 비교 {row.n}건 {row.detail}"
+    if row.section == "failure":
+        return f"실패 {row.key} 전체 {row.n}건 {row.detail}"
+    if row.section == "category":
+        return f"범주 {row.key} {row.n}건 {row.detail}"
+    if row.section == "skip":
+        return f"건너뜀 {row.key} {row.n}건"
+    return f"{row.section} {row.key} {row.n} {row.detail}"
