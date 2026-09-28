@@ -12,6 +12,7 @@ from app.extracting.constants import EXTRACTOR_VERSION
 from app.models.audit_report_fact import AuditReportFact
 from app.models.disclosure import Disclosure
 from app.models.entry import Entry
+from app.models.extraction_review import ExtractionReview
 from scripts.export_audit_report_facts import build_parser, iter_rows, write_tsv
 
 
@@ -206,9 +207,7 @@ def test_parser_accepts_out_and_has_no_final_reception_flag() -> None:
     args = parser.parse_args(["--out", "facts.tsv"])
     assert args.out == "facts.tsv"
     dests = {action.dest for action in parser._actions}
-    option_strings = {
-        flag for action in parser._actions for flag in action.option_strings
-    }
+    option_strings = {flag for action in parser._actions for flag in action.option_strings}
     assert "final_reception" not in dests
     assert "--final-reception" not in option_strings
 
@@ -241,3 +240,50 @@ def test_write_tsv_emits_header_and_joined_fields() -> None:
     assert by_col["correction_type"] == ""
     assert by_col["opinion_resolved"] == "unqualified"
     assert "auditor" in by_col["conflicts"]
+
+
+async def test_with_reviews_appends_source_tags_only(sessionmaker_fixture) -> None:
+    """소스 판정 태그만 source_tags로 붙이고, 기본 호출은 그 열을 넣지 않는다."""
+    async with sessionmaker_fixture() as session:
+        session.add(_fact())
+        session.add(
+            ExtractionReview(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                bundle="accounts",
+                signal="account_negative",
+                subject="total_asset",
+                extractor_version=EXTRACTOR_VERSION,
+                in_research_panel=True,
+                stratum="F001|separate|total_asset",
+                tail="",
+                raw_value="-1",
+                active=True,
+                verdict="source",
+                tag="as_written",
+                note="",
+            )
+        )
+        session.add(
+            ExtractionReview(
+                rcept_no="20200331000001",
+                dcm_no="11111",
+                bundle="hours",
+                signal="fail",
+                subject="not_found|missing=1|conflicts=0",
+                extractor_version=EXTRACTOR_VERSION,
+                in_research_panel=False,
+                stratum="*|*|hours",
+                tail="",
+                raw_value="",
+                active=True,
+                verdict="logic",
+                tag="",
+                note="",
+            )
+        )
+        await session.commit()
+        rows = list(await iter_rows(session, with_reviews=True))
+        plain = list(await iter_rows(session))
+    assert rows[0]["source_tags"] == "accounts:total_asset:as_written"
+    assert "source_tags" not in plain[0]
