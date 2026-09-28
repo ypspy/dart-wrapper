@@ -471,22 +471,13 @@ def _iqr_from_points(
     rows: list[SummaryRow] = []
     for stratum, group in grouped.items():
         scales = [point.scale for point in group]
-        parsed = _quartiles(scales)
-        if parsed is None:
-            rows.append(
-                SummaryRow(
-                    section="stratum",
-                    key=stratum,
-                    n=len(group),
-                    detail="건너뜀 n<30",
-                )
-            )
+        bounds = quartile_bounds(scales)
+        if bounds is None:
+            detail = "건너뜀 n<30" if len(group) < 30 else "건너뜀 iqr_zero"
+            rows.append(SummaryRow(section="stratum", key=stratum, n=len(group), detail=detail))
             continue
-        q1, q3, iqr = parsed
-        low = q1 - 1.5 * iqr
-        high = q3 + 1.5 * iqr
-        # 동점이 많아 IQR이 0이어도 Q1보다 작거나 Q3보다 큰 눈금은 꼬리다.
-        # 값이 모두 같으면 울타리 밖이 없고 요약만 건너뜀 iqr_zero다.
+        q1, q3, low, high = bounds
+        iqr = q3 - q1
         outliers = [point for point in group if point.scale < low or point.scale > high]
         kept = [
             point
@@ -494,10 +485,7 @@ def _iqr_from_points(
             if (point.rcept_no, point.dcm_no, point.bundle, _tail_signal(point, low), point.subject)
             not in seen
         ]
-        if iqr <= 0 and not kept:
-            detail = "건너뜀 iqr_zero"
-        else:
-            detail = f"Q1 {_fmt(q1)} Q3 {_fmt(q3)} IQR {_fmt(iqr)} 후보 {len(kept)}"
+        detail = f"Q1 {_fmt(q1)} Q3 {_fmt(q3)} IQR {_fmt(iqr)} 후보 {len(kept)}"
         rows.append(SummaryRow(section="stratum", key=stratum, n=len(group), detail=detail))
         for point in kept:
             signal = _tail_signal(point, low)

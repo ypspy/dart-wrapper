@@ -154,7 +154,7 @@ def test_panel_queue_order_is_extreme_five() -> None:
         elif index == 29:
             amount = 10**9
         else:
-            amount = 1_000
+            amount = 1000 + index
         fact = view(
             index,
             accounts=[
@@ -191,6 +191,8 @@ def test_panel_queue_order_is_extreme_five() -> None:
         if item.signal == "iqr_high" and item.subject == "total_asset" and item.queue_order == 1
     ]
     assert len(highs) == 1
+    assert highs[0].rcept_no == "20200300000029"
+    assert highs[0].raw_value == "1000000000"
     assert highs[0].in_research_panel is True
     assert highs[0].tail == "high"
     lows = [
@@ -199,6 +201,8 @@ def test_panel_queue_order_is_extreme_five() -> None:
         if item.signal == "iqr_low" and item.subject == "total_asset" and item.queue_order == 1
     ]
     assert len(lows) == 1
+    assert lows[0].rcept_no == "20200300000000"
+    assert lows[0].raw_value == "1"
     assert lows[0].in_research_panel is True
     outsider = [
         item
