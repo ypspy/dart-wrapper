@@ -4,8 +4,16 @@
 <header class="ops-topbar">
   <div>
     <h2>추출 진단 검토</h2>
+    {% if notice %}
+    <p role="status">{{ notice }}</p>
+    {% endif %}
+    {% if summary_lines %}
+    <pre>{% for line in summary_lines %}{{ line }}
+{% endfor %}</pre>
+    {% else %}
     <p class="muted">진단을 실행하면 요약이 나옵니다.</p>
-    <form method="post" action="/admin/reviews/diagnose?page={{ page }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}">
+    {% endif %}
+    <form method="post" action="/admin/reviews/diagnose?page={{ page }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}{% if selected %}&amp;rcept_no={{ rcept_no }}&amp;dcm_no={{ dcm_no }}&amp;key_bundle={{ key_bundle }}&amp;signal={{ signal }}&amp;subject={{ subject }}{% endif %}">
       <button type="submit">진단 실행</button>
     </form>
   </div>

@@ -6,12 +6,16 @@ from collections.abc import Callable
 
 import httpx
 from fastapi import FastAPI
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import get_session
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from app.extracting.constants import EXTRACTOR_VERSION
 from app.main import create_app
+from app.models.audit_report_fact import AuditReportFact
+from app.models.disclosure import Disclosure
+from app.models.extraction_job import ExtractionJob
 from app.models.extraction_review import ExtractionReview
 from app.services.extraction_review_service import REVIEW_PAGE_SIZE
 
@@ -166,3 +170,85 @@ async def test_reviews_page_opens_default_row_and_rejects_queue_six(
     assert "이 행은 기본 검토 목록에 없습니다." in missing.text
     assert "20200331000006" not in missing.text
     assert "total_equity" not in missing.text
+
+
+def _fact() -> AuditReportFact:
+    return AuditReportFact(
+        rcept_no="20200331000001",
+        dcm_no="11111",
+        source_report_type="F001",
+        fs_scope="separate",
+        fetch_status="ok",
+        extractor_version=EXTRACTOR_VERSION,
+        hours_status="not_found",
+        conflicts=[],
+    )
+
+
+async def test_diagnose_shows_summary_and_keeps_catalog(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_fact())
+        session.add(Disclosure(rcept_no="20200331000001", corp_name="그대로", rcept_dt="20200331"))
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post("/admin/reviews/diagnose")
+    assert response.status_code == 200
+    assert "실패 " in response.text
+    async with sessionmaker() as session:
+        fact = (await session.execute(select(AuditReportFact))).scalar_one()
+        disclosure = (await session.execute(select(Disclosure))).scalar_one()
+        reviews = (await session.execute(select(ExtractionReview))).scalars().all()
+    assert fact.hours_status == "not_found"
+    assert disclosure.corp_name == "그대로"
+    assert reviews
+
+
+async def test_diagnose_running_job_does_not_change_reviews(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_fact())
+        session.add(_review(verdict="logic", note="유지"))
+        session.add(
+            ExtractionJob(
+                job_id="job-1",
+                status="running",
+                extractor_id="audit_opinion",
+                mode="extract",
+                params={},
+            )
+        )
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post("/admin/reviews/diagnose")
+    assert "추출 잡이 진행 중이라 진단을 시작하지 않습니다." in response.text
+    async with sessionmaker() as session:
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+    assert row.verdict == "logic"
+    assert row.note == "유지"
+
+
+async def test_diagnose_empty_population_keeps_active(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_review(active=True, verdict="source", tag="as_written"))
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post("/admin/reviews/diagnose")
+    assert "현재 추출기 ok 행이 없습니다." in response.text
+    async with sessionmaker() as session:
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+    assert row.active is True
+    assert row.verdict == "source"
+    assert row.tag == "as_written"
+
+
+async def test_diagnose_requires_token(client_factory: ClientFactory) -> None:
+    app, _sessionmaker = await _app()
+    async with client_factory(app) as client:
+        response = await client.post("/admin/reviews/diagnose")
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/admin/token")
