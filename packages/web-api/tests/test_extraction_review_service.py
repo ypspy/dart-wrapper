@@ -15,7 +15,9 @@ from app.models.extraction_review import ExtractionReview
 from app.services.extraction_review_service import (
     ExtractionReviewError,
     diagnose,
+    export_tsv,
     fact_to_view,
+    import_tsv,
 )
 
 
@@ -224,3 +226,84 @@ def test_fact_to_view_without_disclosure_clears_rcept_dt() -> None:
     assert view.corp_code is None
     assert view.year_end is None
     assert view.corp_cls is None
+
+
+def _review(**overrides: object) -> ExtractionReview:
+    values: dict[str, object] = {
+        "rcept_no": "20200331000001",
+        "dcm_no": "11111",
+        "bundle": "accounts",
+        "signal": "iqr_high",
+        "subject": "total_asset",
+        "extractor_version": EXTRACTOR_VERSION,
+        "in_research_panel": True,
+        "stratum": "F001|separate|total_asset",
+        "tail": "high",
+        "queue_order": 1,
+        "raw_value": "10",
+        "active": True,
+        "verdict": "hold",
+        "tag": "",
+        "note": "",
+    }
+    values.update(overrides)
+    return ExtractionReview(**values)  # type: ignore[arg-type]
+
+
+async def test_export_default_and_next_slice(sessionmaker_fixture) -> None:
+    async with sessionmaker_fixture() as session:
+        session.add(_review(queue_order=1, verdict="source", tag="real_magnitude"))
+        session.add(
+            _review(
+                signal="iqr_low",
+                tail="low",
+                queue_order=1,
+                verdict="logic",
+                subject="total_asset",
+            )
+        )
+        session.add(
+            _review(signal="iqr_high", queue_order=6, raw_value="99", subject="total_equity")
+        )
+        session.add(
+            _review(
+                bundle="hours",
+                signal="hours_nonpositive",
+                subject="audit_current_total",
+                tail="",
+                queue_order=None,
+                stratum="F001|separate|audit_current_total",
+            )
+        )
+        await session.commit()
+        default_rows = await export_tsv(session, next_slice=False)
+        next_rows = await export_tsv(session, next_slice=True)
+    default_signals = {row["signal"] for row in default_rows}
+    assert "hours_nonpositive" in default_signals
+    assert "iqr_high" in default_signals
+    assert all(row["queue_order"] != "6" for row in default_rows)
+    assert {row["subject"] for row in next_rows} == {"total_equity"}
+    assert default_rows[0]["viewer_url"].startswith("https://dart.fss.or.kr/")
+
+
+async def test_import_rejects_bad_file_and_keeps_blanks(sessionmaker_fixture) -> None:
+    async with sessionmaker_fixture() as session:
+        session.add(_review(verdict="source", tag="as_written", note="유지"))
+        await session.commit()
+        header = "rcept_no\tdcm_no\tbundle\tsignal\tsubject\tverdict\ttag\tnote\n"
+        good = header + "20200331000001\t11111\taccounts\tiqr_high\ttotal_asset\thold\t-\t\n"
+        count = await import_tsv(session, good)
+        await session.commit()
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+    assert count == 1
+    assert row.verdict == "hold"
+    assert row.tag == ""
+    assert row.note == "유지"
+    async with sessionmaker_fixture() as session:
+        bad = (
+            header + "20200331000001\t11111\taccounts\tiqr_high\ttotal_asset\tlogic\tas_written\t\n"
+        )
+        with pytest.raises(ExtractionReviewError):
+            await import_tsv(session, bad)
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+    assert row.verdict == "hold"
