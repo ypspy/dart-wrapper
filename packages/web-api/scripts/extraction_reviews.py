@@ -110,8 +110,11 @@ async def _export(
 
 
 async def _import(sessionmaker: async_sessionmaker[AsyncSession], path: str) -> None:
-    """UTF-8 TSV의 판정을 반영하고 commit한다. 오류면 rollback한다."""
-    text = Path(path).read_text(encoding="utf-8")
+    """UTF-8 TSV의 판정을 반영하고 commit한다. 오류면 rollback한다.
+
+    Excel이 붙인 BOM이 있어도 헤더로 읽는다.
+    """
+    text = Path(path).read_text(encoding="utf-8-sig")
     async with sessionmaker() as session:
         try:
             await import_tsv(session, text)

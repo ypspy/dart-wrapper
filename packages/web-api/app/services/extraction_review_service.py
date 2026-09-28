@@ -360,6 +360,8 @@ def _export_record(row: ExtractionReview) -> dict[str, str]:
 
 def _parse_import(text: str) -> list[_ParsedImport]:
     """헤더·중복·판정 형식을 확인하고, 쓰기는 하지 않는다."""
+    if text.startswith("\ufeff"):
+        text = text[1:]
     reader = csv.DictReader(io.StringIO(text), delimiter="\t")
     fieldnames = list(reader.fieldnames or [])
     if any(name not in fieldnames for name in _IMPORT_HEADERS):

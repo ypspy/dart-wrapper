@@ -320,7 +320,11 @@ async def test_import_rejects_bad_file_and_keeps_blanks(sessionmaker_fixture) ->
         session.add(_review(verdict="source", tag="as_written", note="유지"))
         await session.commit()
         header = "rcept_no\tdcm_no\tbundle\tsignal\tsubject\tverdict\ttag\tnote\n"
-        good = header + "20200331000001\t11111\taccounts\tiqr_high\ttotal_asset\thold\t-\t\n"
+        good = (
+            "\ufeff"
+            + header
+            + "20200331000001\t11111\taccounts\tiqr_high\ttotal_asset\thold\t-\t\n"
+        )
         count = await import_tsv(session, good)
         await session.commit()
         row = (await session.execute(select(ExtractionReview))).scalar_one()
