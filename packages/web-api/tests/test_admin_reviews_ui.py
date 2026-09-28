@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 import httpx
@@ -168,8 +169,15 @@ async def test_reviews_page_opens_default_row_and_rejects_queue_six(
     assert "DART 수집 운영" not in partial.text
     assert "10" in partial.text
     assert "이 행은 기본 검토 목록에 없습니다." in missing.text
-    assert "20200331000006" not in missing.text
-    assert "total_equity" not in missing.text
+    assert ">20200331000006</a>" not in missing.text
+    assert not re.search(
+        r'hx-get="/admin/reviews\?[^"]*rcept_no=20200331000006',
+        missing.text,
+    )
+    assert (
+        'action="/admin/reviews/diagnose?page=1&amp;bundle=&amp;verdict=&amp;rcept_no=20200331000006&amp;dcm_no=11111&amp;key_bundle=accounts&amp;signal=iqr_high&amp;subject=total_equity"'
+        in missing.text
+    )
 
 
 def _fact() -> AuditReportFact:
@@ -244,6 +252,32 @@ async def test_diagnose_empty_population_keeps_active(client_factory: ClientFact
     assert row.active is True
     assert row.verdict == "source"
     assert row.tag == "as_written"
+
+
+async def test_diagnose_keeps_out_of_slice_natural_key(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_review(rcept_no="20200331000006", queue_order=6, subject="total_equity"))
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/reviews/diagnose",
+            params={
+                "rcept_no": "20200331000006",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_equity",
+            },
+        )
+    assert response.status_code == 200
+    assert "이 행은 기본 검토 목록에 없습니다." in response.text
+    assert "왼쪽에서 한 건을 고르세요." not in response.text
+    assert (
+        'action="/admin/reviews/diagnose?page=1&amp;bundle=&amp;verdict=&amp;rcept_no=20200331000006'
+        in response.text
+    )
 
 
 async def test_diagnose_requires_token(client_factory: ClientFactory) -> None:
