@@ -19,6 +19,7 @@ from app.services.extraction_review_service import (
     fact_to_view,
     import_tsv,
 )
+from scripts.extraction_reviews import build_parser
 
 
 @pytest.fixture
@@ -307,3 +308,13 @@ async def test_import_rejects_bad_file_and_keeps_blanks(sessionmaker_fixture) ->
             await import_tsv(session, bad)
         row = (await session.execute(select(ExtractionReview))).scalar_one()
     assert row.verdict == "hold"
+
+
+def test_parser_accepts_three_commands() -> None:
+    parser = build_parser()
+    diagnose_args = parser.parse_args(["diagnose", "--summary-out", "out.tsv"])
+    export_args = parser.parse_args(["export-tsv", "--next", "--out", "out.tsv"])
+    import_args = parser.parse_args(["import-tsv", "--in", "in.tsv"])
+    assert diagnose_args.command == "diagnose"
+    assert export_args.next_slice is True
+    assert import_args.path == "in.tsv"
