@@ -7,6 +7,7 @@ import math
 from app.reviewing.candidates import (
     FactView,
     categorical_candidates,
+    failure_candidates,
     numeric_candidates,
     quartile_bounds,
     select_panel_ids,
@@ -343,3 +344,70 @@ def test_rare_representatives_stop_at_five_panel() -> None:
     picked = [item for item in candidates if item.signal == "rare_code" and item.subject == "other"]
     assert len(picked) == 5
     assert all(item.in_research_panel for item in picked)
+
+
+def test_failure_groups_skip_expected_missing_and_cap_panel() -> None:
+    # 비어 있는 상태는 classify_outcome에서 fail이다. 이 시나리오는 내부회계만 실패다.
+    other_ok = {
+        "auditor_status": "ok",
+        "opinion_status": "ok",
+        "gaap_status": "ok",
+        "audit_report_date_status": "ok",
+        "current_period_status": "ok",
+        "hours_status": "ok",
+        "activities_status": "ok",
+        "communications_status": "ok",
+        "accounts_status": "ok",
+        "going_concern_status": "ok",
+        "subsidiary_status": "ok",
+    }
+    listed = [
+        view(
+            index,
+            source_report_type="F001",
+            fs_scope="separate",
+            icfr_status="skipped",
+            corp_cls="Y",
+            year_end="2024.12",
+            rcept_dt=f"202501{index:02d}",
+            corp_code="C",
+            conflicts=[],
+            **other_ok,
+        )
+        for index in range(1, 8)
+    ]
+    unlisted = view(
+        20,
+        source_report_type="F001",
+        fs_scope="separate",
+        icfr_status="skipped",
+        corp_cls="E",
+        year_end="2024.12",
+        conflicts=[],
+        **other_ok,
+    )
+    panel = {(row.rcept_no, row.dcm_no) for row in listed[:5]}
+    candidates, summary = failure_candidates([*listed, unlisted], panel)
+    assert all(item.bundle == "icfr" and item.signal == "fail" for item in candidates)
+    assert len(candidates) == 5
+    assert all(item.in_research_panel for item in candidates)
+    assert candidates[0].subject == "skipped|missing=1|conflicts=0"
+    assert not any(item.rcept_no == unlisted.rcept_no for item in candidates)
+    assert any(row.section == "failure" and row.n == 7 for row in summary)
+
+
+def test_failure_uses_non_panel_when_panel_is_empty() -> None:
+    rows = [
+        view(
+            index,
+            source_report_type="F001",
+            fs_scope="separate",
+            opinion_status="not_found",
+            conflicts=[],
+        )
+        for index in range(6)
+    ]
+    candidates, _summary = failure_candidates(rows, set())
+    opinion = [item for item in candidates if item.bundle == "opinion" and item.signal == "fail"]
+    assert len(opinion) == 5
+    assert all(item.in_research_panel is False for item in opinion)

@@ -1,4 +1,4 @@
-"""숫자 이상치와 범주 빈도의 진단 후보."""
+"""숫자 이상치, 범주 빈도, 실패 그룹의 진단 후보."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from datetime import date
 from typing import TypeGuard
 
 from app.extracting.dates import parse_year_end
+from app.extracting.field_bundles import classify_outcome, icfr_period_year, status_attr
 
 _NEGATIVE_ACCOUNTS = frozenset(
     {
@@ -779,3 +780,113 @@ def _representative_candidates(
         )
         for order, row in enumerate(ordered, start=1)
     ]
+
+
+ENTRY_FIELDS: dict[str, tuple[str, ...]] = {
+    "auditor": ("cover_entry_id", "opinion_entry_id", "a001_opinion_entry_id"),
+    "opinion": ("opinion_entry_id", "a001_opinion_entry_id"),
+    "gaap": ("cover_entry_id", "opinion_entry_id"),
+    "audit_report_date": ("opinion_entry_id",),
+    "current_period": ("cover_entry_id", "a001_cover_entry_id"),
+    "hours": ("activity_entry_id",),
+    "activities": ("activity_entry_id",),
+    "communications": ("activity_entry_id",),
+    "accounts": ("bs_entry_id", "is_entry_id"),
+    "icfr": ("icfr_entry_id",),
+    "going_concern": ("opinion_entry_id",),
+    "subsidiary": ("notes_entry_id", "a001_affiliate_entry_id"),
+}
+
+
+def failure_candidates(
+    facts: Sequence[FactView],
+    panel_ids: set[tuple[str, str]],
+) -> tuple[list[ReviewCandidate], list[SummaryRow]]:
+    """실패 칸만 상태·섹션 없음·conflicts로 묶어 대표를 고른다."""
+    groups: dict[tuple[str, str], list[FactView]] = {}
+    conflicts_not_list = 0
+    for fact in facts:
+        if fact.fetch_status != "ok":
+            continue
+        period_year = icfr_period_year(fact.year_end, fact.rcept_dt)
+        flag, not_list = _conflict_flag(fact.conflicts)
+        if not_list:
+            conflicts_not_list += 1
+        for bundle, fields in ENTRY_FIELDS.items():
+            status = getattr(fact, status_attr(bundle))
+            outcome = classify_outcome(
+                bundle,
+                fs_scope=fact.fs_scope,
+                status=status,
+                hours_status=fact.hours_status,
+                activities_status=fact.activities_status,
+                report_type=fact.source_report_type,
+                corp_cls=fact.corp_cls,
+                period_year=period_year,
+            )
+            if outcome != "fail":
+                continue
+            subject = _failure_subject(status, _entries_missing(fact, fields), flag)
+            groups.setdefault((bundle, subject), []).append(fact)
+
+    candidates: list[ReviewCandidate] = []
+    summary: list[SummaryRow] = []
+    if conflicts_not_list:
+        summary.append(
+            SummaryRow(
+                section="skip",
+                key="conflicts_not_list",
+                n=conflicts_not_list,
+                detail="",
+            )
+        )
+    for bundle in ENTRY_FIELDS:
+        subjects = sorted(subject for key, subject in groups if key == bundle)
+        for subject in subjects:
+            rows = groups[(bundle, subject)]
+            picked = _representative_candidates(
+                rows,
+                panel_ids,
+                bundle=bundle,
+                signal="fail",
+                subject=subject,
+            )
+            candidates.extend(picked)
+            n_panel = sum(1 for row in rows if (row.rcept_no, row.dcm_no) in panel_ids)
+            summary.append(
+                SummaryRow(
+                    section="failure",
+                    key=f"{bundle}|{subject}",
+                    n=len(rows),
+                    detail=f"패널 {n_panel} 대표 {len(picked)}",
+                )
+            )
+    return candidates, summary
+
+
+def _conflict_flag(conflicts: object) -> tuple[int, bool]:
+    """리스트가 아니면 (0, 참). 비어 있지 않으면 1."""
+    if not isinstance(conflicts, list):
+        return 0, True
+    if conflicts:
+        return 1, False
+    return 0, False
+
+
+def _entries_missing(fact: FactView, fields: tuple[str, ...]) -> int:
+    """묶음 entry가 모두 비었으면 1."""
+    for field in fields:
+        value = getattr(fact, field)
+        if isinstance(value, str):
+            if value.strip():
+                return 0
+            continue
+        if value is not None:
+            return 0
+    return 1
+
+
+def _failure_subject(status: str | None, missing: int, flag: int) -> str:
+    """상태·섹션 없음·conflicts 유무를 한 키로 잇는다."""
+    label = "None" if status is None else status
+    return f"{label}|missing={missing}|conflicts={flag}"
