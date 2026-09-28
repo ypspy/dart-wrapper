@@ -19,6 +19,7 @@ from app.services.extraction_review_service import (
     ExtractionReviewError,
     diagnose,
     export_tsv,
+    has_source_and_logic_iqr_stratum,
     import_tsv,
 )
 
@@ -90,10 +91,15 @@ async def _export(
     out: str | None,
     next_slice: bool,
 ) -> None:
-    """검토 TSV를 파일 또는 표준 출력에 쓴다. 행이 없어도 헤더는 쓴다."""
+    """검토 TSV를 파일 또는 표준 출력에 쓴다. 행이 없어도 헤더는 쓴다.
+
+    --next인데 판정이 갈린 IQR 층이 없을 때만 표준 오류에 알린다.
+    그런 층이 있어도 다음 hold 창이 비면 헤더만 쓰고 알림은 쓰지 않는다.
+    """
     async with sessionmaker() as session:
         rows = await export_tsv(session, next_slice=next_slice)
-    if next_slice and not rows:
+        missing_mixed_stratum = next_slice and not await has_source_and_logic_iqr_stratum(session)
+    if missing_mixed_stratum:
         print("소스와 로직이 같이 있는 층이 없습니다.", file=sys.stderr)
     if out is None:
         _reconfigure_stdout()

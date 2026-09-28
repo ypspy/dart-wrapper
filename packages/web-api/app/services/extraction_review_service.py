@@ -219,18 +219,22 @@ class _ReviewPatch:
     note: str | None
 
 
+async def has_source_and_logic_iqr_stratum(session: AsyncSession) -> bool:
+    """활성 IQR 행을 층으로 묶어, source와 logic이 같이 있는 층이 있으면 참.
+
+    다음 hold 창이 비어 있어도 층이 갈려 있으면 참이다.
+    """
+    rows = await _load_active_reviews(session)
+    return any(_mixed_verdict(group) for group in _iqr_groups(rows).values())
+
+
 async def export_tsv(session: AsyncSession, *, next_slice: bool) -> list[dict[str, str]]:
     """활성 검토 행을 내보내기 열로 만든다.
 
     next_slice가 거짓이면 금지·대표 신호와 순번 1–5인 IQR이다.
     참이면 판정이 갈린 IQR 층의 다음 hold만이다.
     """
-    stored = (
-        (await session.execute(select(ExtractionReview).where(ExtractionReview.active.is_(True))))
-        .scalars()
-        .all()
-    )
-    rows = list(stored)
+    rows = await _load_active_reviews(session)
     if next_slice:
         picked = _next_slice_rows(rows)
     else:
@@ -265,17 +269,37 @@ def _in_default_slice(row: ExtractionReview) -> bool:
     return 1 <= row.queue_order <= 5
 
 
-def _next_slice_rows(rows: list[ExtractionReview]) -> list[ExtractionReview]:
-    """source와 logic이 함께 있는 층의 IQR만, 꼬리별 m+1부터 m+5 hold를 고른다."""
+async def _load_active_reviews(session: AsyncSession) -> list[ExtractionReview]:
+    """active가 참인 검토 행만 읽는다."""
+    stored = (
+        (await session.execute(select(ExtractionReview).where(ExtractionReview.active.is_(True))))
+        .scalars()
+        .all()
+    )
+    return list(stored)
+
+
+def _iqr_groups(rows: list[ExtractionReview]) -> dict[str, list[ExtractionReview]]:
+    """IQR 신호만 층 키로 묶는다."""
     grouped: dict[str, list[ExtractionReview]] = {}
     for row in rows:
         if row.signal not in _IQR_SIGNALS:
             continue
         grouped.setdefault(row.stratum, []).append(row)
+    return grouped
+
+
+def _mixed_verdict(group: list[ExtractionReview]) -> bool:
+    """한 층에 source와 logic이 둘 다 있으면 참."""
+    verdicts = {row.verdict for row in group}
+    return "source" in verdicts and "logic" in verdicts
+
+
+def _next_slice_rows(rows: list[ExtractionReview]) -> list[ExtractionReview]:
+    """source와 logic이 함께 있는 층의 IQR만, 꼬리별 m+1부터 m+5 hold를 고른다."""
     chosen: list[ExtractionReview] = []
-    for group in grouped.values():
-        verdicts = {row.verdict for row in group}
-        if "source" not in verdicts or "logic" not in verdicts:
+    for group in _iqr_groups(rows).values():
+        if not _mixed_verdict(group):
             continue
         for tail in {row.tail for row in group}:
             chosen.extend(_next_tail(group, tail))

@@ -17,6 +17,7 @@ from app.services.extraction_review_service import (
     diagnose,
     export_tsv,
     fact_to_view,
+    has_source_and_logic_iqr_stratum,
     import_tsv,
 )
 from scripts.extraction_reviews import build_parser
@@ -285,6 +286,33 @@ async def test_export_default_and_next_slice(sessionmaker_fixture) -> None:
     assert all(row["queue_order"] != "6" for row in default_rows)
     assert {row["subject"] for row in next_rows} == {"total_equity"}
     assert default_rows[0]["viewer_url"].startswith("https://dart.fss.or.kr/")
+
+
+async def test_mixed_stratum_with_empty_next_window(sessionmaker_fixture) -> None:
+    """판정이 갈린 층의 다음 hold 창이 비어도 혼합 층은 있다."""
+    async with sessionmaker_fixture() as session:
+        session.add(_review(queue_order=1, verdict="source", tag="real_magnitude"))
+        session.add(
+            _review(
+                signal="iqr_low",
+                tail="low",
+                queue_order=1,
+                verdict="logic",
+            )
+        )
+        session.add(
+            _review(
+                signal="iqr_high",
+                queue_order=10,
+                raw_value="99",
+                subject="total_equity",
+            )
+        )
+        await session.commit()
+        mixed = await has_source_and_logic_iqr_stratum(session)
+        next_rows = await export_tsv(session, next_slice=True)
+    assert mixed is True
+    assert next_rows == []
 
 
 async def test_import_rejects_bad_file_and_keeps_blanks(sessionmaker_fixture) -> None:
