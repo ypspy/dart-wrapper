@@ -19,7 +19,7 @@
   <p><a href="{{ viewer_url }}" target="_blank" rel="noreferrer">원문</a></p>
   <form
     id="review-verdict-form"
-    hx-post="/admin/reviews/verdict"
+    hx-post="/admin/reviews/verdict?page={{ page }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}"
     hx-target="#review-detail"
     hx-swap="outerHTML"
   >

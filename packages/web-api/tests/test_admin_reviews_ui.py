@@ -313,6 +313,48 @@ async def test_verdict_requires_token(client_factory: ClientFactory) -> None:
     assert response.headers["location"].endswith("/admin/token")
 
 
+async def test_verdict_keeps_list_filters_after_save(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(
+            _review(
+                signal="hours_nonpositive",
+                subject="audit_current_total",
+                tail="",
+                queue_order=None,
+                in_research_panel=False,
+                bundle="hours",
+                verdict="hold",
+            )
+        )
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/reviews/verdict?page=2&bundle=hours&verdict=hold",
+            data={
+                "rcept_no": "20200331000001",
+                "dcm_no": "11111",
+                "key_bundle": "hours",
+                "signal": "hours_nonpositive",
+                "subject": "audit_current_total",
+                "verdict": "source",
+                "tag": "",
+                "note": "",
+            },
+        )
+    assert response.status_code == 200
+    assert (
+        'value="source" selected' in response.text
+        or 'value="source" selected="selected"' in response.text
+    )
+    assert "page=2&amp;bundle=hours&amp;verdict=hold" in response.text
+    assert "page=2&amp;bundle=hours&amp;verdict=source" not in response.text
+    async with sessionmaker() as session:
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+    assert row.verdict == "source"
+
+
 async def test_verdict_saves_three_fields_and_empty_tag(client_factory: ClientFactory) -> None:
     app, sessionmaker = await _app()
     async with sessionmaker() as session:

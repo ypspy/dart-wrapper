@@ -194,6 +194,14 @@ async def reviews_verdict(
     """판정·태그·메모를 저장하고 상세와 목록 행을 갱신한다."""
     if not _has_valid_token(request, settings):
         return _to_token_page()
+    # 폼 verdict는 판정값이고, 쿼리 verdict는 목록 필터라 query_params에서 읽는다.
+    try:
+        page = int(request.query_params.get("page", "1"))
+    except ValueError:
+        page = 1
+    shown_page = 1 if page < 1 else page
+    bundle = request.query_params.get("bundle", "")
+    list_verdict = request.query_params.get("verdict", "")
     selected = await get_default_review(
         session,
         rcept_no=rcept_no,
@@ -241,8 +249,8 @@ async def reviews_verdict(
             "form_tag": form_tag,
             "form_note": form_note,
             "oob_row": oob_row,
-            "page": 1,
-            "bundle": "",
-            "verdict": "",
+            "page": shown_page,
+            "bundle": bundle,
+            "verdict": list_verdict,
         },
     )
