@@ -1,4 +1,7 @@
 <section id="review-detail">
+  {% if error %}
+  <p role="alert">{{ error }}</p>
+  {% endif %}
   {% if selected %}
   <dl>
     <dt>접수번호</dt><dd>{{ selected.rcept_no }}</dd>
@@ -14,24 +17,39 @@
     <dt>추출기</dt><dd>{{ selected.extractor_version }}</dd>
   </dl>
   <p><a href="{{ viewer_url }}" target="_blank" rel="noreferrer">원문</a></p>
-  <form id="review-verdict-form">
+  <form
+    id="review-verdict-form"
+    hx-post="/admin/reviews/verdict"
+    hx-target="#review-detail"
+    hx-swap="outerHTML"
+  >
+    <input type="hidden" name="rcept_no" value="{{ selected.rcept_no }}">
+    <input type="hidden" name="dcm_no" value="{{ selected.dcm_no }}">
+    <input type="hidden" name="key_bundle" value="{{ selected.bundle }}">
+    <input type="hidden" name="signal" value="{{ selected.signal }}">
+    <input type="hidden" name="subject" value="{{ selected.subject }}">
     <select name="verdict">
-      <option value="hold" {% if selected.verdict == "hold" %}selected{% endif %}>hold</option>
-      <option value="source" {% if selected.verdict == "source" %}selected{% endif %}>source</option>
-      <option value="logic" {% if selected.verdict == "logic" %}selected{% endif %}>logic</option>
+      <option value="hold" {% if form_verdict == "hold" %}selected{% endif %}>hold</option>
+      <option value="source" {% if form_verdict == "source" %}selected{% endif %}>source</option>
+      <option value="logic" {% if form_verdict == "logic" %}selected{% endif %}>logic</option>
     </select>
     <select name="tag">
-      <option value="" {% if selected.tag == "" %}selected{% endif %}></option>
-      <option value="as_written" {% if selected.tag == "as_written" %}selected{% endif %}>as_written</option>
-      <option value="real_magnitude" {% if selected.tag == "real_magnitude" %}selected{% endif %}>real_magnitude</option>
-      <option value="rare_but_valid" {% if selected.tag == "rare_but_valid" %}selected{% endif %}>rare_but_valid</option>
-      <option value="other" {% if selected.tag == "other" %}selected{% endif %}>other</option>
+      <option value="" {% if form_tag == "" %}selected{% endif %}></option>
+      <option value="as_written" {% if form_tag == "as_written" %}selected{% endif %}>as_written</option>
+      <option value="real_magnitude" {% if form_tag == "real_magnitude" %}selected{% endif %}>real_magnitude</option>
+      <option value="rare_but_valid" {% if form_tag == "rare_but_valid" %}selected{% endif %}>rare_but_valid</option>
+      <option value="other" {% if form_tag == "other" %}selected{% endif %}>other</option>
     </select>
-    <textarea name="note">{{ selected.note }}</textarea>
+    <textarea name="note">{{ form_note }}</textarea>
   </form>
   {% elif rcept_no is not none %}
   <p>이 행은 기본 검토 목록에 없습니다.</p>
   {% else %}
   <p>왼쪽에서 한 건을 고르세요.</p>
+  {% endif %}
+  {% if oob_row %}
+  {% with row=oob_row, oob=true %}
+  {% include "admin/partials/review_list_row.html" %}
+  {% endwith %}
   {% endif %}
 </section>

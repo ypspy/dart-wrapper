@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from app.services.extraction_review_service import (
     diagnose,
     get_default_review,
     list_default_reviews,
+    save_review_form,
 )
 
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
@@ -85,6 +86,11 @@ async def _render_reviews(
         "subject": subject,
         "notice": notice,
         "summary_lines": summary_lines or [],
+        "error": "",
+        "form_verdict": selected.verdict if selected is not None else "",
+        "form_tag": selected.tag if selected is not None else "",
+        "form_note": selected.note if selected is not None else "",
+        "oob_row": None,
     }
     if request.headers.get("HX-Request") == "true":
         return templates.TemplateResponse(
@@ -168,4 +174,75 @@ async def reviews_diagnose(
         subject=subject,
         notice=notice,
         summary_lines=summary_lines,
+    )
+
+
+@router.post("/reviews/verdict", response_class=HTMLResponse, summary="판정 저장")
+async def reviews_verdict(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings_dep),
+    rcept_no: str = Form(),
+    dcm_no: str = Form(),
+    key_bundle: str = Form(),
+    signal: str = Form(),
+    subject: str = Form(),
+    verdict: str = Form(),
+    tag: str = Form(default=""),
+    note: str = Form(default=""),
+) -> HTMLResponse:
+    """판정·태그·메모를 저장하고 상세와 목록 행을 갱신한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+    selected = await get_default_review(
+        session,
+        rcept_no=rcept_no,
+        dcm_no=dcm_no,
+        bundle=key_bundle,
+        signal=signal,
+        subject=subject,
+    )
+    error = ""
+    oob_row = None
+    form_verdict = verdict
+    form_tag = tag
+    form_note = note
+    try:
+        selected = await save_review_form(
+            session,
+            rcept_no=rcept_no,
+            dcm_no=dcm_no,
+            bundle=key_bundle,
+            signal=signal,
+            subject=subject,
+            verdict=verdict,
+            tag=tag,
+            note=note,
+        )
+        await session.commit()
+        oob_row = selected
+        form_verdict = selected.verdict
+        form_tag = selected.tag
+        form_note = selected.note
+    except ExtractionReviewError as exc:
+        error = str(exc)
+    viewer_url = ""
+    if selected is not None:
+        viewer_url = DART_DOCUMENT_VIEW.format(rcept_no=selected.rcept_no, dcm_no=selected.dcm_no)
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/review_detail.html",
+        {
+            "selected": selected,
+            "viewer_url": viewer_url,
+            "rcept_no": rcept_no,
+            "error": error,
+            "form_verdict": form_verdict,
+            "form_tag": form_tag,
+            "form_note": form_note,
+            "oob_row": oob_row,
+            "page": 1,
+            "bundle": "",
+            "verdict": "",
+        },
     )

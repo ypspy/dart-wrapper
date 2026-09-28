@@ -32,23 +32,7 @@
     <table>
       <tbody>
         {% for row in rows %}
-        <tr>
-          <td>{{ "패널" if row.in_research_panel else "" }}</td>
-          <td>{{ row.bundle }}</td>
-          <td>{{ row.signal }}</td>
-          <td>{{ row.stratum }}</td>
-          <td>{{ row.queue_order if row.queue_order is not none else "" }}</td>
-          <td>{{ row.verdict }}</td>
-          <td>
-            <a
-              href="/admin/reviews?page={{ page }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}&amp;rcept_no={{ row.rcept_no }}&amp;dcm_no={{ row.dcm_no }}&amp;key_bundle={{ row.bundle }}&amp;signal={{ row.signal }}&amp;subject={{ row.subject }}"
-              hx-get="/admin/reviews?page={{ page }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}&amp;rcept_no={{ row.rcept_no }}&amp;dcm_no={{ row.dcm_no }}&amp;key_bundle={{ row.bundle }}&amp;signal={{ row.signal }}&amp;subject={{ row.subject }}"
-              hx-target="#review-detail"
-              hx-swap="outerHTML"
-              hx-push-url="true"
-            >{{ row.rcept_no }}</a>
-          </td>
-        </tr>
+        {% include "admin/partials/review_list_row.html" %}
         {% endfor %}
       </tbody>
     </table>

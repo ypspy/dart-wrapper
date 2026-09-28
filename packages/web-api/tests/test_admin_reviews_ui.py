@@ -6,6 +6,7 @@ import re
 from collections.abc import Callable
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -115,7 +116,9 @@ async def test_reviews_page_filters_and_pages(client_factory: ClientFactory) -> 
         await session.commit()
     async with client_factory(app) as client:
         client.cookies.set("admin_token", "dev-admin-token")
-        page2 = await client.get("/admin/reviews", params={"page": 2, "bundle": "hours", "verdict": "hold"})
+        page2 = await client.get(
+            "/admin/reviews", params={"page": 2, "bundle": "hours", "verdict": "hold"}
+        )
         ignored = await client.get("/admin/reviews", params={"bundle": "nope", "verdict": "nope"})
     assert f"20200331{REVIEW_PAGE_SIZE:06d}" in page2.text
     assert "20200331000000" not in page2.text
@@ -164,7 +167,9 @@ async def test_reviews_page_opens_default_row_and_rejects_queue_six(
             },
         )
     assert "이전 판정=source" in opened.text
-    assert "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200331000001&amp;dcmNo=11111" in opened.text
+    assert (
+        "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200331000001&amp;dcmNo=11111" in opened.text
+    )
     assert 'target="_blank"' in opened.text
     assert "DART 수집 운영" not in partial.text
     assert "10" in partial.text
@@ -286,3 +291,132 @@ async def test_diagnose_requires_token(client_factory: ClientFactory) -> None:
         response = await client.post("/admin/reviews/diagnose")
     assert response.status_code == 307
     assert response.headers["location"].endswith("/admin/token")
+
+
+async def test_verdict_requires_token(client_factory: ClientFactory) -> None:
+    app, _sessionmaker = await _app()
+    async with client_factory(app) as client:
+        response = await client.post(
+            "/admin/reviews/verdict",
+            data={
+                "rcept_no": "20200331000001",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_asset",
+                "verdict": "logic",
+                "tag": "",
+                "note": "",
+            },
+        )
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/admin/token")
+
+
+async def test_verdict_saves_three_fields_and_empty_tag(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_fact())
+        session.add(Disclosure(rcept_no="20200331000001", corp_name="그대로", rcept_dt="20200331"))
+        session.add(_review(tag="as_written", note="이전 판정=source\n유지", raw_value="10"))
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/reviews/verdict",
+            data={
+                "rcept_no": "20200331000001",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_asset",
+                "verdict": "source",
+                "tag": "",
+                "note": "이전 판정=source\n유지",
+            },
+        )
+    assert response.status_code == 200
+    assert "hx-swap-oob" in response.text
+    assert (
+        'value="source" selected' in response.text
+        or 'value="source" selected="selected"' in response.text
+    )
+    async with sessionmaker() as session:
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+        fact = (await session.execute(select(AuditReportFact))).scalar_one()
+        disclosure = (await session.execute(select(Disclosure))).scalar_one()
+    assert row.verdict == "source"
+    assert row.tag == ""
+    assert row.note == "이전 판정=source\n유지"
+    assert row.raw_value == "10"
+    assert fact.hours_status == "not_found"
+    assert disclosure.corp_name == "그대로"
+
+
+@pytest.mark.parametrize(
+    ("verdict", "tag", "message"),
+    [
+        ("nope", "", "판정은 hold, source, logic만 적을 수 있습니다."),
+        (
+            "source",
+            "-",
+            "태그는 as_written, real_magnitude, rare_but_valid, other만 적을 수 있습니다.",
+        ),
+        ("logic", "as_written", "logic 또는 hold 판정에는 태그를 적을 수 없습니다."),
+        ("hold", "other", "logic 또는 hold 판정에는 태그를 적을 수 없습니다."),
+    ],
+)
+async def test_verdict_rejects_and_shows_reason(
+    client_factory: ClientFactory, verdict: str, tag: str, message: str
+) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_review())
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/reviews/verdict",
+            data={
+                "rcept_no": "20200331000001",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_asset",
+                "verdict": verdict,
+                "tag": tag,
+                "note": "바꾸지마",
+            },
+        )
+    assert message in response.text
+    async with sessionmaker() as session:
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+    assert row.verdict == "hold"
+    assert row.tag == ""
+    assert row.note == ""
+
+
+async def test_verdict_rejects_queue_six(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_review(queue_order=6, verdict="hold"))
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.post(
+            "/admin/reviews/verdict",
+            data={
+                "rcept_no": "20200331000001",
+                "dcm_no": "11111",
+                "key_bundle": "accounts",
+                "signal": "iqr_high",
+                "subject": "total_asset",
+                "verdict": "logic",
+                "tag": "",
+                "note": "",
+            },
+        )
+    assert "해당하는 검토 행이 없습니다." in response.text
+    async with sessionmaker() as session:
+        row = (await session.execute(select(ExtractionReview))).scalar_one()
+    assert row.verdict == "hold"
