@@ -86,3 +86,4 @@
 | 2026-09-18 | [감사보고서일 창 안 최댓값](plans/2026-09-18-audit-report-date-window-latest.md) | plan |
 | 2026-09-19 | [살아 있는 문서 정렬과 GitHub 공개 리포](plans/2026-09-19-docs-and-github-repo.md) | plan |
 | 2026-09-28 | [추출 12묶음 진단](plans/2026-09-28-extraction-review-diagnosis.md) | plan |
+| 2026-09-28 | [추출 진단 Admin 검토 화면](plans/2026-09-28-extraction-review-admin.md) | plan |
