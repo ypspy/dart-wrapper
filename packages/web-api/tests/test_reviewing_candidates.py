@@ -6,6 +6,7 @@ import math
 
 from app.reviewing.candidates import (
     FactView,
+    categorical_candidates,
     numeric_candidates,
     quartile_bounds,
     select_panel_ids,
@@ -282,3 +283,63 @@ def test_panel_prefers_consolidated_then_f_then_latest() -> None:
         ),
     ]
     assert select_panel_ids(rows) == {("20200300000004", "1")}
+
+
+def test_rare_code_and_invalid_auditor() -> None:
+    rows = [
+        view(
+            index,
+            opinion_status="ok",
+            opinion_code="unqualified",
+            auditor_status="ok",
+            auditor_resolved="삼일회계법인",
+        )
+        for index in range(99)
+    ]
+    rare = view(
+        100,
+        opinion_status="ok",
+        opinion_code="adverse",
+        auditor_status="ok",
+        auditor_resolved="A",
+    )
+    blank = view(
+        101,
+        opinion_status="ok",
+        opinion_code="unqualified",
+        auditor_status="ok",
+        auditor_resolved="  ",
+    )
+    panel = {(rare.rcept_no, rare.dcm_no)}
+    candidates, summary = categorical_candidates([*rows, rare, blank], panel)
+    rare_rows = [item for item in candidates if item.signal == "rare_code"]
+    assert {item.subject for item in rare_rows} == {"adverse"}
+    assert rare_rows[0].queue_order == 1
+    assert rare_rows[0].in_research_panel is True
+    assert rare_rows[0].stratum == "*|*|opinion"
+    invalid = [item for item in candidates if item.signal == "auditor_invalid"]
+    assert {item.rcept_no for item in invalid} == {rare.rcept_no, blank.rcept_no}
+    assert any(row.section == "category" and row.key == "opinion|unqualified" for row in summary)
+    assert not any(item.signal == "rare_code" and item.bundle == "auditor" for item in candidates)
+
+
+def test_rare_representatives_stop_at_five_panel() -> None:
+    # 흔한 코드 1000건이라 other 10건은 1% 미만이다. 접수번호는 210–219와 겹치지 않는다.
+    rows = [view(index, gaap_status="ok", gaap_code="k-ifrs") for index in range(1000, 2010)]
+    rares = []
+    panel: set[tuple[str, str]] = set()
+    for index in range(210, 220):
+        fact = view(
+            index,
+            gaap_status="ok",
+            gaap_code="other",
+            rcept_dt=f"202003{index:02d}",
+            corp_code="C",
+        )
+        rares.append(fact)
+        if index >= 215:
+            panel.add((fact.rcept_no, fact.dcm_no))
+    candidates, _summary = categorical_candidates([*rows, *rares], panel)
+    picked = [item for item in candidates if item.signal == "rare_code" and item.subject == "other"]
+    assert len(picked) == 5
+    assert all(item.in_research_panel for item in picked)

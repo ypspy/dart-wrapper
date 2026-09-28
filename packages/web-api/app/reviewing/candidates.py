@@ -1,4 +1,4 @@
-"""감사시간·계정·종속기업·보고일 간격의 숫자 진단 후보."""
+"""숫자 이상치와 범주 빈도의 진단 후보."""
 
 from __future__ import annotations
 
@@ -622,3 +622,160 @@ def _summary(skips: dict[str, int], stratum_rows: list[SummaryRow]) -> list[Summ
     ]
     rows.extend(stratum_rows)
     return rows
+
+
+_CATEGORY_BUNDLES = ("opinion", "gaap", "icfr", "going_concern")
+_REPRESENTATIVE_LIMIT = 5
+_RARE_RATIO = 0.01
+
+
+def categorical_candidates(
+    facts: Sequence[FactView],
+    panel_ids: set[tuple[str, str]],
+) -> tuple[list[ReviewCandidate], list[SummaryRow]]:
+    """1% 미만 코드와 형식이 깨진 감사인만 대표 후보로 만든다."""
+    ok_facts = [fact for fact in facts if fact.fetch_status == "ok"]
+    candidates: list[ReviewCandidate] = []
+    summary: list[SummaryRow] = []
+    for bundle in _CATEGORY_BUNDLES:
+        grouped = _codes_by_value(ok_facts, bundle)
+        denom = sum(len(rows) for rows in grouped.values())
+        if denom == 0:
+            continue
+        for code in sorted(grouped):
+            rows = grouped[code]
+            count = len(rows)
+            summary.append(
+                SummaryRow(
+                    section="category",
+                    key=f"{bundle}|{code}",
+                    n=count,
+                    detail=f"비율 {count / denom:.6f}",
+                )
+            )
+            if count / denom < _RARE_RATIO:
+                candidates.extend(
+                    _representative_candidates(
+                        rows,
+                        panel_ids,
+                        bundle=bundle,
+                        signal="rare_code",
+                        subject=code,
+                    )
+                )
+    names = _auditor_names(ok_facts)
+    auditor_total = sum(len(rows) for rows in names.values())
+    ranked_names = sorted(names.items(), key=lambda item: (-len(item[1]), item[0]))
+    for name, rows in ranked_names:
+        summary.append(
+            SummaryRow(
+                section="category",
+                key=f"auditor|{name}",
+                n=len(rows),
+                detail=f"비율 {len(rows) / auditor_total:.6f}",
+            )
+        )
+    for name in sorted(names):
+        rows = names[name]
+        if not _auditor_name_invalid(name):
+            continue
+        candidates.extend(
+            _representative_candidates(
+                rows,
+                panel_ids,
+                bundle="auditor",
+                signal="auditor_invalid",
+                subject=name,
+            )
+        )
+    return candidates, summary
+
+
+def _codes_by_value(facts: Sequence[FactView], bundle: str) -> dict[str, list[FactView]]:
+    """상태가 ok인 행을 코드별로 모은다."""
+    grouped: dict[str, list[FactView]] = {}
+    for fact in facts:
+        code = _category_code(fact, bundle)
+        if code is None:
+            continue
+        grouped.setdefault(code, []).append(fact)
+    return grouped
+
+
+def _category_code(fact: FactView, bundle: str) -> str | None:
+    """상태가 ok이면 코드 문자열을, 아니면 None을 돌려준다."""
+    if bundle == "opinion":
+        if fact.opinion_status != "ok":
+            return None
+        return fact.opinion_code or ""
+    if bundle == "gaap":
+        if fact.gaap_status != "ok":
+            return None
+        return fact.gaap_code or ""
+    if bundle == "icfr":
+        if fact.icfr_status != "ok":
+            return None
+        return f"{fact.icfr_engagement or ''}/{fact.icfr_opinion_code or ''}"
+    if fact.going_concern_status != "ok":
+        return None
+    if fact.going_concern is None:
+        return ""
+    return str(fact.going_concern)
+
+
+def _auditor_names(facts: Sequence[FactView]) -> dict[str, list[FactView]]:
+    """감사인 상태가 ok인 행을 앞뒤 공백을 뺀 이름별로 모은다."""
+    grouped: dict[str, list[FactView]] = {}
+    for fact in facts:
+        if fact.auditor_status != "ok":
+            continue
+        grouped.setdefault(_auditor_subject(fact), []).append(fact)
+    return grouped
+
+
+def _auditor_subject(fact: FactView) -> str:
+    """앞뒤 공백을 뺀 감사인 이름. 없으면 빈 문자열."""
+    name = fact.auditor_resolved
+    if not isinstance(name, str):
+        return ""
+    return name.strip()
+
+
+def _auditor_name_invalid(name: str) -> bool:
+    """없거나, 두 글자 미만이거나, 한글 음절이 없으면 형식 오류다."""
+    if len(name) < 2:
+        return True
+    return not any("가" <= char <= "힣" for char in name)
+
+
+def _representative_candidates(
+    rows: list[FactView],
+    panel_ids: set[tuple[str, str]],
+    *,
+    bundle: str,
+    signal: str,
+    subject: str,
+) -> list[ReviewCandidate]:
+    """패널이 있으면 그 5건, 없으면 비패널 5건을 접수일 내림차순으로 고른다."""
+    panel_rows = [row for row in rows if (row.rcept_no, row.dcm_no) in panel_ids]
+    pool = panel_rows if panel_rows else rows
+    ordered = sorted(
+        pool,
+        key=lambda row: (row.rcept_dt, row.rcept_no, row.dcm_no),
+        reverse=True,
+    )[:_REPRESENTATIVE_LIMIT]
+    return [
+        ReviewCandidate(
+            rcept_no=row.rcept_no,
+            dcm_no=row.dcm_no,
+            bundle=bundle,
+            signal=signal,
+            subject=subject,
+            stratum=f"*|*|{bundle}",
+            tail="",
+            queue_order=order,
+            raw_value=subject,
+            in_research_panel=(row.rcept_no, row.dcm_no) in panel_ids,
+        )
+        for order, row in enumerate(ordered, start=1)
+    ]
