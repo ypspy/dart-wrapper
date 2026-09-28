@@ -711,6 +711,7 @@
   <nav class="ops-switch" aria-label="운영 화면">
     <a href="/admin" class="{% if ops_section == 'catalog' %}is-selected{% endif %}">수집</a>
     <a href="/admin/extract" class="{% if ops_section == 'extract' %}is-selected{% endif %}">추출</a>
+    <a href="/admin/reviews" class="{% if ops_section == 'reviews' %}is-selected{% endif %}">검토</a>
   </nav>
   {% block content %}{% endblock %}
 </body>

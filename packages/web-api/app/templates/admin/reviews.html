@@ -1,0 +1,50 @@
+{% extends "admin/base.html" %}
+{% block title %}추출 진단 검토{% endblock %}
+{% block content %}
+<header class="ops-topbar">
+  <div>
+    <h2>추출 진단 검토</h2>
+    <p class="muted">진단을 실행하면 요약이 나옵니다.</p>
+    <form method="post" action="/admin/reviews/diagnose?page={{ page }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}">
+      <button type="submit">진단 실행</button>
+    </form>
+  </div>
+</header>
+<div class="ops-grid">
+  <section aria-label="검토 목록">
+    <form method="get" action="/admin/reviews" class="inline">
+      <label>묶음
+        <input type="text" name="bundle" value="{{ bundle }}">
+      </label>
+      <label>판정
+        <input type="text" name="verdict" value="{{ verdict }}">
+      </label>
+      <button type="submit">필터</button>
+    </form>
+    <table>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ "패널" if row.in_research_panel else "" }}</td>
+          <td>{{ row.bundle }}</td>
+          <td>{{ row.signal }}</td>
+          <td>{{ row.stratum }}</td>
+          <td>{{ row.queue_order if row.queue_order is not none else "" }}</td>
+          <td>{{ row.verdict }}</td>
+          <td>{{ row.rcept_no }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if total > page_size %}
+    <p>
+      {% if page > 1 %}
+      <a href="/admin/reviews?page={{ page - 1 }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}">이전</a>
+      {% endif %}
+      <a href="/admin/reviews?page={{ page + 1 }}&amp;bundle={{ bundle }}&amp;verdict={{ verdict }}">다음</a>
+    </p>
+    {% endif %}
+  </section>
+  {% include "admin/partials/review_detail.html" %}
+</div>
+{% endblock %}

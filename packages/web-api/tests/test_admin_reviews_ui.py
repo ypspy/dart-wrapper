@@ -1,0 +1,117 @@
+"""Admin 진단 검토 화면."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import httpx
+from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.api.deps import get_session
+from app.db.session import create_all, create_db_engine, create_sessionmaker
+from app.extracting.constants import EXTRACTOR_VERSION
+from app.main import create_app
+from app.models.extraction_review import ExtractionReview
+from app.services.extraction_review_service import REVIEW_PAGE_SIZE
+
+ClientFactory = Callable[[FastAPI], httpx.AsyncClient]
+
+
+def _review(**overrides: object) -> ExtractionReview:
+    values: dict[str, object] = {
+        "rcept_no": "20200331000001",
+        "dcm_no": "11111",
+        "bundle": "accounts",
+        "signal": "iqr_high",
+        "subject": "total_asset",
+        "extractor_version": EXTRACTOR_VERSION,
+        "in_research_panel": True,
+        "stratum": "F001|separate|total_asset",
+        "tail": "high",
+        "queue_order": 1,
+        "raw_value": "10",
+        "active": True,
+        "verdict": "hold",
+        "tag": "",
+        "note": "",
+    }
+    values.update(overrides)
+    return ExtractionReview(**values)  # type: ignore[arg-type]
+
+
+async def _app() -> tuple[FastAPI, async_sessionmaker[AsyncSession]]:
+    engine = create_db_engine("sqlite+aiosqlite:///:memory:")
+    await create_all(engine)
+    sessionmaker = create_sessionmaker(engine)
+    app = create_app()
+
+    async def _session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = _session
+    return app, sessionmaker
+
+
+async def test_reviews_page_redirects_without_token(client_factory: ClientFactory) -> None:
+    app, _sessionmaker = await _app()
+    async with client_factory(app) as client:
+        response = await client.get("/admin/reviews")
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/admin/token")
+
+
+async def test_reviews_page_lists_default_slice_and_nav(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        session.add(_review(rcept_no="20200331000003", in_research_panel=False, queue_order=1))
+        session.add(
+            _review(
+                rcept_no="20200331000001",
+                signal="hours_nonpositive",
+                subject="audit_current_total",
+                tail="",
+                queue_order=None,
+            )
+        )
+        session.add(_review(rcept_no="20200331000002", queue_order=2, subject="total_equity"))
+        session.add(_review(rcept_no="20200331000004", queue_order=6, subject="net_income"))
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin/reviews")
+    text = response.text
+    assert response.status_code == 200
+    assert 'href="/admin/reviews" class="is-selected"' in text
+    assert "검토" in text
+    assert "진단을 실행하면 요약이 나옵니다." in text
+    assert "왼쪽에서 한 건을 고르세요." in text
+    assert text.index("20200331000002") < text.index("20200331000001")
+    assert text.index("20200331000001") < text.index("20200331000003")
+    assert "20200331000004" not in text
+
+
+async def test_reviews_page_filters_and_pages(client_factory: ClientFactory) -> None:
+    app, sessionmaker = await _app()
+    async with sessionmaker() as session:
+        for index in range(REVIEW_PAGE_SIZE + 1):
+            session.add(
+                _review(
+                    rcept_no=f"20200331{index:06d}",
+                    signal="hours_nonpositive",
+                    subject="audit_current_total",
+                    tail="",
+                    queue_order=None,
+                    in_research_panel=False,
+                    bundle="hours",
+                )
+            )
+        await session.commit()
+    async with client_factory(app) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        page2 = await client.get("/admin/reviews", params={"page": 2, "bundle": "hours", "verdict": "hold"})
+        ignored = await client.get("/admin/reviews", params={"bundle": "nope", "verdict": "nope"})
+    assert f"20200331{REVIEW_PAGE_SIZE:06d}" in page2.text
+    assert "20200331000000" not in page2.text
+    assert "20200331000000" in ignored.text
