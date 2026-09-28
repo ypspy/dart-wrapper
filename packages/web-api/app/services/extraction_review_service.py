@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.extracting.constants import EXTRACTOR_VERSION
-from app.extracting.field_bundles import DART_DOCUMENT_VIEW
+from app.extracting.field_bundles import BUNDLE_KEYS, DART_DOCUMENT_VIEW
 from app.models.audit_report_fact import AuditReportFact
 from app.models.corp import Corp
 from app.models.disclosure import Disclosure
@@ -258,6 +258,83 @@ async def import_tsv(session: AsyncSession, text: str) -> int:
     for patch in patches:
         _apply_patch(patch)
     return len(parsed)
+
+
+REVIEW_PAGE_SIZE = 50
+_FORM_VERDICTS = frozenset({"hold", "source", "logic"})
+
+
+def _review_sort_key(row: ExtractionReview) -> tuple[int, int, int, str, str, str, str]:
+    """연구 패널, 순번 있는 행, 순번, 층, 신호, 접수번호, 문서번호."""
+    queue_order = 0 if row.queue_order is None else row.queue_order
+    return (
+        0 if row.in_research_panel else 1,
+        0 if row.queue_order is not None else 1,
+        queue_order,
+        row.stratum,
+        row.signal,
+        row.rcept_no,
+        row.dcm_no,
+    )
+
+
+async def list_default_reviews(
+    session: AsyncSession,
+    *,
+    bundle: str,
+    verdict: str,
+    page: int,
+) -> tuple[list[ExtractionReview], int]:
+    """기본 집합을 정렬·필터한 뒤 한 페이지와 전체 건수를 돌려준다."""
+    rows = [row for row in await _load_active_reviews(session) if _in_default_slice(row)]
+    if bundle in BUNDLE_KEYS:
+        rows = [row for row in rows if row.bundle == bundle]
+    if verdict in _FORM_VERDICTS:
+        rows = [row for row in rows if row.verdict == verdict]
+    rows.sort(key=_review_sort_key)
+    total = len(rows)
+    page_index = 1 if page < 1 else page
+    start = (page_index - 1) * REVIEW_PAGE_SIZE
+    return rows[start : start + REVIEW_PAGE_SIZE], total
+
+
+async def save_review_form(
+    session: AsyncSession,
+    *,
+    rcept_no: str,
+    dcm_no: str,
+    bundle: str,
+    signal: str,
+    subject: str,
+    verdict: str,
+    tag: str,
+    note: str,
+) -> ExtractionReview:
+    """기본 집합의 판정·태그·메모만 바꾼다. commit은 호출자가 한다."""
+    if verdict not in _FORM_VERDICTS:
+        raise ExtractionReviewError("판정은 hold, source, logic만 적을 수 있습니다.")
+    if tag != "" and tag not in _ALLOWED_TAGS:
+        raise ExtractionReviewError(
+            "태그는 as_written, real_magnitude, rare_but_valid, other만 적을 수 있습니다."
+        )
+    if verdict in _TAG_BLOCKING_VERDICTS and tag != "":
+        raise ExtractionReviewError("logic 또는 hold 판정에는 태그를 적을 수 없습니다.")
+    stored = await _load_active_reviews(session)
+    row = next(
+        (
+            item
+            for item in stored
+            if _review_key(item) == (rcept_no, dcm_no, bundle, signal, subject)
+            and _in_default_slice(item)
+        ),
+        None,
+    )
+    if row is None:
+        raise ExtractionReviewError("해당하는 검토 행이 없습니다.")
+    row.verdict = verdict
+    row.tag = tag
+    row.note = note
+    return row
 
 
 def _in_default_slice(row: ExtractionReview) -> bool:
