@@ -1,4 +1,4 @@
-<tr{% if oob %} hx-swap-oob="outerHTML"{% endif %} id="review-row-{{ row.rcept_no }}-{{ row.dcm_no }}-{{ row.bundle }}-{{ row.signal }}-{{ row.subject }}">
+<tr{% if oob is defined and oob %} hx-swap-oob="outerHTML"{% endif %} id="review-row-{{ row.rcept_no }}-{{ row.dcm_no }}-{{ row.bundle }}-{{ row.signal }}-{{ row.subject }}">
   <td>{{ "패널" if row.in_research_panel else "" }}</td>
   <td>{{ row.bundle }}</td>
   <td>{{ row.signal }}</td>
