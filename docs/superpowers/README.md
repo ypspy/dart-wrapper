@@ -45,6 +45,7 @@
 | 2026-09-19 | [살아 있는 문서 정렬과 GitHub 공개 리포 설계](specs/2026-09-19-docs-and-github-repo-design.md) | spec |
 | 2026-09-28 | [추출 12묶음 진단 설계](specs/2026-09-28-extraction-review-diagnosis-design.md) | spec |
 | 2026-09-28 | [추출 진단 Admin 검토 화면 설계](specs/2026-09-28-extraction-review-admin-design.md) | spec |
+| 2026-09-30 | [수집 사이클 Admin 설계](specs/2026-09-30-collection-cycle-admin-design.md) | spec |
 
 ## Plans
 
