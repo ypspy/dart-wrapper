@@ -78,6 +78,14 @@ def test_local_app_has_collect_and_read_routes() -> None:
     assert "/facts" not in paths
 
 
+def test_main_app_matches_local_routes() -> None:
+    from app.main import create_app
+
+    local_paths = _paths(create_local_app())
+    main_paths = _paths(create_app())
+    assert main_paths == local_paths
+
+
 def test_role_apps_do_not_import_research_modules() -> None:
     root = Path(__file__).resolve().parents[1]
     script = """
@@ -88,14 +96,9 @@ from app.local import create_local_app
 create_local_app()
 create_public_app(Settings(database_url="sqlite+aiosqlite:///:memory:"))
 banned = (
-    "app.extracting",
-    "app.reviewing",
-    "app.services.extraction_service",
-    "app.adapters.opendart_company",
-    "app.adapters.llm_date_resolver",
     "research",
 )
-loaded = [name for name in sys.modules if name == "research" or name.startswith(banned)]
+loaded = [name for name in sys.modules if name.startswith(banned)]
 raise SystemExit(0 if not loaded else "loaded " + ",".join(loaded))
 """
     completed = subprocess.run(

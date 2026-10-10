@@ -17,11 +17,7 @@ import app.api.v1.viewer
 import app.api.catalog.ui
 import app.api.admin.catalog
 banned = (
-    "app.extracting",
-    "app.reviewing",
-    "app.services.extraction_service",
-    "app.adapters.opendart_company",
-    "app.adapters.llm_date_resolver",
+    "research",
 )
 loaded = [name for name in sys.modules if name.startswith(banned)]
 raise SystemExit(0 if not loaded else "loaded " + ",".join(loaded))
@@ -43,10 +39,7 @@ def test_collect_ui_does_not_import_research() -> None:
 import sys
 import app.api.admin.collect_ui
 banned = (
-    "app.services.extraction_service",
-    "app.services.corp_industry_service",
-    "app.services.completeness_service",
-    "app.extracting",
+    "research",
 )
 loaded = [name for name in sys.modules if name.startswith(banned)]
 raise SystemExit(0 if not loaded else "loaded " + ",".join(loaded))

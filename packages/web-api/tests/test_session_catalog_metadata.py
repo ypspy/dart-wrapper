@@ -28,9 +28,7 @@ if missing:
     raise SystemExit("missing tables " + ",".join(missing))
 
 banned = (
-    "app.extracting",
-    "app.adapters.opendart_company",
-    "app.adapters.llm_date_resolver",
+    "research",
 )
 loaded = [name for name in sys.modules if name.startswith(banned)]
 raise SystemExit(0 if not loaded else "loaded " + ",".join(loaded))

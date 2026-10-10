@@ -1,0 +1,253 @@
+"""Admin 추출 진단 검토 화면."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from research.api.deps import ADMIN_TOKEN_COOKIE, get_session, get_settings_dep
+from app.config import Settings
+from research.extracting.field_bundles import DART_DOCUMENT_VIEW
+from research.reviewing.candidates import format_summary
+from research.services.extraction_review_service import (
+    REVIEW_PAGE_SIZE,
+    ExtractionReviewError,
+    diagnose,
+    get_default_review,
+    list_default_reviews,
+    save_review_form,
+)
+from research.templating import create_templates
+
+templates = create_templates()
+
+router = APIRouter(prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+
+
+def _has_valid_token(request: Request, settings: Settings) -> bool:
+    """쿠키의 Admin 토큰이 설정과 같은지 확인한다."""
+    return request.cookies.get(ADMIN_TOKEN_COOKIE) == settings.admin_token
+
+
+def _to_token_page() -> RedirectResponse:
+    """토큰 입력 화면으로 보낸다."""
+    return RedirectResponse("/admin/token")
+
+
+async def _render_reviews(
+    request: Request,
+    session: AsyncSession,
+    *,
+    page: int,
+    bundle: str,
+    verdict: str,
+    rcept_no: str | None,
+    dcm_no: str,
+    key_bundle: str,
+    signal: str,
+    subject: str,
+    notice: str = "",
+    summary_lines: list[str] | None = None,
+) -> HTMLResponse:
+    """검토 목록과 상세를 같은 템플릿으로 그린다."""
+    rows, total = await list_default_reviews(session, bundle=bundle, verdict=verdict, page=page)
+    shown_page = 1 if page < 1 else page
+    selected = None
+    if rcept_no is not None:
+        selected = await get_default_review(
+            session,
+            rcept_no=rcept_no,
+            dcm_no=dcm_no,
+            bundle=key_bundle,
+            signal=signal,
+            subject=subject,
+        )
+    viewer_url = ""
+    if selected is not None:
+        viewer_url = DART_DOCUMENT_VIEW.format(rcept_no=selected.rcept_no, dcm_no=selected.dcm_no)
+    context = {
+        "ops_section": "reviews",
+        "rows": rows,
+        "total": total,
+        "page": shown_page,
+        "page_size": REVIEW_PAGE_SIZE,
+        "bundle": bundle,
+        "verdict": verdict,
+        "selected": selected,
+        "viewer_url": viewer_url,
+        "rcept_no": rcept_no,
+        "dcm_no": dcm_no,
+        "key_bundle": key_bundle,
+        "signal": signal,
+        "subject": subject,
+        "notice": notice,
+        "summary_lines": summary_lines or [],
+        "error": "",
+        "form_verdict": selected.verdict if selected is not None else "",
+        "form_tag": selected.tag if selected is not None else "",
+        "form_note": selected.note if selected is not None else "",
+        "oob_row": None,
+    }
+    if request.headers.get("HX-Request") == "true":
+        return templates.TemplateResponse(
+            request,
+            "admin/partials/review_detail.html",
+            context,
+        )
+    return templates.TemplateResponse(
+        request,
+        "admin/reviews.html",
+        context,
+    )
+
+
+@router.get("/reviews", response_class=HTMLResponse, summary="추출 진단 검토")
+async def reviews_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings_dep),
+    page: int = Query(default=1),
+    bundle: str = Query(default=""),
+    verdict: str = Query(default=""),
+    rcept_no: str | None = Query(default=None),
+    dcm_no: str = Query(default=""),
+    key_bundle: str = Query(default=""),
+    signal: str = Query(default=""),
+    subject: str = Query(default=""),
+) -> HTMLResponse:
+    """기본 검토 집합을 보여 준다. 진단 요약은 이 조회에서 계산하지 않는다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+    return await _render_reviews(
+        request,
+        session,
+        page=page,
+        bundle=bundle,
+        verdict=verdict,
+        rcept_no=rcept_no,
+        dcm_no=dcm_no,
+        key_bundle=key_bundle,
+        signal=signal,
+        subject=subject,
+    )
+
+
+@router.post("/reviews/diagnose", response_class=HTMLResponse, summary="추출 진단 실행")
+async def reviews_diagnose(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings_dep),
+    page: int = Query(default=1),
+    bundle: str = Query(default=""),
+    verdict: str = Query(default=""),
+    rcept_no: str | None = Query(default=None),
+    dcm_no: str = Query(default=""),
+    key_bundle: str = Query(default=""),
+    signal: str = Query(default=""),
+    subject: str = Query(default=""),
+) -> HTMLResponse:
+    """진단을 저장하고 요약을 페이지 위에 그린다. 새로고침은 이 POST를 다시 보낼 수 있다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+    notice = ""
+    summary_lines: list[str] = []
+    try:
+        summary = await diagnose(session)
+        await session.commit()
+        summary_lines = [format_summary(row) for row in summary]
+    except ExtractionReviewError as exc:
+        notice = str(exc)
+    return await _render_reviews(
+        request,
+        session,
+        page=page,
+        bundle=bundle,
+        verdict=verdict,
+        rcept_no=rcept_no,
+        dcm_no=dcm_no,
+        key_bundle=key_bundle,
+        signal=signal,
+        subject=subject,
+        notice=notice,
+        summary_lines=summary_lines,
+    )
+
+
+@router.post("/reviews/verdict", response_class=HTMLResponse, summary="판정 저장")
+async def reviews_verdict(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings_dep),
+    rcept_no: str = Form(),
+    dcm_no: str = Form(),
+    key_bundle: str = Form(),
+    signal: str = Form(),
+    subject: str = Form(),
+    verdict: str = Form(),
+    tag: str = Form(default=""),
+    note: str = Form(default=""),
+) -> HTMLResponse:
+    """판정·태그·메모를 저장하고 상세와 목록 행을 갱신한다."""
+    if not _has_valid_token(request, settings):
+        return _to_token_page()
+    # 폼 verdict는 판정값이고, 쿼리 verdict는 목록 필터라 query_params에서 읽는다.
+    try:
+        page = int(request.query_params.get("page", "1"))
+    except ValueError:
+        page = 1
+    shown_page = 1 if page < 1 else page
+    bundle = request.query_params.get("bundle", "")
+    list_verdict = request.query_params.get("verdict", "")
+    selected = await get_default_review(
+        session,
+        rcept_no=rcept_no,
+        dcm_no=dcm_no,
+        bundle=key_bundle,
+        signal=signal,
+        subject=subject,
+    )
+    error = ""
+    oob_row = None
+    form_verdict = verdict
+    form_tag = tag
+    form_note = note
+    try:
+        selected = await save_review_form(
+            session,
+            rcept_no=rcept_no,
+            dcm_no=dcm_no,
+            bundle=key_bundle,
+            signal=signal,
+            subject=subject,
+            verdict=verdict,
+            tag=tag,
+            note=note,
+        )
+        await session.commit()
+        oob_row = selected
+        form_verdict = selected.verdict
+        form_tag = selected.tag
+        form_note = selected.note
+    except ExtractionReviewError as exc:
+        error = str(exc)
+    viewer_url = ""
+    if selected is not None:
+        viewer_url = DART_DOCUMENT_VIEW.format(rcept_no=selected.rcept_no, dcm_no=selected.dcm_no)
+    return templates.TemplateResponse(
+        request,
+        "admin/partials/review_detail.html",
+        {
+            "selected": selected,
+            "viewer_url": viewer_url,
+            "rcept_no": rcept_no,
+            "error": error,
+            "form_verdict": form_verdict,
+            "form_tag": form_tag,
+            "form_note": form_note,
+            "oob_row": oob_row,
+            "page": shown_page,
+            "bundle": bundle,
+            "verdict": list_verdict,
+        },
+    )
