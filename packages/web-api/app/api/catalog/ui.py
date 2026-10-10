@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.api.deps import get_catalog_query_service
+from app.api.catalog_deps import get_catalog_query_service
 from app.errors import BadRequest, CatalogNotFound
 from app.services.catalog_query_service import CatalogQueryService
 

@@ -1,26 +1,8 @@
-"""SQLAlchemy 모델 패키지."""
+"""SQLAlchemy 모델 패키지.
 
-from app.models.audit_report_fact import AuditReportFact
+서브모듈을 직접 import한다. 패키지 import 시 연구 전용 모델을 불러오지 않는다.
+"""
+
 from app.models.base import Base
-from app.models.catalog_job import CatalogJob, CatalogJobLog
-from app.models.corp import Corp
-from app.models.disclosure import Disclosure
-from app.models.entry import Entry
-from app.models.extraction_job import ExtractionJob, ExtractionJobLog
-from app.models.extraction_review import ExtractionReview
-from app.models.slice_progress import DisclosureAttempt, SliceProgress
 
-__all__ = [
-    "AuditReportFact",
-    "Base",
-    "CatalogJob",
-    "CatalogJobLog",
-    "Corp",
-    "Disclosure",
-    "DisclosureAttempt",
-    "Entry",
-    "ExtractionJob",
-    "ExtractionJobLog",
-    "ExtractionReview",
-    "SliceProgress",
-]
+__all__ = ["Base"]

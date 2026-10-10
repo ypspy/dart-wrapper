@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
-from app.api.deps import get_catalog_service, get_slice_query_service, require_admin
+from app.api.catalog_deps import get_catalog_service, get_slice_query_service, require_admin
 from app.schemas.catalog import (
     ExtractRequest,
     ExtractResponse,
