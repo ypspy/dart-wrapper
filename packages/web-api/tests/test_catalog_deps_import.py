@@ -34,3 +34,28 @@ raise SystemExit(0 if not loaded else "loaded " + ",".join(loaded))
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_collect_ui_does_not_import_research() -> None:
+    """수집 화면 모듈은 추출·업종 서비스를 불러오지 않는다."""
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import sys
+import app.api.admin.collect_ui
+banned = (
+    "app.services.extraction_service",
+    "app.services.corp_industry_service",
+    "app.services.completeness_service",
+    "app.extracting",
+)
+loaded = [name for name in sys.modules if name.startswith(banned)]
+raise SystemExit(0 if not loaded else "loaded " + ",".join(loaded))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
