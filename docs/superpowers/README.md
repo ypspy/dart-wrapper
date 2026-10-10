@@ -46,6 +46,7 @@
 | 2026-09-28 | [추출 12묶음 진단 설계](specs/2026-09-28-extraction-review-diagnosis-design.md) | spec |
 | 2026-09-28 | [추출 진단 Admin 검토 화면 설계](specs/2026-09-28-extraction-review-admin-design.md) | spec |
 | 2026-09-30 | [수집 사이클 Admin 설계](specs/2026-09-30-collection-cycle-admin-design.md) | spec |
+| 2026-10-10 | [수집·열람과 연구 흐름 분리 설계](specs/2026-10-10-collect-view-split-design.md) | spec |
 
 ## Plans
 
