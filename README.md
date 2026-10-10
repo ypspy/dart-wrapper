@@ -15,10 +15,8 @@ DART 공시 소스를 **재가공해 제공**하기 위한 모노레포입니다
 
 1. **수집** — Admin이 기간/유형으로 entry를 카탈로그에 저장  
    (목록은 정정 전·후 접수 모두, 첨부는 현재 접수 `rcpNo`만—타 접수는 해당 행에서 입수, TOC 중간 노드 포함)
-2. **탐색** — Catalog HTML(/catalog)·Facts HTML(/facts) 또는 Public API로 공시·entry 표/JSON 조회
-3. **열람** — Viewer API가 `viewer_url`로 원문을 Lazy Retrieval·정제 (JSON)
-4. **감사 추출** — 카탈로그 주소로 감사인·의견·보고일·GAAP·당기 등 12묶음을 `audit_report_facts`에 저장 (원문 HTML은 저장하지 않음)
-5. **회사 업종 보강** — 공시 distinct 회사에 OpenDART **기업개황만** 호출하고, KSIC 이름은 저장소 JSON으로 붙임 (목록·본문 HTML과는 별 잡)
+2. **카탈로그 탐색** — Catalog HTML(`/catalog`) 또는 Public API로 공시·entry 표/JSON 조회
+3. **Viewer** — Viewer API가 `viewer_url`로 원문을 Lazy Retrieval·정제 (JSON)
 
 ## 구조
 
@@ -26,20 +24,24 @@ DART 공시 소스를 **재가공해 제공**하기 위한 모노레포입니다
 dart-wrapper/
 └── packages/
     ├── entry-extractor/   # 공시 컨테이너 → flat entry 추출 (Node)
+    ├── research/          # 감사 추출·회사 업종 연구 코드
     └── web-api/           # Admin 수집 + Catalog/Viewer API (FastAPI)
 ```
+
+`packages/research`의 연구 코드는 현재 기본 앱에서 실행하지 않습니다.
 
 ## 현재 모듈
 
 | 패키지 | 역할 |
 |--------|------|
 | [`@dart-wrapper/entry-extractor`](./packages/entry-extractor) | 목록·목차 파싱 후 저장용 flat entry 생성 |
-| [`web-api`](./packages/web-api) | 수집 트리거, Catalog/Viewer, 감사 추출, 회사 업종 |
+| [`research`](./packages/research) | 감사 추출·회사 업종 연구 코드(기본 앱에서 실행하지 않음) |
+| [`web-api`](./packages/web-api) | 수집 트리거, Catalog/Viewer |
 
 | 문서 | 내용 |
 |------|------|
 | packages/entry-extractor/README.md | 수집 정책 |
-| packages/web-api/README.md | API·Admin·추출 규칙 |
+| packages/web-api/README.md | API·Admin·Viewer 규칙 |
 | docs/paper/variable-measurement.md | 논문용 측정 선택 |
 | docs/superpowers/README.md | spec/plan 색인 (당시 버전일 수 있음) |
 | docs/github-repo.md | GitHub 리포 생성 런북 |
@@ -47,7 +49,7 @@ dart-wrapper/
 | AGENTS.md | 에이전트 규칙 |
 
 추출 정책(이력 목록·첨부 접수 스코프·`leafOnly` 등)은 [`packages/entry-extractor/README.md`](./packages/entry-extractor/README.md)를 보세요.  
-API·Admin·감사 추출 규칙은 [`packages/web-api/README.md`](./packages/web-api/README.md)를 보세요.
+API·Admin·Viewer 규칙은 [`packages/web-api/README.md`](./packages/web-api/README.md)를 보세요.
 
 ## 설치
 
@@ -70,31 +72,34 @@ python -m venv .venv
 npm run example
 npm run example:entries
 
-# web-api — packages/web-api 로 이동한 뒤 실행
+# 로컬 앱 — packages/web-api 로 이동한 뒤 실행
 cd packages/web-api
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn app.local:app --reload
+
 ```
 
 PowerShell에서는 `.venv\...`가 아니라 **`.\.venv\...`**(앞에 `.\`)로 써야 합니다.
 venv는 루트가 아니라 `packages/web-api/.venv`에 있습니다.
 
+공개 앱은 Postgres `DATABASE_URL`이 필요하며 `0.0.0.0:$PORT`에 바인딩합니다.
+
+```bash
+python -m uvicorn app.public:app --host 0.0.0.0 --port "$PORT"
+```
+
 - API 문서: http://127.0.0.1:8000/docs
 - Admin 운영 화면: http://127.0.0.1:8000/admin  
-  (처음 열면 `ADMIN_TOKEN` 입력 → 수집 시작·이어하기·슬라이스 완전성·회사 업종 채우기)
+  (처음 열면 `ADMIN_TOKEN` 입력 → 수집 시작·이어하기·슬라이스 완전성)
 - Catalog 탐색: http://127.0.0.1:8000/catalog  
   (공시 목록 → entry 전 컬럼 표·`is_leaf` 구분, 인증 없음)
-- Facts 탐색: http://127.0.0.1:8000/facts  
-  (추출된 감사 문서 1행 표, 인증 없음)
 
 주요 Public 경로:
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor) |
-| GET | `/api/v1/facts` | 감사 추출 결과 목록 (cursor) |
 | GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | entry 목록 (전 feature, `all_entries`) |
-| GET | `/api/v1/disclosures/{rcp_no}/audit-facts` | 공시별 감사 추출 결과 |
 | GET | `/api/v1/viewer/{rcp_no}` | 공시 전체 원문 정제 |
 | GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 섹션 단건 원문 정제 |
 
-Admin API는 `X-Admin-Token`이 필요합니다. 재개·슬라이스·추출 모드는 [`packages/web-api/README.md`](./packages/web-api/README.md)를 보세요.
+Admin API는 `X-Admin-Token`이 필요합니다. 재개·슬라이스 규칙은 [`packages/web-api/README.md`](./packages/web-api/README.md)를 보세요.

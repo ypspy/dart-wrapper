@@ -19,6 +19,8 @@ OpenDART 목록·재무제표 API가 아니라 DART 상세검색 및 상세페�
 - DART 원문 수집 시 한국어 인코딩(EUC-KR / UTF-8) 자동 처리를 적용합니다.
 - OpenDART는 기업개황 보강에만 사용합니다.
 
+기본 앱의 범위는 수집과 열람이다. 추출기 버전, 로직 메모, 팔로업 규칙은 `packages/research`를 다룰 때 적용한다.
+
 ## 카탈로그 보호 (삭제 금지에 가깝게)
 리프 주소 카탈로그(`entries`, `disclosures`, `slice_progress`, `disclosure_attempts`, `catalog_jobs` 및 이를 담은 `dart_catalog.db` 통째 삭제)는 DART에서 다시 모으는 비용이 큽니다. `audit_report_facts`·추출/날짜해소 잡만 비우는 것과 같지 않습니다.
 
