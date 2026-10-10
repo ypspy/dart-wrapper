@@ -104,6 +104,8 @@ async def test_ensure_schema_adds_hours_to_legacy_audit_report_facts() -> None:
 
 async def test_ensure_schema_creates_corps_table() -> None:
     """빈 DB를 열면 corps 테이블이 생긴다."""
+    from app.models.corp import Corp  # noqa: F401 — 연구 모델은 메타 등록을 위해 직접 import
+
     engine = create_db_engine("sqlite+aiosqlite:///:memory:")
     await ensure_schema(engine)
     async with engine.begin() as connection:
