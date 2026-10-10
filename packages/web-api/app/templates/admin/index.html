@@ -73,9 +73,8 @@
 
     <h3>회사 업종</h3>
     <div hx-get="/admin/corps-panel"
-         hx-trigger="every 5s"
+         hx-trigger="load, every 5s"
          hx-swap="innerHTML">
-      {% include "admin/partials/corps_panel.html" %}
     </div>
 
     <h3>로그</h3>

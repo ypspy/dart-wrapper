@@ -218,15 +218,6 @@ async def dashboard(
             "job_busy": job_busy,
             "notice": notice,
             "ops_section": "catalog",
-            "corps_summary": {
-                "disclosure_corps": 0,
-                "ok_count": 0,
-                "remaining_count": 0,
-            },
-            "corps_job": None,
-            "corps_logs": [],
-            "corps_stop_requested": False,
-            "opendart_ready": bool(settings.opendart_api_keys),
         },
     )
 

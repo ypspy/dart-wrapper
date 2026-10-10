@@ -324,6 +324,20 @@ async def test_admin_index_collect_form_poll_includes_current_fields(client_fact
     assert "start_date={{ start_date }}" not in response.text
 
 
+async def test_admin_index_corps_panel_loads_via_htmx(client_factory) -> None:
+    """초기 HTML은 가짜 업종 집계를 그리지 않고 HTMX로 패널을 불러온다."""
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin")
+
+    body = response.text
+    assert response.status_code == 200
+    assert 'hx-get="/admin/corps-panel"' in body
+    corps_block = body.split('hx-get="/admin/corps-panel"', 1)[1].split("</div>", 1)[0]
+    assert "load" in corps_block
+    assert "공시 회사 0" not in body
+
+
 async def test_admin_index_collect_form_is_collapsed_by_default(client_factory) -> None:
     async with client_factory(_app()) as client:
         client.cookies.set("admin_token", "dev-admin-token")
