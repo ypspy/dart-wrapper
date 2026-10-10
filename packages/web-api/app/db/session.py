@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import text
+from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -202,18 +202,37 @@ def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
-async def create_all(engine: AsyncEngine) -> None:
-    """모델 기준으로 테이블을 만들고 알려진 스키마 누락을 보강한다.
+# 앱 기동이 만드는 테이블. 연구 모델이 같은 MetaData에 올라와 있어도 넣지 않는다.
+_CATALOG_TABLES: tuple[str, ...] = (
+    "entries",
+    "disclosures",
+    "catalog_jobs",
+    "catalog_job_logs",
+    "slice_progress",
+    "disclosure_attempts",
+)
 
-    기존 이름은 유지한다. 실제로는 `ensure_schema`와 같다.
+
+async def create_all(engine: AsyncEngine) -> None:
+    """이미 등록된 ORM 테이블을 모두 만들고 알려진 스키마 누락을 보강한다.
+
+    테스트와 일회성 스크립트가 쓴다. 앱 기동은 `ensure_schema`를 쓴다.
     """
-    await ensure_schema(engine)
+    await _create_and_patch(engine, tables=None)
 
 
 async def ensure_schema(engine: AsyncEngine) -> None:
-    """없는 테이블을 만들고, 알려진 누락 컬럼만 안전하게 추가한다."""
+    """카탈로그 테이블만 만들고, 알려진 누락 컬럼을 안전하게 추가한다."""
+    tables = [Base.metadata.tables[name] for name in _CATALOG_TABLES]
+    await _create_and_patch(engine, tables=tables)
+
+
+async def _create_and_patch(engine: AsyncEngine, tables: list[Table] | None) -> None:
+    """테이블을 만든 뒤 컬럼 보정을 적용한다."""
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(
+            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables)
+        )
         dialect = connection.dialect.name
         for table, column, sqlite_ddl, postgres_ddl in _COLUMN_PATCHES:
             ddl = sqlite_ddl if dialect == "sqlite" else postgres_ddl
