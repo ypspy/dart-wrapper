@@ -34,7 +34,7 @@ cd packages/web-api
 .\.venv\Scripts\python.exe -m uvicorn app.local:app --reload
 ```
 
-공개 앱은 Postgres `DATABASE_URL`이 필요하며 `0.0.0.0:$PORT`에 바인딩합니다.
+공개 앱은 `DATABASE_URL`이 `postgresql+asyncpg://`로 시작해야 프로세스가 시작되며 `0.0.0.0:$PORT`에 바인딩합니다.
 
 ```bash
 python -m uvicorn app.public:app --host 0.0.0.0 --port "$PORT"
@@ -75,6 +75,8 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 
 수집기는 Node entry-extractor 기본값을 따릅니다(목록 이력 포함·첨부 접수 스코프·TOC 중간 노드 포함).
 상세는 [../entry-extractor/README.md](../entry-extractor/README.md)를 보세요.
+
+DART 원문 요청의 최소 간격은 프로세스 안이다. Viewer는 섹션을 한 번에 하나씩 가져오고, `DartHttpClient` 기본 간격은 1초다. Node `safeGet`의 1초는 그대로다. 로컬 수집과 공개 열람은 시계를 공유하지 않는다.
 
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
 
@@ -170,7 +172,7 @@ HTMX가 작업 카드·로그·슬라이스 요약·히트맵은 5초, 연도 �
 
 ## 설정
 
-`.env.example`을 참고해 `.env`를 만듭니다. 로컬 개발은 SQLite를 사용할 수 있고, 공개 앱은 Postgres `DATABASE_URL`이 필요합니다.
+`.env.example`을 참고해 `.env`를 만듭니다. 로컬 개발은 SQLite를 사용할 수 있고, 공개 앱은 `DATABASE_URL`이 `postgresql+asyncpg://`로 시작해야 프로세스가 시작됩니다.
 
 Admin 수집 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`, `HEATMAP_REPORT_TYPES`, `DART_FETCH_MIN_INTERVAL_SECONDS`입니다.
 `HEATMAP_REPORT_TYPES`는 히트맵·유형 토글에 고정 표시할 보고서 유형(쉼표 구분, 기본 `A001,A002,A003,F001,F002,F004`)입니다.

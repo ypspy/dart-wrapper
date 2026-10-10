@@ -81,7 +81,7 @@ cd packages/web-api
 PowerShell에서는 `.venv\...`가 아니라 **`.\.venv\...`**(앞에 `.\`)로 써야 합니다.
 venv는 루트가 아니라 `packages/web-api/.venv`에 있습니다.
 
-공개 앱은 Postgres `DATABASE_URL`이 필요하며 `0.0.0.0:$PORT`에 바인딩합니다.
+공개 앱은 `DATABASE_URL`이 `postgresql+asyncpg://`로 시작해야 프로세스가 시작되며 `0.0.0.0:$PORT`에 바인딩합니다.
 
 ```bash
 python -m uvicorn app.public:app --host 0.0.0.0 --port "$PORT"
