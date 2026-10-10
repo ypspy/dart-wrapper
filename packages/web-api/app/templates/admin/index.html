@@ -71,12 +71,6 @@
       {% include "admin/partials/collect_form.html" %}
     </div>
 
-    <h3>회사 업종</h3>
-    <div hx-get="/admin/corps-panel"
-         hx-trigger="load, every 5s"
-         hx-swap="innerHTML">
-    </div>
-
     <h3>로그</h3>
     <div hx-get="/admin/job-logs"
          hx-trigger="every 5s"

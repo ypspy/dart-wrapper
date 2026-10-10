@@ -106,23 +106,6 @@ def _app(
     return app
 
 
-async def test_admin_index_renders_corp_industry_panel(
-    client_factory: ClientFactory,
-) -> None:
-    """대시보드 첫 화면은 HTMX로 회사 업종 패널을 불러온다."""
-    async with client_factory(_app(FakeCorpIndustryService())) as client:
-        client.cookies.set("admin_token", "dev-admin-token")
-        response = await client.get("/admin")
-
-    body = response.text
-    assert response.status_code == 200
-    assert "회사 업종" in body
-    assert 'hx-get="/admin/corps-panel"' in body
-    corps_block = body.split('hx-get="/admin/corps-panel"', 1)[1].split("</div>", 1)[0]
-    assert "load" in corps_block
-    assert "빠진 회사 채우기" not in body
-
-
 async def test_corps_panel_renders_distinct_company_summary(
     client_factory: ClientFactory,
 ) -> None:
