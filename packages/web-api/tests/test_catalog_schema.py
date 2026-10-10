@@ -2,20 +2,42 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 from app.db.session import _COLUMN_PATCHES, ensure_schema, create_db_engine
-from app.models import Base
 
 
 def test_metadata_tables_are_catalog_only() -> None:
-    names = set(Base.metadata.tables)
-    assert names == {
-        "entries",
-        "disclosures",
-        "catalog_jobs",
-        "catalog_job_logs",
-        "slice_progress",
-        "disclosure_attempts",
-    }
+    """신선한 프로세스에서 app.models import 시 카탈로그 테이블만 등록되는지 확인한다."""
+    root = Path(__file__).resolve().parents[1]
+    script = """
+from app.models import Base
+
+expected = {
+    "entries",
+    "disclosures",
+    "catalog_jobs",
+    "catalog_job_logs",
+    "slice_progress",
+    "disclosure_attempts",
+}
+names = set(Base.metadata.tables)
+if names != expected:
+    extra = sorted(names - expected)
+    missing = sorted(expected - names)
+    raise SystemExit(f"mismatch extra={extra!r} missing={missing!r}")
+raise SystemExit(0)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_column_patches_are_catalog_only() -> None:
