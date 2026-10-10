@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -127,3 +128,28 @@ async def test_extraction_job_find_latest_and_update_params(
         loaded = await jobs.get("new")
         assert loaded is not None
         assert loaded.params["processed_count"] == 3
+
+
+async def test_find_latest_keeps_later_insert_when_clock_does_not_advance(
+    sessionmaker_fixture: async_sessionmaker[AsyncSession],
+) -> None:
+    """시계가 안 움직여도 나중에 만든 잡이 최신이다."""
+    frozen = datetime(2026, 10, 10, 1, 55, 36, 321825, tzinfo=timezone.utc)
+
+    def frozen_now(tz: timezone | None = None) -> datetime:
+        return frozen
+
+    async with sessionmaker_fixture() as session:
+        jobs = ExtractionJobRepository(session)
+        with (
+            patch("app.models.extraction_job.datetime") as model_datetime,
+            patch("app.repositories.extraction_job_repository.datetime") as repo_datetime,
+        ):
+            model_datetime.now = frozen_now
+            repo_datetime.now = frozen_now
+            await jobs.create("old", "corp_industry", {})
+            await jobs.create("new", "corp_industry", {})
+        await session.commit()
+        latest = await jobs.find_latest("corp_industry")
+        assert latest is not None
+        assert latest.job_id == "new"

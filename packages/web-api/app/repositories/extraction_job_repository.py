@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -39,10 +39,23 @@ class ExtractionJobRepository:
             params=params or {},
             status="pending",
             mode=mode,
+            created_at=await self._next_created_at(),
         )
         self._session.add(job)
         await self._session.flush()
         return job
+
+    async def _next_created_at(self) -> datetime:
+        """생성 시각을 정한다. 시계가 안 움직이면 직전 잡보다 뒤로 민다."""
+        now = _now()
+        latest = await self._session.scalar(select(func.max(ExtractionJob.created_at)))
+        if latest is None:
+            return now
+        if latest.tzinfo is None:
+            latest = latest.replace(tzinfo=timezone.utc)
+        if now > latest:
+            return now
+        return latest + timedelta(microseconds=1)
 
     async def get(self, job_id: str) -> ExtractionJob | None:
         """작업 단건. 없으면 None."""
