@@ -11,6 +11,10 @@ output/
 # Brainstorm visual companion
 .superpowers/
 
+# 골드 검수 DB. 카탈로그와 분리된 파일이며 저장소에 넣지 않는다.
+gold.db
+gold*.db
+
 # Python (web-api)
 .venv/
 __pycache__/
