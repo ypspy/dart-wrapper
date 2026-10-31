@@ -1,0 +1,28 @@
+{% extends "admin/base.html" %}
+{% block title %}골드 검수{% endblock %}
+{% block content %}
+<header class="ops-topbar">
+  <div>
+    <h2>골드 검수</h2>
+    <p class="muted">실행 {{ run_id }}</p>
+  </div>
+</header>
+<table>
+  <thead>
+    <tr><th>기간</th><th>본표본</th><th>완료</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for row in counts %}
+    <tr>
+      <td>{{ row.period }}</td>
+      <td>{{ row.main_n }}</td>
+      <td>{{ row.done_n }}</td>
+      <td><a href="/admin/gold/next?period={{ row.period }}&amp;pass=prefill">다음 문서</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">표본이 없습니다.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p><a href="/admin/gold/metrics">정밀도</a></p>
+{% endblock %}

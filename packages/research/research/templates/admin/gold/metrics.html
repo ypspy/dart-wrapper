@@ -1,0 +1,33 @@
+{% extends "admin/base.html" %}
+{% block title %}골드 정밀도{% endblock %}
+{% block content %}
+<header class="ops-topbar">
+  <div>
+    <h2>정밀도 {{ version }}</h2>
+  </div>
+</header>
+<table>
+  <thead>
+    <tr>
+      <th>범위</th><th>기간</th><th>묶음</th><th>대상</th>
+      <th>claim</th><th>TP</th><th>FP</th><th>하한</th><th>통과</th><th>메모</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.scope }}</td>
+      <td>{{ row.period }}</td>
+      <td>{{ row.bundle }}</td>
+      <td>{{ row.subject }}</td>
+      <td>{{ row.n_claim }}</td>
+      <td>{{ row.tp }}</td>
+      <td>{{ row.fp }}</td>
+      <td>{{ "%.4f"|format(row.lo) }}</td>
+      <td>{{ "통과" if row.passed else "보류" }}</td>
+      <td>{{ row.note }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

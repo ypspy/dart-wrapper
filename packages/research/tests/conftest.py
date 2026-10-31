@@ -14,26 +14,9 @@ _WEB_API_TESTS = Path(__file__).resolve().parents[2] / "web-api" / "tests"
 if str(_WEB_API_TESTS) not in sys.path:
     sys.path.append(str(_WEB_API_TESTS))
 
-from app.local import create_local_app
-from research.api.admin import corps as admin_corps
-from research.api.admin import extract as admin_extract
-from research.api.admin import extract_ui as admin_extract_ui
-from research.api.admin import reviews as admin_reviews
-from research.api.facts import ui as facts_ui
-from research.api.v1 import facts as audit_facts
+from research.local_app import create_app  # noqa: E402
 
-
-def create_app() -> FastAPI:
-    """로컬 앱에 연구 라우터(추출·검토·업종·Facts)를 붙여 돌려준다."""
-    app = create_local_app()
-    app.include_router(admin_corps.router)
-    app.include_router(admin_extract.router)
-    app.include_router(admin_extract_ui.router)
-    app.include_router(admin_reviews.router)
-    app.include_router(facts_ui.router)
-    app.include_router(audit_facts.router)
-    app.include_router(audit_facts.list_router)
-    return app
+__all__ = ["create_app"]
 
 
 @pytest.fixture

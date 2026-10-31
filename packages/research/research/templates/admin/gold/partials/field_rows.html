@@ -1,0 +1,14 @@
+{% for row in rows %}
+<li class="gold-row"
+    data-bundle="{{ row.bundle }}"
+    data-subject="{{ row.subject }}"
+    data-verdict="{{ row.verdict }}"
+    data-group="{{ row.group }}"
+    data-cells="[]"
+    tabindex="0">
+  <span class="gold-name">{{ row.subject }}</span>
+  {% if row.display is defined %}
+  <span class="gold-value">{{ row.display }}</span>
+  {% endif %}
+</li>
+{% endfor %}
