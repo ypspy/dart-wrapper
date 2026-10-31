@@ -19,8 +19,9 @@ const { parseDisclosureRow } = require('./parse');
  * @param {(info: object) => void} [params.onProgress] 진행 콜백(옵션)
  * @param {'recent'|null} [params.finalReport=null] 'recent'면 최종보고서만
  * @param {(url: string) => Promise<string>} [params.fetcher] 테스트용 HTML 공급
- * @returns {Promise<{listedCount: number, disclosures: object[], error: Error|null}>}
+ * @returns {Promise<{listedCount: number, totalKnown: boolean, disclosures: object[], error: Error|null}>}
  *   원천이 알려준 총건수와 공시 메타데이터 배열(각 항목에 main.do url 포함).
+ *   totalKnown은 첫 페이지에서 '총 N건'을 읽었을 때만 true다.
  *   수집 도중 요청이 실패하면 error에 마지막 오류가 담긴다.
  */
 async function fetchDisclosureListResult({
@@ -42,6 +43,7 @@ async function fetchDisclosureListResult({
 
   let currentPage = 1;
   let totalCount = 0;
+  let totalKnown = false;
   let lastError = null;
 
   while (true) {
@@ -76,7 +78,10 @@ async function fetchDisclosureListResult({
       // 페이지 정보는 '[1/3] [총 42건]' 형태로 div.pageInfo에 들어있다.
       const pageInfoText = $('div.pageInfo').first().text() || $('span.total').text();
       const match = pageInfoText.match(/총\s*([\d,]+)\s*건/);
-      if (match) totalCount = parseInt(match[1].replace(/,/g, ''), 10);
+      if (match) {
+        totalCount = parseInt(match[1].replace(/,/g, ''), 10);
+        totalKnown = true;
+      }
       if (onProgress) onProgress({ type: 'total', reportType, year, totalCount });
     }
 
@@ -106,12 +111,11 @@ async function fetchDisclosureListResult({
   }
 
   const disclosures = maxTotal ? allDisclosures.slice(0, maxTotal) : allDisclosures;
-  // 총건수를 못 읽었으면 실제 수집 건수를 기대치로 삼는다.
-  const listedCount = maxTotal
-    ? Math.min(maxTotal, totalCount || disclosures.length)
-    : totalCount || disclosures.length;
+  // 총건수를 못 읽었으면 수집 건수를 길잡이로만 쓰고, 완료 판정에는 쓰지 않는다.
+  const observed = totalKnown ? totalCount : disclosures.length;
+  const listedCount = maxTotal ? Math.min(maxTotal, observed) : observed;
 
-  return { listedCount, disclosures, error: lastError };
+  return { listedCount, totalKnown, disclosures, error: lastError };
 }
 
 /**

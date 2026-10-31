@@ -39,9 +39,14 @@ class DisclosureListItem(BaseModel):
 
 
 class DisclosureListResult(BaseModel):
-    """하루치 목록 조회 결과. `listed_count`는 원천이 알려준 총건수다."""
+    """하루치 목록 조회 결과.
+
+    `listed_count`는 원천이 알려준 총건수다.
+    `total_known`이 아니면 그 숫자는 완료 판정에 쓸 수 없다.
+    """
 
     listed_count: int
+    total_known: bool = True
     items: list[DisclosureListItem] = Field(default_factory=list)
 
 

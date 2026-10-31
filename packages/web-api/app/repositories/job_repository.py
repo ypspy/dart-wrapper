@@ -98,6 +98,52 @@ class JobRepository:
             abandoned.append(job.job_id)
         return abandoned
 
+    async def abandon_idle(
+        self,
+        *,
+        idle_seconds: float,
+        modes: tuple[str, ...] = ("nightly", "recollect"),
+        now: datetime | None = None,
+        reason: str = "이전 야간 수집이 멈춰 있어 부분 완료로 마감했습니다. 다음 실행이 이어 합니다.",
+    ) -> list[str]:
+        """로그가 오래된 야간·재수집 작업만 partial로 마감한다.
+
+        Admin에서 켠 일반 수집은 건드리지 않는다.
+        """
+        moment = now or _now()
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        abandoned: list[str] = []
+        for job in await self.list_active():
+            if job.mode not in modes:
+                continue
+            stamp = await self._latest_activity(job)
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if (moment - stamp).total_seconds() < idle_seconds:
+                continue
+            await self.mark_finished(
+                job.job_id,
+                "partial",
+                total_entries=max(job.total_entries, job.saved_entries),
+                saved_entries=job.saved_entries,
+                error_message=reason,
+            )
+            await self.add_log(job.job_id, "warning", reason)
+            abandoned.append(job.job_id)
+        return abandoned
+
+    async def _latest_activity(self, job: CatalogJob) -> datetime:
+        """마지막 로그 시각. 로그가 없으면 시작·생성 시각을 쓴다."""
+        statement = (
+            select(CatalogJobLog.created_at)
+            .where(CatalogJobLog.job_id == job.job_id)
+            .order_by(CatalogJobLog.id.desc())
+            .limit(1)
+        )
+        logged = (await self._session.execute(statement)).scalar_one_or_none()
+        return logged or job.started_at or job.created_at
+
     async def get(self, job_id: str) -> CatalogJob | None:
         """작업을 조회한다. 없으면 None."""
         return await self._session.get(CatalogJob, job_id)

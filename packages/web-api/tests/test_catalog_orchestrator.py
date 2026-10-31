@@ -306,6 +306,134 @@ async def test_soft_stop_halts_remaining_slices(sessionmaker_fixture) -> None:
     assert any("남은 슬라이스" in log.message for log in status.logs)
 
 
+class EmptyListCollector(ScriptedCollector):
+    """총건수 확인 여부를 지정할 수 있는 빈 목록 수집기."""
+
+    def __init__(self, *, total_known: bool) -> None:
+        super().__init__(rcept_nos=())
+        self._total_known = total_known
+
+    async def list_disclosures(self, request: CollectRequest) -> DisclosureListResult:
+        self.list_calls.append(request)
+        return DisclosureListResult(
+            listed_count=0,
+            total_known=self._total_known,
+            items=[],
+        )
+
+
+async def test_future_dates_are_not_collected(sessionmaker_fixture) -> None:
+    """오늘과 미래는 슬라이스를 만들지 않는다."""
+    from datetime import date
+
+    collector = ScriptedCollector(rcept_nos=("1",))
+    service = CatalogService(
+        sessionmaker_fixture,
+        collector,
+        max_retries=1,
+        retry_backoff_seconds=0.0,
+        block_streak_threshold=99,
+        block_wait_seconds=0.0,
+        clock=lambda: date(2026, 7, 25),
+    )
+    request = ExtractRequest(report_type="F001", start_date="20260724", end_date="20260726")
+
+    response = await service.start_extract(request)
+    await service.run_job(response.job_id, request)
+
+    assert [call.start_date for call in collector.list_calls] == ["20260724"]
+    rows = await _slices(sessionmaker_fixture)
+    assert [row.slice_date for row in rows] == ["20260724"]
+    status = await service.get_status(response.job_id)
+    assert any("오늘" in log.message for log in status.logs)
+
+
+async def test_unknown_total_zero_is_not_complete(sessionmaker_fixture) -> None:
+    """총건수 문구가 없는 0건은 완료로 닫지 않는다."""
+    collector = EmptyListCollector(total_known=False)
+    service = _service(sessionmaker_fixture, collector)
+
+    response = await service.start_extract(REQUEST)
+    await service.run_job(response.job_id, REQUEST)
+
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status == "failed"
+    assert rows[0].status != "complete"
+    assert rows[0].listed_count is None
+
+
+async def test_confirmed_zero_on_business_day_needs_second_look(sessionmaker_fixture) -> None:
+    """영업일의 확인된 0건은 한 번 더 보기 전에는 완료가 아니다."""
+    collector = EmptyListCollector(total_known=True)
+    service = _service(sessionmaker_fixture, collector)
+
+    first = await service.start_extract(REQUEST)
+    await service.run_job(first.job_id, REQUEST)
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].slice_date == "20260724"
+    assert rows[0].status == "pending"
+    assert rows[0].listed_count == 0
+    assert rows[0].empty_confirmations == 1
+
+    second = await service.start_extract(REQUEST)
+    await service.run_job(second.job_id, REQUEST)
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status == "complete"
+    assert rows[0].empty_confirmations == 2
+
+
+async def test_confirmed_zero_on_weekend_is_complete(sessionmaker_fixture) -> None:
+    """주말에 총 0건이 확인되면 바로 완료한다."""
+    from datetime import date
+
+    collector = EmptyListCollector(total_known=True)
+    service = CatalogService(
+        sessionmaker_fixture,
+        collector,
+        max_retries=1,
+        retry_backoff_seconds=0.0,
+        block_streak_threshold=99,
+        block_wait_seconds=0.0,
+        clock=lambda: date(2026, 7, 26),
+    )
+    request = ExtractRequest(report_type="F001", start_date="20260725", end_date="20260725")
+
+    response = await service.start_extract(request)
+    await service.run_job(response.job_id, request)
+
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].slice_date == "20260725"
+    assert rows[0].status == "complete"
+
+
+async def test_block_streak_stops_following_dates(sessionmaker_fixture) -> None:
+    """연속 차단이면 다음 날짜로 넘어가지 않고 작업을 부분 완료로 끝낸다."""
+    collector = ScriptedCollector(
+        rcept_nos=("1", "2"),
+        failing={"1": 9, "2": 9},
+        error=SourceFetchError("요청이 차단되었습니다(HTTP 429)"),
+    )
+    service = CatalogService(
+        sessionmaker_fixture,
+        collector,
+        max_retries=1,
+        retry_backoff_seconds=0.0,
+        block_streak_threshold=2,
+        block_wait_seconds=60.0,
+    )
+    request = ExtractRequest(report_type="F001", start_date="20260723", end_date="20260725")
+
+    response = await service.start_extract(request)
+    await service.run_job(response.job_id, request)
+
+    assert [call.start_date for call in collector.list_calls] == ["20260723"]
+    rows = await _slices(sessionmaker_fixture)
+    assert [row.slice_date for row in rows] == ["20260723"]
+    assert rows[0].status == "blocked"
+    status = await service.get_status(response.job_id)
+    assert status.status == "partial"
+
+
 async def test_job_records_disclosure_progress_counts(sessionmaker_fixture) -> None:
     collector = ScriptedCollector()
     service = _service(sessionmaker_fixture, collector)

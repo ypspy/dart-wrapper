@@ -47,15 +47,30 @@ class SliceRepository:
         await self._session.flush()
         return slice_row
 
+    async def find_slice(self, report_type: str, slice_date: str) -> SliceProgress | None:
+        """유형·날짜로 슬라이스를 찾는다. 없으면 None."""
+        statement = (
+            select(SliceProgress)
+            .where(SliceProgress.report_type == report_type)
+            .where(SliceProgress.slice_date == slice_date)
+        )
+        return (await self._session.execute(statement)).scalars().first()
+
     async def get_slice(self, slice_id: str) -> SliceProgress | None:
         """슬라이스를 조회한다. 없으면 None."""
         return await self._session.get(SliceProgress, slice_id)
 
-    async def set_listed(self, slice_id: str, listed_count: int, job_id: str) -> None:
-        """원천 목록 총건수를 확정하고 처리 중인 작업을 기록한다."""
+    async def set_listed(self, slice_id: str, listed_count: int | None, job_id: str) -> None:
+        """원천 목록 총건수를 기록한다. 확인하지 못했으면 None으로 비운다."""
         slice_row = await self._require_slice(slice_id)
         slice_row.listed_count = listed_count
         slice_row.last_job_id = job_id
+
+    async def set_empty_confirmations(self, slice_id: str, count: int) -> None:
+        """영업일 0건을 확인한 횟수를 기록한다."""
+        slice_row = await self._require_slice(slice_id)
+        slice_row.empty_confirmations = count
+        slice_row.updated_at = _now()
 
     async def mark_slice_status(self, slice_id: str, status: str) -> None:
         """슬라이스 상태를 바꾼다. running으로 바꿀 때 시도 횟수를 올린다."""
@@ -63,6 +78,8 @@ class SliceRepository:
         if status == "running" and slice_row.status != "running":
             slice_row.attempt += 1
             slice_row.started_at = _now()
+            slice_row.finished_at = None
+        if status != "complete":
             slice_row.finished_at = None
         slice_row.status = status
         slice_row.updated_at = _now()

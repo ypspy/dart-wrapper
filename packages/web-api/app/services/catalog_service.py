@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -32,6 +34,7 @@ from app.schemas.catalog import (
 )
 from app.schemas.entry import EntryRecord
 from app.services.dart_job_lock import assert_dart_idle
+from app.services.slice_query_service import kst_today, last_closed_date
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,30 @@ def is_blocking_error(exc: Exception) -> bool:
 def _params_key(payload: dict[str, object]) -> str:
     """같은 범위의 중복 수집을 판별하기 위한 정규화 키를 만든다."""
     return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+
+def is_likely_business_day(day: date) -> bool:
+    """월–금이면 접수가 있을 수 있는 날로 본다.
+
+    공휴일 달력은 두지 않는다. 영업일의 0건은 한 번 더 확인한 뒤에만 완료한다.
+    """
+    return day.weekday() < 5
+
+
+def parse_slice_date(value: str) -> date:
+    """YYYYMMDD 문자열을 날짜로 읽는다."""
+    return date(int(value[:4]), int(value[4:6]), int(value[6:8]))
+
+
+@dataclass(frozen=True)
+class SliceOutcome:
+    """슬라이스 한 번의 처리 결과."""
+
+    saved: int
+    processed: int
+    listed: int
+    complete: bool
+    halt: bool
 
 
 def iter_dates(start_date: str, end_date: str) -> list[str]:
@@ -105,13 +132,18 @@ class CatalogService:
         retry_backoff_seconds: float = 1.0,
         block_streak_threshold: int = 5,
         block_wait_seconds: float = 60.0,
+        clock: Callable[[], date] | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self._sessionmaker = sessionmaker
         self._collector = collector
         self._max_retries = max(1, max_retries)
         self._retry_backoff_seconds = retry_backoff_seconds
         self._block_streak_threshold = block_streak_threshold
+        # 차단 뒤 다음 날짜로 넘어가지 않는다. 인자는 기존 호출부 호환용으로만 남긴다.
         self._block_wait_seconds = block_wait_seconds
+        self._clock = clock or kst_today
+        self._monotonic = monotonic or time.monotonic
         # 중단 요청된 작업. 다음 공시 경계에서 멈춘다.
         self._stop_requested: set[str] = set()
 
@@ -160,9 +192,30 @@ class CatalogService:
         """미완료·실패 슬라이스를 이어서 처리할 작업을 등록한다."""
         return await self._start_job(request.model_dump(mode="json"), mode="resume")
 
+    def yesterday(self) -> str:
+        """한국시간 기준 어제(YYYYMMDD). 오늘과 미래는 수집하지 않는다."""
+        return last_closed_date(as_of=self._clock()).strftime("%Y%m%d")
+
     async def run_job(self, job_id: str, request: ExtractRequest) -> None:
-        """요청 기간을 날짜 슬라이스로 나눠 순서대로 처리한다."""
-        days = iter_dates(request.start_date, request.end_date)
+        """요청 기간을 날짜 슬라이스로 나눠 순서대로 처리한다.
+
+        오늘과 미래는 잘라 낸다. 잘린 날짜의 슬라이스는 만들지 않는다.
+        """
+        requested = iter_dates(request.start_date, request.end_date)
+        yesterday = self.yesterday()
+        days = [day for day in requested if day <= yesterday]
+        if len(days) != len(requested):
+            await self._log(
+                job_id,
+                "warning",
+                "오늘과 이후 날짜는 수집하지 않습니다. 한국시간 어제까지만 처리합니다.",
+            )
+        if not days:
+            await self._finish_without_slices(
+                job_id,
+                "오늘과 이후 날짜는 수집하지 않습니다. 한국시간 어제까지를 지정해 주세요.",
+            )
+            return
         targets = [(request.report_type, day) for day in days]
         await self._run_slices(job_id, targets, request.include_attachments)
 
@@ -173,7 +226,10 @@ class CatalogService:
                 report_type=request.report_type,
                 slice_id=request.slice_id,
             )
-            targets = [(row.report_type, row.slice_date) for row in pending]
+            yesterday = self.yesterday()
+            targets = [
+                (row.report_type, row.slice_date) for row in pending if row.slice_date <= yesterday
+            ]
 
         if not targets:
             async with self._sessionmaker() as session:
@@ -185,6 +241,30 @@ class CatalogService:
             return
 
         await self._run_slices(job_id, targets, request.include_attachments)
+
+    async def run_planned(
+        self,
+        job_id: str,
+        targets: Sequence[tuple[str, str]],
+        include_attachments: bool = True,
+        *,
+        deadline: float | None = None,
+        skip_complete: bool = False,
+    ) -> str | None:
+        """미리 정한 슬라이스만 직렬로 처리한다.
+
+        반환은 멈춘 이유(`budget`, `blocked`)이고, 계획대로 끝나면 None이다.
+        """
+        if not targets:
+            await self._finish_without_slices(job_id, "처리할 슬라이스가 없습니다.")
+            return None
+        return await self._run_slices(
+            job_id,
+            targets,
+            include_attachments,
+            deadline=deadline,
+            skip_complete=skip_complete,
+        )
 
     async def get_status(self, job_id: str) -> JobStatusResponse:
         """작업 현황과 최근 로그를 반환한다.
@@ -248,13 +328,34 @@ class CatalogService:
 
         return ExtractResponse(job_id=job_id, status="pending", mode=mode)
 
+    async def _finish_without_slices(self, job_id: str, message: str) -> None:
+        """손댈 슬라이스가 없을 때 작업을 성공으로 마감한다."""
+        async with self._sessionmaker() as session:
+            jobs = JobRepository(session)
+            await jobs.mark_running(job_id)
+            await jobs.add_log(job_id, "info", message)
+            await jobs.mark_finished(job_id, "succeeded", total_entries=0, saved_entries=0)
+            await session.commit()
+
+    async def _is_complete(self, report_type: str, slice_date: str) -> bool:
+        """이미 완료된 슬라이스인지. 행이 없으면 거짓이다."""
+        async with self._sessionmaker() as session:
+            row = await SliceRepository(session).find_slice(report_type, slice_date)
+        return row is not None and row.status == "complete"
+
     async def _run_slices(
         self,
         job_id: str,
         targets: Sequence[tuple[str, str]],
         include_attachments: bool,
-    ) -> None:
-        """슬라이스 목록을 차례로 처리하고 작업을 마감한다."""
+        *,
+        deadline: float | None = None,
+        skip_complete: bool = False,
+    ) -> str | None:
+        """슬라이스 목록을 차례로 처리하고 작업을 마감한다.
+
+        반환은 멈춘 이유(`budget`, `blocked`)이다. 계획대로 끝나면 None.
+        """
         async with self._sessionmaker() as session:
             jobs = JobRepository(session)
             await jobs.mark_running(job_id)
@@ -269,9 +370,29 @@ class CatalogService:
         day_listed = 0
         incomplete = 0
         stopped = False
+        stop_reason: str | None = None
+        yesterday = self.yesterday()
 
         try:
             for report_type, slice_date in targets:
+                if deadline is not None and self._monotonic() >= deadline:
+                    stop_reason = "budget"
+                    incomplete += 1
+                    await self._log(
+                        job_id,
+                        "warning",
+                        "시간 한도에 도달해 남은 슬라이스를 다음 실행으로 넘깁니다.",
+                    )
+                    break
+                if slice_date > yesterday:
+                    await self._log(
+                        job_id,
+                        "warning",
+                        f"{slice_date}는 오늘 이후라 수집하지 않습니다.",
+                    )
+                    continue
+                if skip_complete and await self._is_complete(report_type, slice_date):
+                    continue
                 if job_id in self._stop_requested:
                     stopped = True
                     await self._log(
@@ -283,19 +404,27 @@ class CatalogService:
                     incomplete += 1
                     break
 
-                saved, processed, listed, is_complete = await self._process_slice(
+                outcome = await self._process_slice(
                     job_id,
                     report_type,
                     slice_date,
                     include_attachments,
                 )
-                saved_total += saved
-                processed_total += processed
-                listed_total += listed
-                day_processed = processed
-                day_listed = listed
-                if not is_complete:
+                saved_total += outcome.saved
+                processed_total += outcome.processed
+                listed_total += outcome.listed
+                day_processed = outcome.processed
+                day_listed = outcome.listed
+                if not outcome.complete:
                     incomplete += 1
+                if outcome.halt:
+                    stop_reason = "blocked"
+                    await self._log(
+                        job_id,
+                        "error",
+                        "차단이 이어져 다음 날짜로 넘어가지 않고 작업을 멈춥니다.",
+                    )
+                    break
 
                 if job_id in self._stop_requested:
                     stopped = True
@@ -312,7 +441,7 @@ class CatalogService:
                 await jobs.mark_failed(job_id, str(exc))
                 await jobs.add_log(job_id, "error", f"수집 작업이 중단되었습니다: {exc}")
                 await session.commit()
-            return
+            return None
 
         finally:
             self._stop_requested.discard(job_id)
@@ -341,6 +470,7 @@ class CatalogService:
                 ),
             )
             await session.commit()
+        return stop_reason
 
     async def _process_slice(
         self,
@@ -348,10 +478,10 @@ class CatalogService:
         report_type: str,
         slice_date: str,
         include_attachments: bool,
-    ) -> tuple[int, int, int, bool]:
+    ) -> SliceOutcome:
         """하루치 슬라이스를 처리한다.
 
-        반환: (저장 entry 수, 처리 공시 수, 목록 공시 수, 슬라이스 완료 여부)
+        반환은 저장·처리 건수와 완료 여부, 그리고 작업을 멈춰야 하는지다.
         작업 현황 프로그레스는 해당일 입수/입수대상만 갱신한다.
         """
         async with self._sessionmaker() as session:
@@ -382,12 +512,29 @@ class CatalogService:
                     job_id, saved_entries=0, total_entries=0
                 )
                 await session.commit()
-            return 0, 0, 0, False
+            return SliceOutcome(0, 0, 0, False, False)
 
+        if not listed.total_known and not listed.items:
+            async with self._sessionmaker() as session:
+                slices = SliceRepository(session)
+                await slices.set_listed(slice_id, None, job_id)
+                await slices.mark_slice_status(slice_id, "failed")
+                await JobRepository(session).add_log(
+                    job_id,
+                    "error",
+                    f"{slice_date} 총건수를 확인하지 못해 완료로 닫지 않습니다.",
+                )
+                await session.commit()
+            return SliceOutcome(0, 0, 0, False, False)
+
+        listed_count = listed.listed_count if listed.total_known else None
         async with self._sessionmaker() as session:
-            await SliceRepository(session).set_listed(slice_id, listed.listed_count, job_id)
+            await SliceRepository(session).set_listed(slice_id, listed_count, job_id)
+            note = "" if listed.total_known else " (총건수 미확인, 완료로 닫지 않음)"
             await JobRepository(session).add_log(
-                job_id, "info", f"{slice_date} 목록 {listed.listed_count}건을 확인했습니다."
+                job_id,
+                "info" if listed.total_known else "warning",
+                f"{slice_date} 목록 {listed.listed_count}건을 확인했습니다.{note}",
             )
             await JobRepository(session).update_progress(
                 job_id,
@@ -439,30 +586,59 @@ class CatalogService:
                 await self._log(
                     job_id,
                     "error",
-                    f"{slice_date} 수집이 차단된 것으로 보여 중단합니다. 재개로 이어서 처리하세요.",
+                    f"{slice_date} 수집이 차단된 것으로 보여 중단합니다. "
+                    "다음 날짜로 넘어가지 않습니다. 다음 실행에서 이어 하세요.",
                 )
-                if self._block_wait_seconds > 0:
-                    await asyncio.sleep(self._block_wait_seconds)
                 break
 
         async with self._sessionmaker() as session:
             slices = SliceRepository(session)
             updated = await slices.evaluate_complete(slice_id)
-            if blocked and updated.status != "complete":
+            if not listed.total_known and updated.status == "complete":
+                await slices.mark_slice_status(slice_id, "pending")
+                updated = await slices.get_slice(slice_id)
+            if (
+                listed.total_known
+                and updated is not None
+                and updated.status == "complete"
+                and (updated.listed_count or 0) == 0
+                and is_likely_business_day(parse_slice_date(slice_date))
+            ):
+                confirmations = updated.empty_confirmations + 1
+                await slices.set_empty_confirmations(slice_id, confirmations)
+                if confirmations < 2:
+                    await slices.mark_slice_status(slice_id, "pending")
+                    await JobRepository(session).add_log(
+                        job_id,
+                        "warning",
+                        f"{slice_date} 영업일 0건은 한 번 더 확인하기 전에는 완료로 닫지 않습니다.",
+                    )
+                updated = await slices.get_slice(slice_id)
+            elif listed.total_known and (listed.listed_count or 0) > 0:
+                await slices.set_empty_confirmations(slice_id, 0)
+                updated = await slices.get_slice(slice_id)
+            if blocked and updated is not None and updated.status != "complete":
                 await slices.mark_slice_status(slice_id, "blocked")
                 updated = await slices.get_slice(slice_id)
-            is_complete = updated.status == "complete"
+            is_complete = updated is not None and updated.status == "complete"
             await JobRepository(session).add_log(
                 job_id,
                 "info" if is_complete else "warning",
                 (
-                    f"{slice_date} 완전성: 목록 {updated.listed_count}건 중 "
-                    f"성공 {updated.succeeded}건, 실패 {updated.failed_count}건"
+                    f"{slice_date} 완전성: 목록 {updated.listed_count if updated else None}건 중 "
+                    f"성공 {updated.succeeded if updated else 0}건, "
+                    f"실패 {updated.failed_count if updated else 0}건"
                 ),
             )
             await session.commit()
 
-        return saved_total, processed, listed.listed_count, is_complete
+        return SliceOutcome(
+            saved_total,
+            processed,
+            listed.listed_count,
+            is_complete,
+            blocked,
+        )
 
     async def _process_disclosure(
         self,
