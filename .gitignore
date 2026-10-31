@@ -19,6 +19,7 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 packages/web-api/*.db
+packages/web-api/.nightly.lock
 
 # Ad-hoc DART probes and live dumps (keep on disk, do not track)
 packages/web-api/scripts/probe_*

@@ -38,6 +38,8 @@ class SliceProgress(Base):
     attempted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     succeeded: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 영업일 0건을 몇 번 확인했는지. 한 번만 보면 완료로 닫지 않는다.
+    empty_confirmations: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_job_id: Mapped[str | None] = mapped_column(String(64))
     attempt: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

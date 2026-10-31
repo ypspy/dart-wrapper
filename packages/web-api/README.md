@@ -291,11 +291,54 @@ DART는 차단·점검·지연으로 수집이 자주 끊깁니다. 그래서 �
 - 요청 기간을 **하루 단위 슬라이스**로 나눕니다. 페이지 번호는 시간이 지나면 다른 공시를 담으므로 재개 기준으로 쓰지 않습니다.
 - 슬라이스 안에서는 공시(접수번호) 하나를 처리할 때마다 저장을 확정합니다. 중간에 끊겨도 성공분은 남습니다.
 - 이미 성공한 공시는 다시 파싱하지 않습니다. 같은 기간을 여러 번 돌려도 중복이 생기지 않습니다.
-- 일시 오류는 `DISCLOSURE_MAX_RETRIES`만큼 지수 백오프로 재시도하고, 차단으로 보이는 응답이 `BLOCK_STREAK_THRESHOLD`회 연속되면 슬라이스를 `blocked`로 두고 접습니다.
+- 일시 오류는 `DISCLOSURE_MAX_RETRIES`만큼 지수 백오프로 재시도하고, 차단으로 보이는 응답이 `BLOCK_STREAK_THRESHOLD`회 연속되면 슬라이스를 `blocked`로 두고 **그 날짜에서 작업을 부분 완료로 끝냅니다.** 60초 뒤 다음 날짜로 넘어가지 않습니다.
 - 목록 건수(`listed_count`)와 성공 건수가 같고 실패가 없을 때만 슬라이스가 `complete`입니다.
+- 오늘과 미래(한국시간)는 수집하지 않고 슬라이스도 만들지 않습니다.
+- 첫 페이지에서 `총 N건`을 읽지 못한 0건은 `complete`가 아니라 `failed`입니다.
+- 월–금에 `총 0건`이 확인돼도 한 번 더 같은 결과를 보기 전에는 `complete`로 닫지 않습니다. 주말의 확인된 0건은 바로 완료합니다.
 
 작업 상태는 `succeeded`(모든 슬라이스 완료), `partial`(미완료 슬라이스 남음), `failed`(예기치 못한 중단)입니다.
 남은 슬라이스는 `POST /admin/catalog/resume`이나 화면의 "이어하기"로 채웁니다.
+`failed`로 남은 빈 영업일만 이어하기가 다시 집습니다. 이미 `complete`인 날(예: 예전에 0건으로 닫힌 F004)을 다시 받으려면 아래 야간 스크립트의 `--recollect`를 씁니다.
+
+## 야간 수집
+
+스케줄러는 앱 밖에 둡니다. 진입점은 `scripts/nightly_catalog.py`입니다.
+`packages/web-api`에서 실행합니다. 한 프로세스·한 유형·하루씩 직렬이며, 병렬 추출은 쓰지 않습니다.
+
+```powershell
+cd packages\web-api
+.\.venv\Scripts\python.exe scripts\nightly_catalog.py --budget-minutes 240
+```
+
+1. `HEATMAP_REPORT_TYPES`마다 한국시간 **어제**를 채웁니다.
+2. `--budget-minutes`(기본 240, `0`이면 한도 없음)가 남으면 `19990101`(또는 `--floor`)까지 **어제 전날부터 과거로** 빈 날을 채웁니다.
+3. 시간 한도나 연속 차단이면 작업을 `partial`로 끝내고 프로세스가 빠져나갑니다. 다음 날 같은 명령이 완료되지 않은 날부터 이어 합니다.
+4. 이미 `complete`인 날은 다시 받지 않습니다. 프로세스가 죽으면 잠금 파일(`.nightly.lock`)의 pid가 없을 때 다음 실행이 그 야간 잡을 풀어 이어 합니다.
+
+Windows 작업 스케줄러 예:
+
+```text
+프로그램: C:\path\to\packages\web-api\.venv\Scripts\python.exe
+인수: scripts\nightly_catalog.py --budget-minutes 240
+시작 위치: C:\path\to\packages\web-api
+```
+
+cron 예: `0 1 * * * cd /path/to/packages/web-api && .venv/bin/python scripts/nightly_catalog.py --budget-minutes 240`
+
+어제만 돌리려면 `--no-backfill`입니다.
+
+### F004 공백 다시 받기
+
+2026-08-14 이후에 0건으로 닫혔거나 슬라이스가 없는 F004는 야간 백필만으로는 이미 `complete`인 날이 빠집니다.
+병합 뒤 노트북 DB가 있는 `packages/web-api`에서, 수집·감사 추출이 멈춰 있을 때:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\nightly_catalog.py --recollect --report-type F004 --start 20260814
+```
+
+종료일을 생략하면 한국시간 어제까지입니다. `20260814002766`처럼 이미 성공한 접수는 다시 열지 않고, 그 뒤 접수만 붙입니다.
+오늘 날짜는 넣지 않습니다. 감사 추출과 동시에 켜지지 않습니다.
 
 ## Admin 화면
 
@@ -371,7 +414,7 @@ HTMX가 작업 카드·로그·슬라이스 요약·히트맵은 5초, 연도 �
 
 `.env.example`을 참고해 `.env`를 만듭니다. 개발은 SQLite, 배포는 Neon PostgreSQL을 쓰며 `DATABASE_URL`만 교체하면 됩니다.
 
-Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`, `HEATMAP_REPORT_TYPES`, `DART_FETCH_MIN_INTERVAL_SECONDS`입니다.
+Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`(감사 추출의 차단 대기. 카탈로그 수집은 차단되면 작업을 멈춤), `HEATMAP_REPORT_TYPES`, `DART_FETCH_MIN_INTERVAL_SECONDS`입니다.
 `HEATMAP_REPORT_TYPES`는 히트맵·유형 토글에 고정 표시할 보고서 유형(쉼표 구분, 기본 `A001,A002,A003,F001,F002,F004`)입니다.
 코드별 한국어 명칭은 `app/report_types.py`에 있으며, 목록에 없는 코드는 코드 그대로 표시합니다.
 

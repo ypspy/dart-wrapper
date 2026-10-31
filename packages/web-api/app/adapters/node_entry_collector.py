@@ -60,8 +60,13 @@ class NodeEntryCollector:
         payload = {"mode": "list", **request.model_dump()}
         result = DisclosureListResult.model_validate(await self._run_script(payload))
         if request.corp_code:
+            # 기업 필터는 하루 총건수가 아니므로 슬라이스 완료로 쓰지 않는다.
             items = [item for item in result.items if item.corp_code == request.corp_code]
-            return DisclosureListResult(listed_count=len(items), items=items)
+            return DisclosureListResult(
+                listed_count=len(items),
+                total_known=False,
+                items=items,
+            )
         return result
 
     async def extract_disclosure(
