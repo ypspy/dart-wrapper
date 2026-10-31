@@ -387,7 +387,7 @@ def make_population(tmp_path: Path, n_per_year: int = 60) -> Path:
                 corp_cls=("Y", "K", "E")[index % 3],
                 correction=correction,
                 fetch_status="fail" if index % 23 == 0 else "ok",
-                icfr_ok=index % 2 == 0,
+                icfr_ok=index % 10 == 0,
                 review=index % 2 == 0,
                 kam=kam,
                 dtd=dtd,

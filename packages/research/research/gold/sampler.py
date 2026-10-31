@@ -11,8 +11,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from research.extracting.constants import EXTRACTOR_VERSION
+from research.extracting.field_bundles import BUNDLE_KEYS, status_attr
 from research.gold.db import catalog_file
 from research.gold.periods import assign_period, layout_era, period_dtd_mismatch
+from research.gold.subjects import extract_predicted, subjects_for
 
 POPULATION_SQL = """
 SELECT
@@ -521,6 +523,259 @@ def build_sample(conn: sqlite3.Connection, params: SampleParams | None = None) -
         )
     conn.commit()
     return run_id
+
+
+CLAIM_FILTERS: dict[str, str] = {
+    "icfr": "f.icfr_status = 'ok'",
+    "subsidiary": "f.fs_scope = 'consolidated' AND f.subsidiary_status = 'ok'",
+    "hours": "f.hours_status = 'ok'",
+    "activities": "f.activities_status = 'ok'",
+    "communications": "f.communications_status = 'ok'",
+}
+
+
+def is_claim(fact: dict[str, Any], bundle: str, subject: str) -> bool:
+    """상태가 ok이고 예측값이 있으면 추출기가 값을 주장한 것이다."""
+    if extract_predicted(fact, bundle, subject) is None:
+        return False
+    return fact.get(status_attr(bundle)) == "ok"
+
+
+def _claim_sql(bundle: str, subject: str) -> str:
+    """과표집 후보를 거르는 SQL 조건."""
+    if bundle == "accounts":
+        account = subject.split("@", 1)[0].replace("'", "")
+        return f'f.accounts LIKE \'%"account": "{account}"%\''
+    if bundle in CLAIM_FILTERS:
+        extra = ""
+        if bundle == "icfr" and subject == "opinion":
+            extra = " AND IFNULL(f.icfr_opinion_code, '') != ''"
+        if bundle == "icfr" and subject == "engagement":
+            extra = " AND IFNULL(f.icfr_engagement, '') != ''"
+        return CLAIM_FILTERS[bundle] + extra
+    column = status_attr(bundle)
+    return f"f.{column} = 'ok'"
+
+
+def _load_sample_facts(
+    conn: sqlite3.Connection, run_id: str
+) -> list[tuple[sqlite3.Row, dict[str, Any]]]:
+    """이번 실행의 표본과 카탈로그 facts를 짝짓는다."""
+    samples = conn.execute(
+        """
+        SELECT period, role, rcept_no, dcm_no
+        FROM gold_samples
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchall()
+    paired: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+    for sample in samples:
+        fact = conn.execute(
+            """
+            SELECT * FROM cat.audit_report_facts
+            WHERE rcept_no = ? AND dcm_no = ?
+            """,
+            (sample["rcept_no"], sample["dcm_no"]),
+        ).fetchone()
+        if fact is not None:
+            paired.append((sample, dict(fact)))
+    return paired
+
+
+def find_sparse_fields(
+    conn: sqlite3.Connection,
+    run_id: str,
+    threshold: int = 383,
+) -> list[tuple[str, str]]:
+    """풀링 또는 기간 claim이 threshold 미만인 (묶음, subject)를 찾는다."""
+    paired = [
+        item
+        for item in _load_sample_facts(conn, run_id)
+        if item[0]["role"] in {"main", "oversample"}
+    ]
+    periods = {sample["period"] for sample, _fact in paired if sample["role"] == "main"}
+    sparse: list[tuple[str, str]] = []
+    for bundle in BUNDLE_KEYS:
+        for subject in subjects_for(bundle):
+            by_period: dict[str, int] = {period: 0 for period in periods}
+            for sample, fact in paired:
+                if not is_claim(fact, bundle, subject):
+                    continue
+                period = sample["period"]
+                by_period[period] = by_period.get(period, 0) + 1
+            pooled = sum(by_period.values())
+            period_short = (
+                any(count < threshold for count in by_period.values())
+                if by_period
+                else True
+            )
+            if pooled < threshold or period_short:
+                sparse.append((bundle, subject))
+    return sparse
+
+
+def _remember_sparse(
+    conn: sqlite3.Connection, run_id: str, bundle: str, subject: str
+) -> None:
+    """실행 파라미터에 희소 필드를 고정한다."""
+    row = conn.execute(
+        "SELECT params FROM gold_runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    if row is None:
+        return
+    params = json.loads(row[0])
+    fields = params.setdefault("sparse_fields", [])
+    token = [bundle, subject]
+    if token not in fields:
+        fields.append(token)
+    conn.execute(
+        "UPDATE gold_runs SET params = ? WHERE run_id = ?",
+        (json.dumps(params, ensure_ascii=False), run_id),
+    )
+
+
+def oversample(
+    conn: sqlite3.Connection,
+    run_id: str,
+    field: tuple[str, str],
+    target: int = 383,
+) -> int:
+    """희소 필드 claim이 target이 될 때까지 해당 필드가 있는 문서를 더 뽑는다."""
+    bundle, subject = field
+    _remember_sparse(conn, run_id, bundle, subject)
+    paired = [
+        item
+        for item in _load_sample_facts(conn, run_id)
+        if item[0]["role"] in {"main", "oversample"}
+        and is_claim(item[1], bundle, subject)
+    ]
+    need = target - len(paired)
+    if need <= 0:
+        conn.commit()
+        return 0
+    run = conn.execute(
+        "SELECT seed FROM gold_runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    seed = run["seed"] if run else "gold-2026-10"
+    claim_sql = _claim_sql(bundle, subject)
+    candidates = conn.execute(
+        f"""
+        SELECT
+            f.rcept_no AS rcept_no,
+            f.dcm_no AS dcm_no,
+            f.source_report_type AS source_report_type,
+            f.fs_scope AS fs_scope,
+            d.rcept_dt AS rcept_dt,
+            d.year_end AS year_end,
+            d.correction_type AS correction_type,
+            d.corp_code AS corp_code,
+            c.corp_cls AS corp_cls,
+            e.dtd AS dtd
+        FROM cat.audit_report_facts f
+        JOIN cat.disclosures d ON d.rcept_no = f.rcept_no
+        LEFT JOIN cat.corps c ON c.corp_code = d.corp_code
+        LEFT JOIN cat.entries e ON e.entry_id = f.cover_entry_id
+        WHERE f.fetch_status = 'ok'
+          AND f.source_report_type IN ('F001', 'F002', 'A001')
+          AND f.extractor_version = ?
+          AND {claim_sql}
+          AND NOT EXISTS (
+              SELECT 1 FROM gold_samples s
+              WHERE s.run_id = ? AND s.rcept_no = f.rcept_no AND s.dcm_no = f.dcm_no
+          )
+        """,
+        (EXTRACTOR_VERSION, run_id),
+    ).fetchall()
+    grouped: dict[str, list[sqlite3.Row]] = {}
+    for record in candidates:
+        period, _sub = assign_period(
+            record["rcept_dt"] or "",
+            record["year_end"],
+            record["dtd"],
+            is_correction=bool((record["correction_type"] or "").strip()),
+        )
+        if period == "OUT":
+            continue
+        grouped.setdefault(period, []).append(record)
+    quotas = allocate({key: len(rows) for key, rows in grouped.items()}, need, 0)
+    as_of_row = conn.execute(
+        """
+        SELECT json_extract(meta, '$.catalog_as_of')
+        FROM gold_samples WHERE run_id = ? AND json_extract(meta, '$.catalog_as_of') IS NOT NULL
+        LIMIT 1
+        """,
+        (run_id,),
+    ).fetchone()
+    as_of = as_of_row[0] if as_of_row else _catalog_as_of(conn)
+    next_order = conn.execute(
+        "SELECT COALESCE(MAX(queue_order), 0) FROM gold_samples WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()[0]
+    added = 0
+    for period, rows in grouped.items():
+        quota = quotas.get(period, 0)
+        if quota <= 0:
+            continue
+        ordered = sorted(
+            rows,
+            key=lambda record: rank_hash(
+                seed,
+                "oversample",
+                bundle,
+                subject,
+                record["rcept_no"],
+                record["dcm_no"],
+            ),
+        )
+        picked = ordered[:quota]
+        weight = (len(rows) / len(picked)) if picked else 0.0
+        for record in picked:
+            signals = conn.execute(
+                """
+                SELECT signal FROM cat.extraction_reviews
+                WHERE rcept_no = ? AND dcm_no = ?
+                """,
+                (record["rcept_no"], record["dcm_no"]),
+            ).fetchall()
+            signal_names = [item[0] for item in signals if item[0]]
+            next_order += 1
+            meta = {
+                "oversample_for": f"{bundle}:{subject}",
+                "field_weight": weight,
+                "catalog_as_of": as_of,
+                "dtd": record["dtd"] or "",
+                "fye": record["year_end"] or "",
+                "layout_era": layout_era(record["year_end"]),
+                "in_extraction_reviews": 1 if signal_names else 0,
+                "review_signals": signal_names,
+                "market_source": "current_tag",
+                "holdout": 0,
+            }
+            conn.execute(
+                """
+                INSERT INTO gold_samples (
+                    run_id, rcept_no, dcm_no, period, sub_period, stratum, stratum_weight,
+                    sample_hash, mode, role, queue_order, status, exclude_reason, meta,
+                    started_at, finished_at, active_seconds
+                ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'prefill', 'oversample', ?, 'todo', NULL, ?,
+                          NULL, NULL, NULL)
+                """,
+                (
+                    run_id,
+                    record["rcept_no"],
+                    record["dcm_no"],
+                    period,
+                    f"oversample|{bundle}:{subject}|{period}",
+                    weight,
+                    _sample_hash(seed, record["rcept_no"], record["dcm_no"]),
+                    next_order,
+                    json.dumps(meta, ensure_ascii=False),
+                ),
+            )
+            added += 1
+    conn.commit()
+    return added
 
 
 def render_stats(conn: sqlite3.Connection, run_id: str) -> str:
