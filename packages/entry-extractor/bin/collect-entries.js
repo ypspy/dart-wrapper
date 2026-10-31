@@ -35,7 +35,7 @@ function requireRange(params) {
 async function runList(params) {
   requireRange(params);
 
-  const { listedCount, disclosures, error } = await fetchDisclosureListResult({
+  const { listedCount, totalKnown, disclosures, error } = await fetchDisclosureListResult({
     reportType: params.report_type,
     startDate: params.start_date,
     endDate: params.end_date,
@@ -50,7 +50,9 @@ async function runList(params) {
   // 목록을 온전히 못 가져오면 완전성 판정이 어긋나므로 실패로 알린다.
   if (error) throw new Error(`목록 수집 실패: ${error.message}`);
 
-  process.stdout.write(JSON.stringify({ listed_count: listedCount, items: disclosures }));
+  process.stdout.write(
+    JSON.stringify({ listed_count: listedCount, total_known: totalKnown, items: disclosures })
+  );
 }
 
 async function runExtract(params) {

@@ -31,6 +31,12 @@ _COLUMN_PATCHES: tuple[tuple[str, str, str, str], ...] = (
         "VARCHAR(16) NOT NULL DEFAULT 'collect'",
     ),
     (
+        "slice_progress",
+        "empty_confirmations",
+        "INTEGER NOT NULL DEFAULT 0",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
         "entries",
         "ordinal",
         "INTEGER",

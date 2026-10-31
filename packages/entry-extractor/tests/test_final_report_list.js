@@ -38,3 +38,30 @@ describe('fetchDisclosureListResult finalReport', () => {
     assert.ok(urls[0].includes('finalReport=recent'));
   });
 });
+
+describe('fetchDisclosureListResult 총건수', () => {
+  it('총 0건이 있으면 totalKnown이고 listedCount는 0이다', async () => {
+    const result = await fetchDisclosureListResult({
+      reportType: 'F004',
+      startDate: '20260816',
+      endDate: '20260816',
+      fetcher: async () => emptyListHtml,
+    });
+    assert.equal(result.totalKnown, true);
+    assert.equal(result.listedCount, 0);
+    assert.deepEqual(result.disclosures, []);
+    assert.equal(result.error, null);
+  });
+
+  it('총건수 문구가 없는 빈 페이지는 totalKnown이 아니다', async () => {
+    const result = await fetchDisclosureListResult({
+      reportType: 'F004',
+      startDate: '20260817',
+      endDate: '20260817',
+      fetcher: async () => '<html><body><table><tbody id="tbody"></tbody></table></body></html>',
+    });
+    assert.equal(result.totalKnown, false);
+    assert.equal(result.listedCount, 0);
+    assert.equal(result.error, null);
+  });
+});
