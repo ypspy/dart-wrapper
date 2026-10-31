@@ -95,4 +95,16 @@ MIGRATIONS: tuple[str, ...] = (
     CREATE INDEX ix_gold_samples_queue
         ON gold_samples (run_id, period, status, queue_order);
     """,
+    """
+    CREATE TABLE gold_rereview (
+        extractor_version TEXT NOT NULL,
+        rcept_no TEXT NOT NULL,
+        dcm_no TEXT NOT NULL,
+        bundle TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (extractor_version, rcept_no, dcm_no, bundle, subject)
+    );
+    """,
 )

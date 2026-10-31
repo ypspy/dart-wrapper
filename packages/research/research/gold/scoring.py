@@ -12,8 +12,8 @@ from typing import Any, Iterator
 from research.gold.matching import matches
 from research.gold.periods import FLAGGED_SAMPLE_PERIODS
 from research.gold.sampler import is_claim
-from research.gold.snapshots import load_snapshot
-from research.gold.subjects import extract_predicted
+from research.gold.snapshots import load_snapshot, versions
+from research.gold.subjects import TABLE_BUNDLES, extract_predicted
 
 _PASS_LINE = 0.99
 
@@ -408,3 +408,151 @@ def blind_report(conn: sqlite3.Connection, version: str) -> list[dict[str, Any]]
             }
         )
     return report
+
+
+@dataclass
+class ReReview:
+    """표가 바뀌어 사람이 다시 봐야 하는 항목."""
+
+    rcept_no: str
+    dcm_no: str
+    bundle: str
+    subject: str
+    reason: str
+
+
+def _canon(value: Any) -> str:
+    """표 JSON을 비교용 문자열로 만든다."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _hours_keys(table: Any) -> tuple[Any, Any]:
+    """총 감사시간·투입 인원(당기, 합계)."""
+    audit = None
+    headcount = None
+    if not isinstance(table, list):
+        return (audit, headcount)
+    for cell in table:
+        if not isinstance(cell, dict):
+            continue
+        if cell.get("role") != "total" or cell.get("period") != "current":
+            continue
+        if cell.get("metric") == "audit":
+            audit = cell.get("value")
+        if cell.get("metric") == "headcount":
+            headcount = cell.get("value")
+    return (audit, headcount)
+
+
+def _answer_keys(gold_value: Any, old_table: Any) -> tuple[Any, Any]:
+    """라벨에 핵심값이 있으면 그것을, 없으면 이전 스냅샷을 정답으로 본다."""
+    if isinstance(gold_value, dict) and "audit_hours" in gold_value:
+        return (gold_value.get("audit_hours"), gold_value.get("headcount"))
+    return _hours_keys(old_table)
+
+
+def _write_score(
+    conn: sqlite3.Connection,
+    version: str,
+    label: Label,
+    predicted: Any,
+    outcome: str,
+) -> None:
+    """한 subject의 채점 행을 교체한다."""
+    conn.execute(
+        """
+        DELETE FROM gold_scores
+        WHERE extractor_version = ? AND rcept_no = ? AND dcm_no = ? AND bundle = ? AND subject = ?
+        """,
+        (version, label.rcept_no, label.dcm_no, label.bundle, label.subject),
+    )
+    conn.execute(
+        """
+        INSERT INTO gold_scores (
+            extractor_version, rcept_no, dcm_no, bundle, subject, predicted, outcome, scored_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            version,
+            label.rcept_no,
+            label.dcm_no,
+            label.bundle,
+            label.subject,
+            json.dumps(predicted, ensure_ascii=False),
+            outcome,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+
+
+def table_carryover(
+    conn: sqlite3.Connection, old_version: str, new_version: str
+) -> list[ReReview]:
+    """표가 같으면 판정을 넘기고, hours 핵심값이 다르면 FP, 나머진 재검수 큐로 보낸다."""
+    conn.execute(
+        "DELETE FROM gold_rereview WHERE extractor_version = ?", (new_version,)
+    )
+    queued: list[ReReview] = []
+    created_at = datetime.now(timezone.utc).isoformat()
+    for label in gold_final(conn):
+        if label.bundle not in TABLE_BUNDLES:
+            continue
+        old_snap = load_snapshot(conn, old_version, label.rcept_no, label.dcm_no)
+        new_snap = load_snapshot(conn, new_version, label.rcept_no, label.dcm_no)
+        if new_snap is None:
+            continue
+        old_table = (
+            extract_predicted(old_snap, label.bundle, label.subject)
+            if old_snap
+            else None
+        )
+        new_table = extract_predicted(new_snap, label.bundle, label.subject)
+        if _canon(old_table) == _canon(new_table):
+            if label.verdict == "correct":
+                outcome = "tp"
+            elif label.verdict == "wrong":
+                outcome = "fp"
+            else:
+                outcome = "abstain"
+            _write_score(conn, new_version, label, new_table, outcome)
+            continue
+        if label.bundle == "hours" and _hours_keys(new_table) != _answer_keys(
+            label.gold_value, old_table
+        ):
+            _write_score(conn, new_version, label, new_table, "fp")
+            continue
+        reason = "hours 핵심값은 같고 표가 달라졌습니다."
+        if label.bundle != "hours":
+            reason = "이전 버전과 표가 달라 다시 확인이 필요합니다."
+        review = ReReview(
+            label.rcept_no, label.dcm_no, label.bundle, label.subject, reason
+        )
+        queued.append(review)
+        conn.execute(
+            """
+            INSERT INTO gold_rereview (
+                extractor_version, rcept_no, dcm_no, bundle, subject, reason, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_version,
+                review.rcept_no,
+                review.dcm_no,
+                review.bundle,
+                review.subject,
+                review.reason,
+                created_at,
+            ),
+        )
+        _write_score(conn, new_version, label, new_table, "abstain")
+    conn.commit()
+    return queued
+
+
+def rescore(conn: sqlite3.Connection, new_version: str) -> int:
+    """스칼라·계정은 자동으로 다시 채점하고, 표는 승계 규칙으로 처리한다."""
+    written = score(conn, new_version)
+    older = [version for version in versions(conn) if version != new_version]
+    if older:
+        table_carryover(conn, older[0], new_version)
+    return written

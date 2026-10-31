@@ -1,0 +1,6 @@
+<p><a href="{{ link }}" target="_blank" rel="noopener">DART에서 열기</a></p>
+{% if section_html %}
+<article class="gold-evidence">{{ section_html | safe }}</article>
+{% else %}
+<p class="muted">로컬 원문이 없어 링크만 보여 줍니다.</p>
+{% endif %}

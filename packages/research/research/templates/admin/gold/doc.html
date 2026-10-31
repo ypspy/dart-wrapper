@@ -1,0 +1,37 @@
+{% extends "admin/base.html" %}
+{% block title %}골드 문서{% endblock %}
+{% block content %}
+<main id="gold-doc"
+      data-pass="{{ pass_mode }}"
+      data-evidence-autonav="1"
+      data-highlight="{{ highlight }}"
+      data-bulk-accept="{{ bulk_accept }}"
+      data-rcept="{{ sample.rcept_no }}"
+      data-dcm="{{ sample.dcm_no }}"
+      data-period="{{ sample.period }}"
+      data-dart-url="{{ dart_url }}"
+      data-evidence-url="/admin/gold/evidence/{{ sample.rcept_no }}/{{ sample.dcm_no }}/">
+  <header class="ops-topbar">
+    <div>
+      <h2>{{ sample.period }} · {{ sample.rcept_no }}/{{ sample.dcm_no }}</h2>
+      <p>{{ pass_mode }} · {{ sample.stratum }}
+        {% if overlap %}<span class="gold-badge">리뷰 중복</span>{% endif %}
+      </p>
+      <p><a href="{{ dart_url }}" target="_blank" rel="noopener">DART 열기</a></p>
+    </div>
+  </header>
+  <div class="gold-layout">
+    <ul>
+      {% include "admin/gold/partials/field_rows.html" %}
+    </ul>
+    <div>
+      <label>정답값 <input id="gold-value-input" type="text"></label>
+      <label>메모 <input id="gold-note" type="text"></label>
+      <label>오류 태그 <input id="gold-tag" type="text"></label>
+      <div id="gold-evidence"></div>
+    </div>
+  </div>
+  <p id="gold-toast" role="status" hidden></p>
+</main>
+{% include "admin/gold/partials/gold_js.html" %}
+{% endblock %}

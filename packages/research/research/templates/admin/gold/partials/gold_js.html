@@ -1,0 +1,152 @@
+<script>
+(function () {
+  const root = document.getElementById("gold-doc");
+  if (!root) return;
+  const rows = Array.from(root.querySelectorAll(".gold-row"));
+  let index = 0;
+  const order = ["", "correct", "wrong", "na", "unsure"];
+  const toast = document.getElementById("gold-toast");
+
+  function showToast(message) {
+    if (!toast) return;
+    toast.textContent = message;
+    toast.hidden = false;
+  }
+
+  function current() {
+    return rows[index];
+  }
+
+  function focusRow(next) {
+    if (!rows.length) return;
+    index = (next + rows.length) % rows.length;
+    rows.forEach((row, i) => row.classList.toggle("is-active", i === index));
+    current().focus();
+    if (root.dataset.evidenceAutonav === "1") {
+      moveEvidence();
+    }
+  }
+
+  function moveEvidence() {
+    const row = current();
+    if (!row) return;
+    const bundle = row.dataset.bundle;
+    const url = root.dataset.evidenceUrl + bundle + "?pass=" + root.dataset.pass;
+    const panel = document.getElementById("gold-evidence");
+    if (!panel) return;
+    fetch(url, { headers: { "X-Requested-With": "gold" } })
+      .then((response) => response.text())
+      .then((html) => {
+        panel.innerHTML = html;
+        if (root.dataset.highlight !== "1") return;
+        const cells = JSON.parse(row.dataset.cells || "[]");
+        cells.forEach(([t, r, c]) => {
+          const target = panel.querySelector(
+            '[data-t="' + t + '"][data-r="' + r + '"][data-c="' + c + '"]'
+          );
+          if (!target) return;
+          target.classList.add("gold-hit");
+          target.scrollIntoView({ block: "center" });
+        });
+      })
+      .catch(() => showToast("근거를 불러오지 못했습니다."));
+  }
+
+  function save(row, verdict, extra) {
+    const body = Object.assign({
+      rcept_no: root.dataset.rcept,
+      dcm_no: root.dataset.dcm,
+      bundle: row.dataset.bundle,
+      subject: row.dataset.subject,
+      pass: root.dataset.pass,
+      verdict: verdict,
+      gold_value: extra && extra.gold_value,
+      shown_value: row.querySelector(".gold-value") ? row.querySelector(".gold-value").textContent : null,
+      note: extra && extra.note || "",
+      error_tag: extra && extra.error_tag || null,
+      bulk_accept: Boolean(extra && extra.bulk_accept)
+    }, extra || {});
+    row.dataset.verdict = verdict;
+    fetch("/admin/gold/label", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then((response) => {
+      if (!response.ok) showToast("저장에 실패했습니다.");
+    }).catch(() => showToast("저장에 실패했습니다."));
+  }
+
+  function cycle(row) {
+    const at = order.indexOf(row.dataset.verdict || "");
+    const verdict = order[(at + 1) % order.length] || "correct";
+    save(row, verdict);
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) {
+      if (event.key === "Escape") event.target.blur();
+      return;
+    }
+    const row = current();
+    if (!row) return;
+    const key = event.key;
+    if (key === "j" || key === "ArrowDown") { event.preventDefault(); focusRow(index + 1); return; }
+    if (key === "k" || key === "ArrowUp") { event.preventDefault(); focusRow(index - 1); return; }
+    if (key === "1" || key === "y") { save(row, "correct"); return; }
+    if (key === "2" || key === "n") {
+      save(row, "wrong");
+      const input = document.getElementById("gold-value-input");
+      if (input) input.focus();
+      return;
+    }
+    if (key === "3" || key === "x") { save(row, "na"); return; }
+    if (key === "4" || key === "?") { save(row, "unsure"); return; }
+    if (key === " ") { event.preventDefault(); cycle(row); return; }
+    if (key === "Enter" && event.ctrlKey) {
+      event.preventDefault();
+      const open = rows.filter((item) => !item.dataset.verdict);
+      if (open.length) { showToast("아직 판정하지 않은 항목이 있습니다."); return; }
+      fetch("/admin/gold/doc/" + root.dataset.rcept + "/" + root.dataset.dcm + "/complete?pass=" + root.dataset.pass, { method: "POST" })
+        .then(() => { window.location = "/admin/gold/next?period=" + root.dataset.period + "&pass=" + root.dataset.pass; });
+      return;
+    }
+    if (key === "Enter") { event.preventDefault(); moveEvidence(); return; }
+    if (key === "e") { const input = document.getElementById("gold-value-input"); if (input) input.focus(); return; }
+    if (key === "m") { const input = document.getElementById("gold-note"); if (input) input.focus(); return; }
+    if (key === "t") { const input = document.getElementById("gold-tag"); if (input) input.focus(); return; }
+    if (key === "Tab") {
+      event.preventDefault();
+      const groups = ["basic", "table", "accounts"];
+      const start = groups.indexOf(row.dataset.group);
+      const nextGroup = groups[(start + (event.shiftKey ? 2 : 1)) % groups.length];
+      const found = rows.findIndex((item) => item.dataset.group === nextGroup);
+      if (found >= 0) focusRow(found);
+      return;
+    }
+    if (key === "a") {
+      if (root.dataset.bulkAccept !== "1") return;
+      if (!window.confirm("이 그룹의 미판정을 모두 맞다고 저장할까요?")) return;
+      rows.filter((item) => item.dataset.group === row.dataset.group && !item.dataset.verdict)
+        .forEach((item) => save(item, "correct", { bulk_accept: true }));
+      return;
+    }
+    if (key === "o") { window.open(root.dataset.dartUrl, "_blank", "noopener"); return; }
+    if (key === "X" && event.ctrlKey && event.shiftKey) {
+      const reason = window.prompt("제외 사유");
+      if (!reason) return;
+      fetch("/admin/gold/doc/" + root.dataset.rcept + "/" + root.dataset.dcm + "/exclude?reason=" + encodeURIComponent(reason), { method: "POST" })
+        .then(() => { window.location = "/admin/gold/next?period=" + root.dataset.period + "&pass=" + root.dataset.pass; });
+    }
+  });
+
+  const valueInput = document.getElementById("gold-value-input");
+  if (valueInput) {
+    valueInput.addEventListener("change", () => {
+      const row = current();
+      if (!row) return;
+      save(row, "wrong", { gold_value: valueInput.value });
+    });
+  }
+  focusRow(0);
+})();
+</script>

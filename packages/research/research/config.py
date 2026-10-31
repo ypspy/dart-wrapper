@@ -25,6 +25,11 @@ class ResearchSettings(BaseSettings):
     date_resolver_model: str = "gpt-4o-mini"
     date_resolver_prompt_version: str = "v1"
 
+    # 골드 검수. 카탈로그와 다른 파일이고, 기본 앱은 이 경로를 만들지 않는다.
+    gold_db_path: str = "C:/dev/dart-wrapper/data/gold/gold.db"
+    gold_cache_root: str = "C:/dev/dart-wrapper/data/gold_cache"
+    gold_run_id: str = "gold-2026-10"
+
     @property
     def opendart_api_keys(self) -> tuple[str, ...]:
         """OpenDART 인증키를 우선순위대로 모은다. 한도가 차면 다음 키를 쓴다."""
