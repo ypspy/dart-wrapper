@@ -1,14 +1,13 @@
 # web-api
 
-DART 공시 파이프라인의 FastAPI 서비스입니다. Admin 카탈로그 수집과 Public Viewer(Lazy Retrieval)를 제공합니다.
+DART 공시 파이프라인의 FastAPI 서비스입니다. 로컬 앱은 Admin 카탈로그 수집과 열람을 제공하고, 공개 앱은 카탈로그 조회와 Viewer(Lazy Retrieval)를 제공합니다.
 
 ## 구조
 
 | 레이어 | 위치 | 역할 |
 |--------|------|------|
 | API | `app/api` | 라우터·의존성 |
-| Service | `app/services` | 수집 오케스트레이션, Viewer 파이프라인, 감사 추출 잡 |
-| Extracting | `app/extracting` | 감사 표지·의견·실시내용·첨부 제표 계정·내부회계·계속기업·종속기업 순수 추출·해소 (`audit_opinion.v19`) |
+| Service | `app/services` | 수집 오케스트레이션, Viewer 파이프라인 |
 | Port/Adapter | `app/ports`, `app/adapters` | 엔트리 수집기, DART HTTP |
 | Parsing | `app/parsing` | 본문 정제, 표 → JSON |
 | DB | `app/models`, `app/repositories`, `app/db` | 엔트리·작업 메타데이터 |
@@ -22,54 +21,49 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-PostgreSQL로 배포할 때는 `.venv\Scripts\python.exe -m pip install -e ".[postgres]"`를 추가합니다.
+PostgreSQL로 배포할 때는 `.\.venv\Scripts\python.exe -m pip install -e ".[postgres]"`를 추가합니다.
 
 ## 실행
 
-`packages/web-api` 디렉터리에서 실행합니다. PowerShell은 `.\.venv\...`처럼 `.\` **접두사**가 필요합니다.
+`packages/web-api` 디렉터리에서 실행합니다. PowerShell은 `.\.venv\...`처럼 `.\` 접두사가 필요합니다.
+
+로컬 앱:
 
 ```powershell
 cd packages/web-api
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn app.local:app --reload
 ```
 
-문서: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+공개 앱은 `DATABASE_URL`이 `postgresql+asyncpg://`로 시작해야 프로세스가 시작되며 `0.0.0.0:$PORT`에 바인딩합니다.
+
+```bash
+python -m uvicorn app.public:app --host 0.0.0.0 --port "$PORT"
+```
+
+로컬 앱의 API 문서는 [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)에서 확인합니다.
 
 ## 엔드포인트
 
 Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키를 요구합니다.
 
-| 메서드 | 경로 | 설명 |
-|--------|------|------|
-| POST | `/admin/catalog/extract` | 기간/기업별 수집 트리거 (202, `job_id` 반환) |
-| POST | `/admin/catalog/resume` | 미완료·실패 슬라이스만 재개 |
-| GET | `/admin/catalog/status?job_id=` | 수집 현황·로그 |
-| GET | `/admin/catalog/slices` | 날짜 슬라이스 완전성 목록 |
-| GET | `/admin/catalog/slices/{slice_id}` | 슬라이스 상세와 공시별 처리 결과 |
-| POST | `/admin/catalog/slices/{slice_id}/retry` | 해당 슬라이스 실패분 재시도 |
-| POST | `/admin/catalog/jobs/{job_id}/soft-stop` | 다음 공시 경계에서 중단 |
-| POST | `/admin/extract/audit-opinion` | 감사 표지·의견 추출 트리거 (202, `job_id`) |
-| GET | `/admin/extract/status?job_id=` | 추출 작업 현황·로그 |
-| POST | `/admin/extract/jobs/{job_id}/soft-stop` | 다음 접수 경계에서 추출 중단 |
-| POST | `/admin/extract/jobs/{job_id}/force-finish` | 멈춘 추출 잡 강제 종료(DART 잠금 해제) |
-| GET | `/admin/extract/audit-opinion/completeness` | 기간·유형별 추출 완전성 집계 |
-| POST | `/admin/corps/enrich` | 빠진 회사 OpenDART 개황 채우기 (202, `job_id`) |
-| GET | `/admin/corps/status?job_id=` | 회사 업종 잡 현황·로그 |
-| GET | `/admin/corps/summary` | 공시 distinct / ok / 남음 |
-| POST | `/admin/corps/jobs/{job_id}/soft-stop` | 다음 회사 경계에서 중단 |
-| POST | `/admin/corps/jobs/{job_id}/force-finish` | 강제 마감 |
-| PATCH | `/admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date` | 감사보고서일 수동 보정 |
-| POST | `/admin/extract/resolve-dates` | not_found 감사보고서일 LLM 해소 |
-| GET | `/api/v1/catalog/disclosures` | 공시 목록 (cursor 페이지네이션) |
-| GET | `/api/v1/catalog/disclosures/{rcp_no}` | 공시 단건 요약 |
-| GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | entry 목록 (전 feature, `all_entries`) |
-| GET | `/api/v1/facts` | 감사 추출 결과 목록 (인증 없음, cursor) |
-| GET | `/api/v1/disclosures/{rcp_no}/audit-facts` | 공시별 감사 추출 결과 (인증 없음) |
-| GET | `/api/v1/viewer/{rcp_no}` | 접수번호의 모든 entry 섹션 원문 (종합 분석용) |
-| GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 특정 entry 섹션 원문 (단건 조회) |
-| GET | `/facts` | 추출 문서 납작 표 (조인 메타 + facts 공개 컬럼). `rcept_no`는 Catalog 링크 |
-| GET | `/catalog` | 공시 목록 표 (`DisclosureSummary` 전 컬럼). `disclosure_url`은 「원문」 링크(새 탭) |
-| GET | `/catalog/{rcp_no}` | 공시 메타 + entry 표. `disclosure_url`「원문」·`viewer_url`「viewer」 링크. attachment는 `rcpNo`+`dcm_no`로 해당 문서 main.do에 연결 |
+| 메서드 | 경로 | 앱 | 설명 |
+|--------|------|----|------|
+| GET | `/admin` | 로컬 | 카탈로그 수집 운영 화면 |
+| GET | `/health` | 둘 다 | 서비스 상태 확인 |
+| POST | `/admin/catalog/extract` | 로컬 | 기간/기업별 수집 트리거 (202, `job_id` 반환) |
+| POST | `/admin/catalog/resume` | 로컬 | 미완료·실패 슬라이스만 재개 |
+| GET | `/admin/catalog/status?job_id=` | 로컬 | 수집 현황·로그 |
+| GET | `/admin/catalog/slices` | 로컬 | 날짜 슬라이스 완전성 목록 |
+| GET | `/admin/catalog/slices/{slice_id}` | 로컬 | 슬라이스 상세와 공시별 처리 결과 |
+| POST | `/admin/catalog/slices/{slice_id}/retry` | 로컬 | 해당 슬라이스 실패분 재시도 |
+| POST | `/admin/catalog/jobs/{job_id}/soft-stop` | 로컬 | 다음 공시 경계에서 중단 |
+| GET | `/api/v1/catalog/disclosures` | 둘 다 | 공시 목록 (cursor 페이지네이션) |
+| GET | `/api/v1/catalog/disclosures/{rcp_no}` | 둘 다 | 공시 단건 요약 |
+| GET | `/api/v1/catalog/disclosures/{rcp_no}/entries` | 둘 다 | entry 목록 (전 feature, `all_entries`) |
+| GET | `/api/v1/viewer/{rcp_no}` | 둘 다 | 접수번호의 모든 entry 섹션 원문 (종합 분석용) |
+| GET | `/api/v1/viewer/{rcp_no}/sections/{entry_id}` | 둘 다 | 특정 entry 섹션 원문 (단건 조회) |
+| GET | `/catalog` | 둘 다 | 공시 목록 표 (`DisclosureSummary` 전 컬럼). `disclosure_url`은 「원문」 링크(새 탭) |
+| GET | `/catalog/{rcp_no}` | 둘 다 | 공시 메타 + entry 표. `disclosure_url`「원문」·`viewer_url`「viewer」 링크. attachment는 `rcpNo`+`dcm_no`로 해당 문서 main.do에 연결 |
 
 목록 쿼리: `corp_code`, `corp_name`, `report_nm`, `report_type`, `start_date`, `end_date`, `limit`(1–100), `cursor`.
 총건수는 반환하지 않으며, 다음 페이지는 `next_cursor`로 이어갑니다.
@@ -82,200 +76,9 @@ Admin 경로(`/admin/**`)는 `X-Admin-Token` 헤더 또는 `admin_token` 쿠키�
 수집기는 Node entry-extractor 기본값을 따릅니다(목록 이력 포함·첨부 접수 스코프·TOC 중간 노드 포함).
 상세는 [../entry-extractor/README.md](../entry-extractor/README.md)를 보세요.
 
+DART 원문 요청의 최소 간격은 프로세스 안이다. Viewer는 섹션을 한 번에 하나씩 가져오고, `DartHttpClient` 기본 간격은 1초다. Node `safeGet`의 1초는 그대로다. 로컬 수집과 공개 열람은 시계를 공유하지 않는다.
+
 전체 Viewer 조회는 일부 섹션이 실패하면 해당 섹션에만 `error`를 담고 나머지는 정상 반환합니다. 모든 섹션이 실패하면 502입니다.
-
-## 감사보고서 추출
-
-카탈로그에 있는 `viewer_url`로 감사 표지·의견 5필드(감사인, 의견, 보고일, GAAP, 당기)를
-뽑아 `audit_report_facts`에 저장합니다. 같은 행에 외부감사 실시내용 1~4절 JSON
-(`hours`, `activities`, `communications`)과 첨부 제표 계정 JSON(`accounts`)도 붙입니다.
-같은 행에 내부회계관리제도 감사·검토 의견(`icfr_engagement`, `icfr_opinion_code`, `icfr_status`)과
-당기 계속기업 중요한 불확실성(`going_concern`, 적정 의견의 제목·강조사항만)·연결 종속기업 수(`subsidiary_count`)도 붙입니다.
-`accounts`에는 부채총계(`total_liability`) 당기·전기 금액도 포함합니다.
-별도 문서(`fs_scope=separate`)의 종속기업 수는 `subsidiary_status=not_applicable`이며 카운트는 null입니다.
-연결 문서는 주석 표를 1차로 세고, 같은 접수 A001 계열회사 표에서 종속 구분 칸을 읽을 수 있을 때만 2차로
-보강합니다. 감사는 적정·부적정·거절, 검토는 거기에 한정·중요한취약점입니다. 회사 운영보고서는 읽지 않습니다.
-5절(중요성 금액)은 추출하지 않습니다. 추출기 버전은 `audit_opinion.v19`입니다.
-원문 HTML은 저장하지 않습니다. 추출 전용 히트맵 UI는 없습니다. 완전성은 아래 집계 API로 확인합니다.
-
-카탈로그 수집과 추출 잡은 둘 다 DART를 치므로 **한 프로세스에서 동시에 돌리지 않습니다.**
-추출과 Viewer 원문 GET은 같은 DART 클라이언트를 쓰며 `DART_FETCH_MIN_INTERVAL_SECONDS`(기본 1초)
-간격을 둡니다. Viewer는 섹션을 한 번에 하나 가져옵니다. 수집기 `safeGet`과 같은 간격입니다.
-날짜 LLM 해소는 DART를 쓰지 않아 수집과 병행할 수 있습니다.
-
-대상은 F001·F002와 A001 첨부 감사·연결감사입니다. 저장 단위는 문서 하나(`rcept_no`+`dcm_no`)이고,
-정정 전·후 접수는 각각 행입니다.
-
-### 버전과 재추출
-
-
-| 모드                   | 동작                                                                         |
-| -------------------- | -------------------------------------------------------------------------- |
-| `extract` / `resume` | 같은 버전이고 `fetch_status=ok`인 행은 건너뜁니다                                        |
-| `reparse`            | `fetch_status=ok`여도 필드가 `not_found`이면 문서 전체를 다시 fetch합니다. override·LLM 보고일은 유지합니다 |
-| `patch`              | 현재 추출기 `ok` 행 중 12묶음 실패가 있는 문서만 다시 fetch합니다. 미추출·fetch 실패는 넣지 않습니다 |
-
-
-버전을 올리지 않은 규칙 변경(아래 목록 감사인 최후 해소 등)은 `extract`만으로는 기존 `ok` 행에
-반영되지 않습니다. `skipped` 칸을 고친 뒤에는 `patch`로 그 문서만 다시 넣습니다.
-
-### 필드 해소
-
-**감사인** (`auditor_source`)
-
-1. 표지 D-2-2 (`cover`). compact 텍스트에 한글 `회계법인`/`감사반`이 있을 때만 채택합니다. 한자 상호(`會計法人` 등)는 표지에서 잡지 않습니다.
-2. A001만 「1. 외부감사에 관한 사항」 당기 칸 (`a001`)
-3. 의견 본문 D-3-1 사전 (`body`)
-4. F001·F002만, 표지·본문을 **읽었는데** 둘 다 `not_found`이고 목록 `submitter`가 비어 있지 않을 때 (`listing`). `normalize_firm_name`을 적용합니다.
-
-문서 출처(1–3)가 하나라도 `ok`이면 listing은 쓰지 않고, auditor `conflicts`에도 넣지 않습니다.
-문서를 읽지 못한 `skipped`(captcha·섹션 없음 등)에도 listing을 쓰지 않습니다.
-A001 목록 `submitter`는 회사명이라 감사인 해소에 쓰지 않습니다.
-F001·F002 listing은 **현재 상호**일 수 있습니다. `auditor_listing`에는 항상 그 이름을 남기고,
-resolved에 쓰는 것은 4순위일 때뿐입니다.
-
-**의견** — 의견서 본문이 `ok`이면 그것을 쓰고, 없으면 A001 당기 칸입니다. 둘이 달라도 코드는 의견서를 유지하고 `conflicts`만 남깁니다.
-
-**보고일** — compact 본문에서 날짜를 전수 모은 뒤 `period_end < iso ≤` 접수번호 앞 8자리(인증일) 중 **가장 늦은 날**이 `ok`/`letter`. 창이 비면 `not_found`(ISO는 null, 후보는 저장). 목록 `rcept_dt`는 쓰지 않음. 수동 보정과 LLM 해소는 아래 API.
-
-### 의견 서식 (v3)
-
-2018년 감사기준서 700 전후 서식을 compact 본문으로 가릅니다. 접수일·자산 규모로 가르지 않습니다.
-
-- **선행형**(의견·근거가 앞): `재무제표감사에대한보고` / `핵심감사사항` / `감사의견근거`가 있으면 그 표지 **앞**만 검색합니다. 강조사항의 과거 거절 인용이 당기 의견으로 잡히지 않게 합니다.
-- **후행형**(종전): 선행 표지가 없고 `경영진의책임` 뒤에 한정·거절·부적정 근거가 있으면 **전문**에서 D-3-2 키워드를 찾습니다. 표지를 앞에서 자르면 근거 단락이 창 밖으로 나갑니다.
-- 구간 안에서도 `일자로발행한감사보고서에서` / `비교표시목적으로` 인용(±80자)은 무시합니다.
-
-의견 분류에 LLM을 쓰지 않습니다. 키워드 튜플은 옛 D-3-2를 유지합니다.
-
-### Admin 추출
-
-운영 화면 `/admin/extract`에서 연구 창 완전성(F001/F002/A001)과 추출 잡을 봅니다.
-JSON 트리거(`POST /admin/extract/audit-opinion`)는 그대로입니다.
-
-`POST /admin/extract/audit-opinion`에 기간·유형·모드를 보냅니다.
-
-```json
-{
-  "start_date": "20200301",
-  "end_date": "20200331",
-  "report_types": ["F001", "F002", "A001"],
-  "mode": "extract"
-}
-```
-
-`mode`는 `extract`(신규), `resume`(행 없음·fetch 실패 재시도), `reparse`(필드 `not_found` 재파싱),
-`patch`(12묶음 실패 문서만 재추출)입니다.
-바로 `job_id`를 돌려주고 실제 추출은 백그라운드에서 진행됩니다.
-현황은 `GET /admin/extract/status?job_id=`로 봅니다.
-워커가 살아 있으면 `POST /admin/extract/jobs/{job_id}/soft-stop`으로 다음 접수에서 멈춥니다.
-프로세스가 죽은 채 `pending`/`running`이면 `force-finish`로 잠금을 풉니다.
-
-감사보고서일만 손으로 고치려면
-`PATCH /admin/extract/audit-opinion/{rcept_no}/{dcm_no}/date`에 `{"iso": "2020-02-20"}`를 보냅니다.
-
-### 완전성
-
-`GET /admin/extract/audit-opinion/completeness?start_date=&end_date=&report_type=`
-한 유형의 기간 집계입니다. 문서 단위는 `rcept_no`+`dcm_no`입니다.
-F001/F002 본문과 A001 첨부 감사·연결감사만 대상입니다. F001/F002의 `기업개황자료` 첨부는 제외합니다.
-문서 카드의 대상/미추출과 잡 `처리 N / 대상 M`의 대상은 접수 수이다. 한 접수에 첨부 감사문서가 둘이면 한쪽만 추출돼도 미추출이 0일 수 있다.
-
-
-| 키                                              | 의미                                                                                                                                                                                        |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`                                       | selector가 고른 대상 문서 수                                                                                                                                                                      |
-| `ok`                                           | `fetch_status=ok` 이고 `extractor_version`이 현재 추출기(`audit_opinion.v19`)와 같음. 12칸 만점이 아님                                                                                                                                 |
-| `all_success`                                  | `ok`이면서 12묶음 실패가 0. 해당없음·제도상없음은 실패가 아님                                                                                                                                                              |
-| `stale_version`                                | `fetch_status=ok` 인데 추출기 버전이 다름. `extract`/`resume`가 덮어 씀                                                                                                                                              |
-| `fetch_failed` / `blocked` / `section_missing` | 해당 fetch 상태                                                                                                                                                                               |
-| `unextracted`                                  | 대상인데 facts 행이 없음                                                                                                                                                                          |
-| `ambiguous_dates`                              | `audit_report_date_status=ambiguous`                                                                                                                                                      |
-| `field_partial`                                | `ok` 행 중 12묶음 `classify_outcome`이 fail인 건. `ok = all_success + field_partial`                                                                                                              |
-
-
-같은 경로에 `status`와 `cursor`/`limit`을 주면 해당 문서 식별자 목록을 받습니다.
-실시내용 1–3절이 ok이고 4절만 `not_found`이면 커뮤니케이션은 제도상없음이며 `field_partial`에 넣지 않습니다.
-첨부 제표에서는 E-4 연구 계정 8개(자산총계·자본총계·당기순손익·재고·매출채권·장기매출채권·계약자산·미청구공사)와
-유동자산·유동부채·부채총계(`total_liability`)의 당기·전기 금액을 읽으며, `제N기` 비교열 헤더는 큰 기수를 당기·작은 기수를 전기로 해석합니다.
-`당기순손실` 과목은 칸 괄호가 없어도 음수로 읽습니다.
-`비유동`·`기타` 과목과 `유동화부채`는 유동 소계로 쓰지 않습니다. `부채와자본총계`는 부채총계로 쓰지 않습니다.
-
-### 필드 묶음 모니터
-
-`/admin/extract` 왼쪽 문서 카드 아래에 현재 추출기 `fetch_status=ok` 행의 12묶음
-(감사인·의견·GAAP·감사보고서일·당기·감사시간·실시항목·커뮤니케이션·계정·내부회계·계속기업·종속기업)
-성공 / 해당없음 / 제도상없음 / 실패를 보여 줍니다. 성공률은 `성공/(성공+실패)`입니다.
-문서 카드의 대상/미추출과 잡 `처리 N / 대상 M`의 대상은 접수 수이다. 한 접수에 첨부 감사문서가 둘이면 한쪽만 추출돼도 미추출이 0일 수 있다. 12묶음 표는 `fetch_status=ok` **fact 행** 기준이며 F001+F002+A001을 합산한다.
-
-- 별도·unknown 문서의 종속기업 `not_applicable`은 해당없음(분모 제외)
-- 실시내용 1–3절 ok이고 4절만 `not_found`이면 커뮤니케이션은 제도상없음
-- 내부회계 `skipped`는 비상장 개별(F001)과 연결 의무 전(F002, 사업연도 ≤ 2022)만 제도상없음. 코넥스(`corp_cls=N`)는 주권상장이다. `not_found`와 A001 `skipped`는 실패
-- 구버전·미추출·fetch 실패는 이 표에 넣지 않습니다 (문서 카드)
-
-JSON: `GET /admin/extract/audit-opinion/field-bundles`, 실패 목록
-`.../field-bundles/items?bundle=&outcome=fail`, TSV
-`.../field-bundles/export` (최대 5000행, `X-Next-Cursor`).
-실행 중 잡은 `params.field_bundles`에 이번 처리분만 가산합니다.
-
-### Public 조회
-
-`GET /api/v1/disclosures/{rcp_no}/audit-facts`는 인증 없이 해당 접수의 추출 행을 반환합니다.
-행이 없으면 404가 아니라 빈 목록입니다. 실시내용·계정 JSON과 `hours_status`·`accounts_status`
-·`icfr_engagement`·`icfr_opinion_code`·`icfr_status`·`going_concern`·`subsidiary_count`·
-`subsidiary_status` 등도 본문에 포함합니다.
-회사명·접수일 등은 facts에 없고, 아래 export가 `entries`/`disclosures`와 조인합니다.
-
-`GET /api/v1/facts` 목록에도 같은 공개 컬럼(`going_concern`, `subsidiary_count` 등)이 포함됩니다.
-
-### DATE_RESOLVER
-
-후보가 있는 `not_found` 감사보고서일은 `POST /admin/extract/resolve-dates`로 LLM이 후보 인덱스를 고릅니다.
-저장 때 창 검사를 하지 않습니다. `{"limit": N}`으로 해소 건수를 자를 수 있습니다.
-추출 잡은 LLM을 호출하지 않습니다.
-설정은 `.env`의 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`(기본 `gpt-4o-mini`),
-`DATE_RESOLVER_PROMPT_VERSION`(기본 `v1`)입니다. API 키가 비어 있으면 400입니다.
-
-### CSV/TSV export
-
-연구용 TSV는 facts와 카탈로그를 조인해 회사명·결산월·접수일·정정구분을 붙입니다.
-정정 전·후 접수를 모두 넣으며, 최종 접수만 남기는 플래그는 없습니다.
-`correction_type`과 `rcept_dt`로 고르면 됩니다.
-
-`packages/web-api`에서 실행합니다.
-
-```powershell
-.\.venv\Scripts\python.exe scripts/export_audit_report_facts.py
-.\.venv\Scripts\python.exe scripts/export_audit_report_facts.py --out facts.tsv
-.\.venv\Scripts\python.exe scripts/export_audit_report_facts.py --database-url sqlite+aiosqlite:///./dart_catalog.db --out facts.tsv
-```
-
-`--database-url` 기본값은 앱 `DATABASE_URL`과 같고, `--out`이 없으면 표준 출력으로 씁니다.
-
-## 회사 업종 (OpenDART)
-
-공시 HTML 수집·감사 추출과 달리, 회사 마스터 보강만 [OpenDART 기업개황 API](https://opendart.fss.or.kr/guide/detail.do?apiGrpCd=DS001&apiId=2019002)
-(`GET /api/company.json`)를 씁니다. `.env`의 `OPENDART_API_KEY`가 없으면 잡을 시작하지 않습니다.
-일일 한도(`020`)가 차면 `OPENDART_API_KEY_2`(또는 같은 변수에 쉼표로 이은 키)로 자동 전환하고,
-한도 난 회사는 새 키로 다시 조회합니다. 모든 키가 한도면 그날 잡을 멈춥니다.
-대상은 `disclosures`에 있는 distinct `corp_code`이며, `fetch_status=ok`인 회사는 건너뜁니다.
-수집·감사 추출의 `dart_job_lock`과 **공유하지 않아** 동시에 돌릴 수 있습니다.
-
-호출 속도는 TCP 차단을 피하려고 `OPENDART_MAX_PER_MINUTE`(기본 200)로 HTTP 시작을
-간격 제한하고, `OPENDART_CONCURRENCY`(기본 2)만 동시에 진행합니다.
-재시도도 같은 분당 한도에 포함됩니다. OpenDART 안내의 분당 1,000회는 상한이 아니라
-그 이상이면 제한될 수 있다는 경고입니다.
-
-`POST /admin/corps/enrich`로 잡을 등록하면 202와 `job_id`를 받고, 현황은
-`GET /admin/corps/status?job_id=`·집계는 `GET /admin/corps/summary`로 확인합니다.
-운영 화면 `/admin` 오른쪽 **회사 업종** 칸에서 공시 회사 수·완료·잔여와 「빠진 회사 채우기」 버튼을 제공합니다.
-HTML 폼은 `POST /admin/corps/start`(303)이고, JSON API와 경로를 나눕니다.
-
-업종 이름은 OpenDART가 아니라 저장소의 KSIC JSON에서 붙입니다.
-조회는 **제11차(`ksic11.json`)에 코드가 있으면 그 표만**, 없으면 제10차(`ksic10.json`)입니다.
-같은 코드를 두 표에서 이어 붙이지 않습니다(10·11차에서 의미가 다를 수 있음).
-11차 JSON은 연계표 엑셀을 `scripts/build_ksic11.py`에, 10차는 `scripts/build_ksic10.py`에 넘깁니다.
-이미 `ok`인 회사는 `scripts/remap_corp_ksic_names.py`로 OpenDART 없이 이름만 다시 채웁니다.
 
 ## 본문 정제 (blocks)
 
@@ -346,7 +149,7 @@ cron 예: `0 1 * * * cd /path/to/packages/web-api && .venv/bin/python scripts/ni
 처음 열면 토큰 입력 화면으로 이동하며, 입력한 토큰은 HttpOnly 쿠키에 저장됩니다.
 
 - **왼쪽(완전성 탐색)**: 연도 요약 바 → 선택 연도의 일별 히트맵 → 선택 연도 슬라이스 요약
-- **오른쪽(실행 컨트롤)**: 최근 작업 상태 카드(항상 표시) → **회사 업종** 패널(공시 distinct 회사 수·완료·잔여, 「빠진 회사 채우기」) → 수집 폼(기본 접힘) → 로그
+- **오른쪽(실행 컨트롤)**: 최근 작업 상태 카드(항상 표시) → 수집 폼(기본 접힘) → 로그
 - **상단 유형 칩**: `HEATMAP_REPORT_TYPES`(기본 `A001,A002,A003,F001,F002,F004`)를 눌러 보고서 유형을 전환합니다.
 칩에는 코드와 한국어 명칭(A001 사업보고서, A002 반기보고서, A003 분기보고서, F001 감사보고서,
 F002 연결감사보고서, F004 회계법인사업보고서)이 함께 나옵니다.
@@ -391,8 +194,8 @@ HTMX가 작업 카드·로그·슬라이스 요약·히트맵은 5초, 연도 �
 
 이미 `entries`만 있는 DB에는 한 번 실행합니다.
 
-```bash
-.venv\Scripts\python.exe scripts/backfill_disclosures.py
+```powershell
+.\.venv\Scripts\python.exe scripts/backfill_disclosures.py
 ```
 
 수집(`POST /admin/catalog/extract`) 이후부터는 disclosure가 자동 갱신됩니다.
@@ -404,22 +207,16 @@ HTMX가 작업 카드·로그·슬라이스 요약·히트맵은 5초, 연도 �
 
 ## 테스트
 
-```bash
-.venv\Scripts\python.exe -m pytest -v
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q --tb=short
 ```
 
 테스트는 실제 DART 서버를 호출하지 않습니다(인메모리 SQLite + httpx MockTransport).
 
 ## 설정
 
-`.env.example`을 참고해 `.env`를 만듭니다. 개발은 SQLite, 배포는 Neon PostgreSQL을 쓰며 `DATABASE_URL`만 교체하면 됩니다.
+`.env.example`을 참고해 `.env`를 만듭니다. 로컬 개발은 SQLite를 사용할 수 있고, 공개 앱은 `DATABASE_URL`이 `postgresql+asyncpg://`로 시작해야 프로세스가 시작됩니다.
 
 Admin 운영 관련 설정은 `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`(감사 추출의 차단 대기. 카탈로그 수집은 차단되면 작업을 멈춤), `HEATMAP_REPORT_TYPES`, `DART_FETCH_MIN_INTERVAL_SECONDS`입니다.
 `HEATMAP_REPORT_TYPES`는 히트맵·유형 토글에 고정 표시할 보고서 유형(쉼표 구분, 기본 `A001,A002,A003,F001,F002,F004`)입니다.
 코드별 한국어 명칭은 `app/report_types.py`에 있으며, 목록에 없는 코드는 코드 그대로 표시합니다.
-
-감사보고서일 LLM 해소는 `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`, `DATE_RESOLVER_PROMPT_VERSION`입니다.
-키가 비어 있으면 `POST /admin/extract/resolve-dates`는 시작하지 않습니다.
-
-회사 업종 보강은 `OPENDART_API_KEY`와 선택인 `OPENDART_API_KEY_2`입니다. 키가 모두 비어 있으면 `POST /admin/corps/enrich`와 Admin 「빠진 회사 채우기」가 시작되지 않습니다. 첫 키 한도가 차면 둘째 키로 이어 갑니다.
-속도는 `OPENDART_MAX_PER_MINUTE`(기본 200)·`OPENDART_CONCURRENCY`(기본 2)입니다.

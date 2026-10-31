@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import get_catalog_query_service
+from app.api.catalog_deps import get_catalog_query_service
 from app.schemas.catalog_query import (
     DisclosureEntriesResponse,
     DisclosureListResponse,

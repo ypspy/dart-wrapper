@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_viewer_service
+from app.api.catalog_deps import get_viewer_service
 from app.schemas.viewer import DisclosureContent, SectionContent
 from app.services.viewer_service import ViewerService
 

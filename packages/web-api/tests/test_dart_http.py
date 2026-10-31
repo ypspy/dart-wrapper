@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -87,6 +88,39 @@ async def test_fetch_html_waits_min_interval_between_requests() -> None:
         fetcher = DartHttpClient(client, min_interval_seconds=0.05)
         await fetcher.fetch_html("https://dart.fss.or.kr/a")
         await fetcher.fetch_html("https://dart.fss.or.kr/b")
+
+    assert len(times) == 2
+    assert times[1] - times[0] >= 0.05
+
+
+async def test_fetch_html_waits_full_interval_when_sleep_returns_early() -> None:
+    """sleep이 일찍 깨어나도 요청 사이 간격은 최소 간격을 채운다."""
+    clock = {"now": 1000.0}
+    times: list[float] = []
+
+    def fake_perf_counter() -> float:
+        return clock["now"]
+
+    async def early_sleep(delay: float) -> None:
+        # 긴 대기는 절반만 흐르고, 짧은 잔여는 그대로 채운다.
+        # 부동소수로 더해지지 않는 잔여는 시계를 한 칸 민다.
+        step = delay / 2 if delay > 0.01 else delay
+        if clock["now"] + step == clock["now"]:
+            step = max(delay, 1e-6)
+        clock["now"] += step
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        times.append(clock["now"])
+        return httpx.Response(200, text="<html></html>")
+
+    with (
+        patch("app.adapters.dart_http.asyncio.sleep", early_sleep),
+        patch("time.perf_counter", fake_perf_counter),
+    ):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            fetcher = DartHttpClient(client, min_interval_seconds=0.05)
+            await fetcher.fetch_html("https://dart.fss.or.kr/a")
+            await fetcher.fetch_html("https://dart.fss.or.kr/b")
 
     assert len(times) == 2
     assert times[1] - times[0] >= 0.05

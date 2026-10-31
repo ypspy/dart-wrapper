@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 
 import httpx
 
@@ -72,17 +73,22 @@ class DartHttpClient:
         self._pace_lock = asyncio.Lock()
 
     async def _wait_interval(self) -> None:
-        """직전 DART 요청과의 최소 간격을 지킨다."""
+        """직전 DART 요청과의 최소 간격을 지킨다.
+
+        asyncio.sleep은 요청한 시간보다 일찍 깨어날 수 있어, 단조 시계가
+        간격을 채울 때까지 남은 시간만큼 다시 잔다.
+        """
         if self._min_interval_seconds <= 0:
             return
         async with self._pace_lock:
-            now = asyncio.get_running_loop().time()
-            if self._last_request_at is not None:
-                wait = self._min_interval_seconds - (now - self._last_request_at)
-                if wait > 0:
-                    await asyncio.sleep(wait)
-                    now = asyncio.get_running_loop().time()
-            self._last_request_at = now
+            while self._last_request_at is not None:
+                remaining = self._min_interval_seconds - (
+                    time.perf_counter() - self._last_request_at
+                )
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(remaining)
+            self._last_request_at = time.perf_counter()
 
     async def fetch_html(self, url: str) -> str:
         """원문 HTML을 가져와 문자열로 반환한다.

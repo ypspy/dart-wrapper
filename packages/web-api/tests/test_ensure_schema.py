@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
+from app.db.session import (
+    _COLUMN_PATCHES,
+    create_db_engine,
+    create_sessionmaker,
+    ensure_schema,
+)
 from app.models.catalog_job import CatalogJob
 from app.repositories.job_repository import JobRepository
 
@@ -52,8 +57,15 @@ async def test_ensure_schema_adds_mode_to_legacy_catalog_jobs() -> None:
     await engine.dispose()
 
 
-async def test_ensure_schema_adds_hours_to_legacy_audit_report_facts() -> None:
-    """예전 스키마(실시내용 컬럼 없음) DB를 열어두면 hours가 생긴다."""
+def test_column_patches_are_catalog_only() -> None:
+    """기동 열 보정은 카탈로그 테이블만 다룬다."""
+    tables = {table for table, _column, _sqlite, _postgres in _COLUMN_PATCHES}
+    assert tables <= {"catalog_jobs", "entries"}
+    assert "audit_report_facts" not in tables
+
+
+async def test_ensure_schema_does_not_patch_audit_report_facts() -> None:
+    """예전 감사 테이블이 있어도 기동 스키마는 연구 열을 보강하지 않는다."""
     engine = create_db_engine("sqlite+aiosqlite:///:memory:")
 
     async with engine.begin() as connection:
@@ -79,50 +91,5 @@ async def test_ensure_schema_adds_hours_to_legacy_audit_report_facts() -> None:
                 await connection.execute(text("PRAGMA table_info(audit_report_facts)"))
             ).fetchall()
         }
-    assert "hours" in columns
-    assert "accounts" in columns
-    assert "accounts_status" in columns
-    assert "bs_entry_id" in columns
-    assert "is_entry_id" in columns
-    assert "fs_parent_entry_id" in columns
-    assert "icfr_entry_id" in columns
-    assert "icfr_engagement" in columns
-    assert "icfr_opinion_raw" in columns
-    assert "icfr_opinion_code" in columns
-    assert "icfr_status" in columns
-    assert "going_concern" in columns
-    assert "going_concern_status" in columns
-    assert "going_concern_raw" in columns
-    assert "going_concern_source" in columns
-    assert "subsidiary_count" in columns
-    assert "subsidiary_status" in columns
-    assert "subsidiary_source" in columns
-    assert "notes_entry_id" in columns
-    assert "a001_affiliate_entry_id" in columns
     await engine.dispose()
-
-
-async def test_ensure_schema_creates_corps_table() -> None:
-    """빈 DB를 열면 corps 테이블이 생긴다."""
-    engine = create_db_engine("sqlite+aiosqlite:///:memory:")
-    await ensure_schema(engine)
-    async with engine.begin() as connection:
-        rows = (
-            await connection.execute(
-                text(
-                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'corps'"
-                )
-            )
-        ).first()
-        columns = {
-            row[1]
-            for row in (await connection.execute(text("PRAGMA table_info(corps)"))).fetchall()
-        }
-    await engine.dispose()
-    assert rows is not None
-    assert "corp_code" in columns
-    assert "induty_code" in columns
-    assert "induty_name_div" in columns
-    assert "fetch_status" in columns
-    assert "opendart_status" in columns
-    assert "fetched_at" in columns
+    assert "hours" not in columns

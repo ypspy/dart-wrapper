@@ -6,10 +6,8 @@ from datetime import datetime, timezone
 
 from app.api.deps import (
     get_catalog_service,
-    get_corp_industry_service,
     get_slice_query_service,
 )
-from app.errors import CatalogNotFound
 from app.main import create_app
 from app.schemas.catalog import (
     DisclosureAttemptItem,
@@ -25,7 +23,6 @@ from app.schemas.catalog import (
     YearSummaryItem,
     YearSummaryResponse,
 )
-from app.services.corp_industry_service import CorpIndustrySummary
 
 SUMMARY = SliceSummary(
     slice_id="s1",
@@ -178,18 +175,6 @@ class FakeCatalogService:
         self.force_finished.append(job_id)
 
 
-class FakeCorpIndustryService:
-    """회사 업종 작업 이력이 없는 대시보드 상태를 흉내 낸다."""
-
-    async def summarize(self) -> CorpIndustrySummary:
-        """빈 회사 업종 집계를 반환한다."""
-        return CorpIndustrySummary(disclosure_corps=0, ok_count=0, remaining_count=0)
-
-    async def get_status(self, job_id: str | None) -> None:
-        """최근 회사 업종 작업이 없음을 알린다."""
-        raise CatalogNotFound("회사 업종 작업을 찾을 수 없습니다.")
-
-
 def _app(
     catalog: FakeCatalogService | None = None,
     slices: FakeSliceQueryService | None = None,
@@ -198,7 +183,6 @@ def _app(
     query_service = slices or FakeSliceQueryService()
     app.dependency_overrides[get_slice_query_service] = lambda: query_service
     app.dependency_overrides[get_catalog_service] = lambda: catalog or FakeCatalogService()
-    app.dependency_overrides[get_corp_industry_service] = lambda: FakeCorpIndustryService()
     return app
 
 
@@ -248,13 +232,16 @@ async def test_admin_index_defaults_to_latest_job_report_type(client_factory) ->
     assert 'class="report-type-chip is-selected"' in body
 
 
-async def test_admin_index_has_extract_nav(client_factory) -> None:
-    """수집 화면에 추출 화면 링크가 있다."""
+async def test_admin_nav_has_collect_only(client_factory) -> None:
+    """수집 화면에는 수집 링크만 있고 추출·검토·사이클 링크는 없다."""
     async with client_factory(_app()) as client:
         client.cookies.set("admin_token", "dev-admin-token")
         response = await client.get("/admin")
     assert response.status_code == 200
-    assert 'href="/admin/extract"' in response.text
+    assert 'href="/admin"' in response.text
+    assert 'href="/admin/extract"' not in response.text
+    assert 'href="/admin/reviews"' not in response.text
+    assert 'href="/admin/cycle"' not in response.text
 
 
 async def test_admin_index_renders_two_column_ops_console(client_factory) -> None:
@@ -322,6 +309,18 @@ async def test_admin_index_collect_form_poll_includes_current_fields(client_fact
     assert 'hx-get="/admin/collect-form"' in response.text
     assert 'hx-include="find form"' in response.text
     assert "start_date={{ start_date }}" not in response.text
+
+
+async def test_admin_index_omits_corps_panel(client_factory) -> None:
+    """수집 대시보드는 연구 앱의 회사 업종 패널을 불러오지 않는다."""
+    async with client_factory(_app()) as client:
+        client.cookies.set("admin_token", "dev-admin-token")
+        response = await client.get("/admin")
+
+    body = response.text
+    assert response.status_code == 200
+    assert 'hx-get="/admin/corps-panel"' not in body
+    assert "회사 업종" not in body
 
 
 async def test_admin_index_collect_form_is_collapsed_by_default(client_factory) -> None:
