@@ -10,9 +10,9 @@ import argparse
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -33,8 +33,9 @@ from app.sections.toc import (
     parse_toc,
 )
 
-_CHICAGO = ZoneInfo("America/Chicago")
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+_CHICAGO_ZONE: ZoneInfo | None = None
+_CHICAGO_ZONE_READY = False
 _BLOCK_MARKERS = ("자동입력 방지", "captcha", "비정상적인 접근", "요청이 차단")
 QUIET_WINDOW_MESSAGE = (
     "지금은 미국 중부시간(시카고) 00:00–04:59라서 시작하지 않습니다. "
@@ -83,9 +84,53 @@ class LoadSummary:
 
 def in_collector_quiet_window(now: datetime) -> bool:
     """시카고 기준 00:00–04:59이면 참. 05:00부터는 거짓."""
+    return _as_chicago(now).hour < 5
+
+
+def _as_chicago(now: datetime) -> datetime:
+    """시각을 미국 중부시간으로 바꾼다. tzdb가 없으면 서머타임 규칙으로 계산한다."""
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-    return now.astimezone(_CHICAGO).hour < 5
+    utc = now.astimezone(timezone.utc)
+    zone = _chicago_zone()
+    if zone is not None:
+        return utc.astimezone(zone)
+    return _chicago_from_rule(utc)
+
+
+def _chicago_zone() -> ZoneInfo | None:
+    """America/Chicago를 연다. Windows처럼 tzdb가 없으면 None."""
+    global _CHICAGO_ZONE, _CHICAGO_ZONE_READY
+    if not _CHICAGO_ZONE_READY:
+        _CHICAGO_ZONE_READY = True
+        try:
+            _CHICAGO_ZONE = ZoneInfo("America/Chicago")
+        except (ZoneInfoNotFoundError, ModuleNotFoundError):
+            _CHICAGO_ZONE = None
+    return _CHICAGO_ZONE
+
+
+def _chicago_from_rule(utc: datetime) -> datetime:
+    """tzdb 없이 미국 중부시간을 계산한다.
+
+    2007년 이후 미국 규칙이다. 서머타임(UTC-5)은 3월 둘째 일요일 02:00
+    표준시부터 11월 첫째 일요일 02:00 일광절약시 직전까지고, 그 밖은
+    표준시(UTC-6)다. 그 두 시각은 UTC로 08:00과 07:00이다.
+    """
+    if utc.tzinfo is None:
+        utc = utc.replace(tzinfo=timezone.utc)
+    utc = utc.astimezone(timezone.utc)
+    start = _nth_sunday(utc.year, 3, 2).replace(hour=8)
+    end = _nth_sunday(utc.year, 11, 1).replace(hour=7)
+    offset_hours = -5 if start <= utc < end else -6
+    return utc.astimezone(timezone(timedelta(hours=offset_hours)))
+
+
+def _nth_sunday(year: int, month: int, n: int) -> datetime:
+    """그 해 그 달의 n번째 일요일 00:00 UTC."""
+    first = datetime(year, month, 1, tzinfo=timezone.utc)
+    days_until_sunday = (6 - first.weekday()) % 7
+    return first + timedelta(days=days_until_sunday + (n - 1) * 7)
 
 
 def _utcnow() -> datetime:

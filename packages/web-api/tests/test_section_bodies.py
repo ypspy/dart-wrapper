@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -16,6 +16,7 @@ from app.errors import SourceFetchError
 from app.sections.load import (
     CollectorWindowError,
     LoadSummary,
+    _chicago_from_rule,
     build_parser,
     in_collector_quiet_window,
     load_section_bodies,
@@ -227,6 +228,71 @@ def test_normalize_body_collapses_blank_lines() -> None:
 )
 def test_quiet_window_follows_chicago_clock(moment: datetime, quiet: bool) -> None:
     assert in_collector_quiet_window(moment) is quiet
+
+
+def test_quiet_window_uses_dst_rule_when_tzdata_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows에는 시스템 tzdb가 없다. ZoneInfo가 실패해도 같은 창을 쓴다."""
+    monkeypatch.setattr("app.sections.load._chicago_zone", lambda: None)
+    cases = [
+        (datetime(2026, 11, 5, 6, 30, tzinfo=timezone.utc), True),
+        (datetime(2026, 11, 5, 10, 59, tzinfo=timezone.utc), True),
+        (datetime(2026, 11, 5, 11, 0, tzinfo=timezone.utc), False),
+        (datetime(2026, 11, 5, 5, 0, tzinfo=timezone.utc), False),
+        (datetime(2026, 7, 15, 5, 30, tzinfo=timezone.utc), True),
+        (datetime(2026, 7, 15, 10, 0, tzinfo=timezone.utc), False),
+        # 2026-03-08은 둘째 일요일. 07:59 UTC=01:59 CST, 08:00 UTC=03:00 CDT.
+        (datetime(2026, 3, 8, 7, 59, tzinfo=timezone.utc), True),
+        (datetime(2026, 3, 8, 8, 0, tzinfo=timezone.utc), True),
+        (datetime(2026, 3, 8, 10, 0, tzinfo=timezone.utc), False),
+        # 2026-11-01은 첫째 일요일. 06:59 UTC=01:59 CDT, 07:00 UTC=01:00 CST.
+        (datetime(2026, 11, 1, 6, 59, tzinfo=timezone.utc), True),
+        (datetime(2026, 11, 1, 7, 0, tzinfo=timezone.utc), True),
+        (datetime(2026, 11, 1, 11, 0, tzinfo=timezone.utc), False),
+    ]
+    for moment, quiet in cases:
+        assert in_collector_quiet_window(moment) is quiet, moment
+
+
+def test_dst_rule_offsets_at_the_transitions() -> None:
+    spring_before = _chicago_from_rule(datetime(2026, 3, 8, 7, 59, tzinfo=timezone.utc))
+    spring_after = _chicago_from_rule(datetime(2026, 3, 8, 8, 0, tzinfo=timezone.utc))
+    fall_before = _chicago_from_rule(datetime(2026, 11, 1, 6, 59, tzinfo=timezone.utc))
+    fall_after = _chicago_from_rule(datetime(2026, 11, 1, 7, 0, tzinfo=timezone.utc))
+
+    assert spring_before.utcoffset() == timedelta(hours=-6)
+    assert spring_before.hour == 1 and spring_before.minute == 59
+    assert spring_after.utcoffset() == timedelta(hours=-5)
+    assert spring_after.hour == 3 and spring_after.minute == 0
+    assert fall_before.utcoffset() == timedelta(hours=-5)
+    assert fall_before.hour == 1 and fall_before.minute == 59
+    assert fall_after.utcoffset() == timedelta(hours=-6)
+    assert fall_after.hour == 1 and fall_after.minute == 0
+
+
+def test_dst_rule_matches_iana_chicago_when_tzdb_exists() -> None:
+    """규칙 구현이 설치본 ZoneInfo와 같은 벽시계를 내는지 시간 단위로 대조한다."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        zone = ZoneInfo("America/Chicago")
+    except ZoneInfoNotFoundError:
+        pytest.skip("이 환경에는 America/Chicago 시간대 자료가 없습니다.")
+
+    cursor = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2027, 1, 1, tzinfo=timezone.utc)
+    while cursor < end:
+        via_rule = _chicago_from_rule(cursor)
+        via_iana = cursor.astimezone(zone)
+        assert via_rule.utcoffset() == via_iana.utcoffset(), cursor
+        assert (via_rule.year, via_rule.month, via_rule.day, via_rule.hour) == (
+            via_iana.year,
+            via_iana.month,
+            via_iana.day,
+            via_iana.hour,
+        ), cursor
+        cursor += timedelta(hours=1)
 
 
 async def test_load_upserts_and_skips_until_refresh(tmp_path: Path) -> None:
