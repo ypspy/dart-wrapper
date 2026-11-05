@@ -200,6 +200,64 @@ HTMX가 작업 카드·로그·슬라이스 요약·히트맵은 5초, 연도 �
 
 수집(`POST /admin/catalog/extract`) 이후부터는 disclosure가 자동 갱신됩니다.
 
+## 감리결과 섹션 본문
+
+회계법인사업보고서(F004)의 `Ⅵ. 감리결과` 절 평문을 카탈로그와 분리된 SQLite에 넣습니다.
+카탈로그(`dart_catalog.db`)는 URI `mode=ro`로만 열고, 본문은 `dart_sections.db`의
+`section_bodies`에 upsert 합니다. 두 DB 모두 `packages/web-api/*.db`라 커밋하지 않습니다.
+출력 파일은 WAL 모드입니다.
+
+상세페이지 `main.do`의 목차에서 절을 고른 뒤, 그 노드의 `viewer.do`를 한 번 받아
+제목·문단·표 셀을 평문으로 저장합니다. 부모 절 응답에 하위 절과 표가 들어 있으므로
+`1. 감사보고서 감리결과` 같은 자식 주소는 따로 받지 않습니다. 표가 감리 내용의 본체라
+평문에 셀을 포함합니다.
+
+요청은 한 건씩이고, DART 요청 사이 기본 간격은 1초입니다. 공시마다 상세·본문 두 요청이라
+약 3천 건이면 한 시간 반보다 오래 걸립니다. 이미 받은 접수와 `not_found`(목차에 절 없음)는
+건너뛰고, 네트워크 실패(`fetch_error`)는 다음 실행에서 다시 시도합니다.
+
+미국 중부시간(시카고) 00:00–04:59에는 시작하지 않습니다. 실행 중 그 시각이 되면
+저장한 데까지 멈추고, 이후 같은 명령으로 이어 받습니다. 야간 수집이 그 시간에 DART를 씁니다.
+
+`packages/web-api`에서 실행합니다.
+
+```powershell
+cd packages\web-api
+.\.venv\Scripts\python.exe scripts\load_section_bodies.py
+```
+
+자주 쓰는 인자:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\load_section_bodies.py `
+    --catalog-db dart_catalog.db `
+    --sections-db dart_sections.db `
+    --report-type F004 `
+    --section-code VI `
+    --interval 1.0 `
+    --limit 20
+```
+
+| 인자 | 기본 | 설명 |
+|------|------|------|
+| `--catalog-db` | `packages/web-api/dart_catalog.db` | 읽기 전용 카탈로그 |
+| `--sections-db` | `packages/web-api/dart_sections.db` | 본문 DB |
+| `--report-type` | `F004` | `disclosures.report_type` |
+| `--section-code` | `VI` | `VI`·`Ⅵ`·`6`은 모두 `VI`로 저장 |
+| `--interval` | `1.0` | DART 요청 최소 간격(초) |
+| `--limit` | `0` | 이번에 새로 시도할 건수. 0이면 전부 |
+| `--refresh` | 끔 | 받은 본문과 섹션 없음도 다시 받음 |
+| `--ignore-window` | 끔 | 시카고 00:00–04:59에도 실행 |
+
+끝나면 `attempted=… loaded=… not_found=… failed=…` 한 줄을 출력합니다.
+`attempted`는 이번에 실제로 처리한 건수이고, 건너뛴 접수는 들어가지 않습니다.
+
+제목은 로마 숫자·전각 문자·글자 사이 공백·`제6장`을 같은 절로 봅니다.
+2016년 이후 표본의 실제 제목은 `Ⅵ. 감리결과`가 아니라
+`Ⅵ. 최근 3개 사업연도의 감리결과`입니다. 번호가 다른 절(예: `Ⅴ. …`)은 맞지 않습니다.
+2016-04-01 이전 회계법인 사업보고서는 DART 목차 없이 금감원 회계포탈에만 있는 경우가 있어,
+짧은 응답은 `fetch_error`로 남고 다음 실행에서 다시 시도합니다.
+
 ## 엔트리 수집 경로
 
 수집은 Node `@dart-wrapper/entry-extractor`의 CLI 브릿지를 서브프로세스로 호출합니다.
