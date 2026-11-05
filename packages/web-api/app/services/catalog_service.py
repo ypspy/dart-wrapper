@@ -1,7 +1,7 @@
 """Admin 카탈로그 수집 오케스트레이션.
 
 수집은 `report_type × 날짜` 슬라이스로 나누고, 슬라이스 안에서는 공시(접수번호) 하나를
-처리할 때마다 저장·기록을 확정한다. 그래서 차단·중단으로 끊겨도 성공분은 남고,
+처리할 때마다 저장·기록을 확정한다. 그래서 차단·중단·시간 한도로 끊겨도 성공분은 남고,
 재개 시에는 실패·미처리 공시만 다시 처리한다.
 """
 
@@ -75,6 +75,8 @@ class SliceOutcome:
     listed: int
     complete: bool
     halt: bool
+    # 공시를 시작하기 전에 시간 한도에 걸려 남은 공시를 두지 않은 경우.
+    budget: bool = False
 
 
 def iter_dates(start_date: str, end_date: str) -> list[str]:
@@ -409,6 +411,7 @@ class CatalogService:
                     report_type,
                     slice_date,
                     include_attachments,
+                    deadline=deadline,
                 )
                 saved_total += outcome.saved
                 processed_total += outcome.processed
@@ -423,6 +426,15 @@ class CatalogService:
                         job_id,
                         "error",
                         "차단이 이어져 다음 날짜로 넘어가지 않고 작업을 멈춥니다.",
+                    )
+                    break
+                if outcome.budget:
+                    # 잘라낸 슬라이스는 위에서 미완료로 집계했다. 뒤 날짜는 시작하지 않는다.
+                    stop_reason = "budget"
+                    await self._log(
+                        job_id,
+                        "warning",
+                        "시간 한도에 도달해 남은 슬라이스를 다음 실행으로 넘깁니다.",
                     )
                     break
 
@@ -478,10 +490,13 @@ class CatalogService:
         report_type: str,
         slice_date: str,
         include_attachments: bool,
+        deadline: float | None = None,
     ) -> SliceOutcome:
         """하루치 슬라이스를 처리한다.
 
         반환은 저장·처리 건수와 완료 여부, 그리고 작업을 멈춰야 하는지다.
+        `deadline`이 있으면 공시를 시작하기 전에 확인한다. 한도를 넘기면
+        그 공시는 시작하지 않고, 이미 저장한 공시만 남긴 채 슬라이스를 완료로 닫지 않는다.
         작업 현황 프로그레스는 해당일 입수/입수대상만 갱신한다.
         """
         async with self._sessionmaker() as session:
@@ -547,10 +562,16 @@ class CatalogService:
         processed = 0
         blocked = False
         block_streak = 0
+        budget_hit = False
 
         for item in listed.items:
             if job_id in self._stop_requested:
                 await self._log(job_id, "warning", f"{slice_date} 처리를 중단했습니다.")
+                break
+            # 한도는 슬라이스 사이뿐 아니라 공시 경계에서도 본다. 진행 중인 공시는 끝내고,
+            # 다음 공시를 시작하기 전에 멈춘다. deadline이 없으면 이 검사는 하지 않는다.
+            if deadline is not None and self._monotonic() >= deadline:
+                budget_hit = True
                 break
 
             saved, outcome = await self._process_disclosure(
@@ -621,6 +642,11 @@ class CatalogService:
                 await slices.mark_slice_status(slice_id, "blocked")
                 updated = await slices.get_slice(slice_id)
             is_complete = updated is not None and updated.status == "complete"
+            # 한도로 중간에 끊긴 슬라이스는 성공 건수가 목록과 같아도 완료로 남기지 않는다.
+            if budget_hit and is_complete:
+                await slices.mark_slice_status(slice_id, "pending")
+                updated = await slices.get_slice(slice_id)
+                is_complete = False
             await JobRepository(session).add_log(
                 job_id,
                 "info" if is_complete else "warning",
@@ -638,6 +664,7 @@ class CatalogService:
             listed.listed_count,
             is_complete,
             blocked,
+            budget_hit,
         )
 
     async def _process_disclosure(
