@@ -4,7 +4,9 @@
 // 진행 로그는 stdout을 오염시키지 않도록 stderr로 보낸다.
 //
 // mode 별 계약:
-//   list    → { listed_count, items }   기간(보통 하루) 목록과 원천 총건수
+//   list    → { listed_count, total_known, items, page_summary? }
+//             기간(보통 하루) 목록과 원천 총건수. page_summary는 총건수를
+//             확인하지 못한 알 수 없는 페이지의 진단이다.
 //   extract → Entry[]                   공시 1건의 leaf 엔트리
 //   collect → Entry[]                   기간 전체 일괄 수집(기존 동작)
 const {
@@ -35,24 +37,29 @@ function requireRange(params) {
 async function runList(params) {
   requireRange(params);
 
-  const { listedCount, totalKnown, disclosures, error } = await fetchDisclosureListResult({
-    reportType: params.report_type,
-    startDate: params.start_date,
-    endDate: params.end_date,
-    maxTotal: params.max_total ?? null,
-    onProgress: (info) => {
-      if (info.type === 'total') {
-        process.stderr.write(`[목록] ${params.start_date} 총 ${info.totalCount}건\n`);
-      }
-    },
-  });
+  const { listedCount, totalKnown, disclosures, error, pageSummary } =
+    await fetchDisclosureListResult({
+      reportType: params.report_type,
+      startDate: params.start_date,
+      endDate: params.end_date,
+      maxTotal: params.max_total ?? null,
+      onProgress: (info) => {
+        if (info.type === 'total') {
+          process.stderr.write(`[목록] ${params.start_date} 총 ${info.totalCount}건\n`);
+        }
+      },
+    });
 
   // 목록을 온전히 못 가져오면 완전성 판정이 어긋나므로 실패로 알린다.
   if (error) throw new Error(`목록 수집 실패: ${error.message}`);
 
-  process.stdout.write(
-    JSON.stringify({ listed_count: listedCount, total_known: totalKnown, items: disclosures })
-  );
+  const payload = {
+    listed_count: listedCount,
+    total_known: totalKnown,
+    items: disclosures,
+  };
+  if (pageSummary) payload.page_summary = pageSummary;
+  process.stdout.write(JSON.stringify(payload));
 }
 
 async function runExtract(params) {

@@ -43,11 +43,13 @@ class DisclosureListResult(BaseModel):
 
     `listed_count`는 원천이 알려준 총건수다.
     `total_known`이 아니면 그 숫자는 완료 판정에 쓸 수 없다.
+    `page_summary`는 총건수도 빈 결과 표시도 없는 페이지의 진단이다.
     """
 
     listed_count: int
     total_known: bool = True
     items: list[DisclosureListItem] = Field(default_factory=list)
+    page_summary: str | None = None
 
 
 class EntryCollector(Protocol):

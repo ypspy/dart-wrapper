@@ -534,11 +534,10 @@ class CatalogService:
                 slices = SliceRepository(session)
                 await slices.set_listed(slice_id, None, job_id)
                 await slices.mark_slice_status(slice_id, "failed")
-                await JobRepository(session).add_log(
-                    job_id,
-                    "error",
-                    f"{slice_date} 총건수를 확인하지 못해 완료로 닫지 않습니다.",
-                )
+                message = f"{slice_date} 총건수를 확인하지 못해 완료로 닫지 않습니다."
+                if listed.page_summary:
+                    message = f"{message} {listed.page_summary}"
+                await JobRepository(session).add_log(job_id, "error", message)
                 await session.commit()
             return SliceOutcome(0, 0, 0, False, False)
 
