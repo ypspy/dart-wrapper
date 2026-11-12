@@ -66,6 +66,7 @@ class NodeEntryCollector:
                 listed_count=len(items),
                 total_known=False,
                 items=items,
+                page_summary=result.page_summary,
             )
         return result
 

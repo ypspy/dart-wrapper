@@ -309,9 +309,10 @@ async def test_soft_stop_halts_remaining_slices(sessionmaker_fixture) -> None:
 class EmptyListCollector(ScriptedCollector):
     """총건수 확인 여부를 지정할 수 있는 빈 목록 수집기."""
 
-    def __init__(self, *, total_known: bool) -> None:
+    def __init__(self, *, total_known: bool, page_summary: str | None = None) -> None:
         super().__init__(rcept_nos=())
         self._total_known = total_known
+        self._page_summary = page_summary
 
     async def list_disclosures(self, request: CollectRequest) -> DisclosureListResult:
         self.list_calls.append(request)
@@ -319,6 +320,7 @@ class EmptyListCollector(ScriptedCollector):
             listed_count=0,
             total_known=self._total_known,
             items=[],
+            page_summary=self._page_summary,
         )
 
 
@@ -360,6 +362,42 @@ async def test_unknown_total_zero_is_not_complete(sessionmaker_fixture) -> None:
     assert rows[0].status == "failed"
     assert rows[0].status != "complete"
     assert rows[0].listed_count is None
+
+
+async def test_confirmed_zero_is_not_closed_as_failed(sessionmaker_fixture) -> None:
+    """확인된 0건은 총건수 미확인 실패로 닫지 않는다."""
+    collector = EmptyListCollector(total_known=True)
+    service = _service(sessionmaker_fixture, collector)
+
+    response = await service.start_extract(REQUEST)
+    await service.run_job(response.job_id, REQUEST)
+
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status != "failed"
+    assert rows[0].listed_count == 0
+    status = await service.get_status(response.job_id)
+    assert not any("총건수를 확인하지 못해" in log.message for log in status.logs)
+
+
+async def test_unknown_page_stays_failed_with_summary(sessionmaker_fixture) -> None:
+    """총건수를 모르는 페이지는 실패로 남고 로그에 진단 요약을 붙인다."""
+    summary = "응답 120자, tbody 없음, 행 0건, 본문: 요청이 차단되었습니다"
+    collector = EmptyListCollector(total_known=False, page_summary=summary)
+    service = _service(sessionmaker_fixture, collector)
+
+    response = await service.start_extract(REQUEST)
+    await service.run_job(response.job_id, REQUEST)
+
+    rows = await _slices(sessionmaker_fixture)
+    assert rows[0].status == "failed"
+    assert rows[0].listed_count is None
+    status = await service.get_status(response.job_id)
+    assert any(
+        log.level == "error"
+        and "총건수를 확인하지 못해 완료로 닫지 않습니다." in log.message
+        and summary in log.message
+        for log in status.logs
+    )
 
 
 async def test_confirmed_zero_on_business_day_needs_second_look(sessionmaker_fixture) -> None:
