@@ -59,9 +59,13 @@ async def test_ensure_schema_adds_mode_to_legacy_catalog_jobs() -> None:
 
 def test_column_patches_are_catalog_only() -> None:
     """기동 열 보정은 카탈로그 테이블만 다룬다."""
-    tables = {table for table, _column, _sqlite, _postgres in _COLUMN_PATCHES}
-    assert tables <= {"catalog_jobs", "entries"}
-    assert "audit_report_facts" not in tables
+    patches = {(table, column) for table, column, _sqlite, _postgres in _COLUMN_PATCHES}
+    assert patches <= {
+        ("catalog_jobs", "mode"),
+        ("entries", "ordinal"),
+        ("slice_progress", "empty_confirmations"),
+    }
+    assert "audit_report_facts" not in {table for table, _column in patches}
 
 
 async def test_ensure_schema_does_not_patch_audit_report_facts() -> None:

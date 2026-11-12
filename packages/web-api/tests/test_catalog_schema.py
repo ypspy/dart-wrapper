@@ -41,9 +41,13 @@ raise SystemExit(0)
 
 
 def test_column_patches_are_catalog_only() -> None:
-    tables = {table for table, _column, _sqlite, _postgres in _COLUMN_PATCHES}
-    assert tables <= {"catalog_jobs", "entries"}
-    assert "audit_report_facts" not in tables
+    patches = {(table, column) for table, column, _sqlite, _postgres in _COLUMN_PATCHES}
+    assert patches <= {
+        ("catalog_jobs", "mode"),
+        ("entries", "ordinal"),
+        ("slice_progress", "empty_confirmations"),
+    }
+    assert "audit_report_facts" not in {table for table, _column in patches}
 
 
 async def test_ensure_schema_does_not_create_research_tables() -> None:

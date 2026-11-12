@@ -21,6 +21,11 @@ from app.models import Base
 
 logger = logging.getLogger(__name__)
 
+# aiosqlite/sqlite3 기본 busy timeout은 5초다.
+# 롤백 저널에서 다른 프로세스의 SHARED 잠금이 COMMIT(PENDING→EXCLUSIVE)을
+# 막으면, 그 5초 안에 수집기가 실패한다. 60초까지 기다린다.
+SQLITE_BUSY_TIMEOUT_SECONDS = 60
+
 # 뼈대 단계에서 Alembic 대신 쓰는 최소 마이그레이션.
 # (테이블명, 컬럼명, SQLite DDL 조각, PostgreSQL DDL 조각)
 _COLUMN_PATCHES: tuple[tuple[str, str, str, str], ...] = (
@@ -45,8 +50,24 @@ _COLUMN_PATCHES: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
+def _is_sqlite_url(database_url: str) -> bool:
+    """sqlite 또는 sqlite+드라이버 URL인지 본다."""
+    scheme = database_url.split(":", 1)[0].lower()
+    return scheme == "sqlite" or scheme.startswith("sqlite+")
+
+
 def create_db_engine(database_url: str) -> AsyncEngine:
-    """DATABASE_URL로 비동기 엔진을 만든다."""
+    """DATABASE_URL로 비동기 엔진을 만든다.
+
+    SQLite는 기본 5초 대신 SQLITE_BUSY_TIMEOUT_SECONDS 동안 잠금을 기다린다.
+    그 외 드라이버는 connect_args를 넣지 않는다.
+    """
+    if _is_sqlite_url(database_url):
+        return create_async_engine(
+            database_url,
+            future=True,
+            connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
+        )
     return create_async_engine(database_url, future=True)
 
 
