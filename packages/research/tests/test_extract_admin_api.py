@@ -1505,4 +1505,3 @@ async def test_field_bundle_items_reject_non_fail_outcome(
         )
     assert response.status_code == 400
     assert "outcome" in response.json()["detail"]
-

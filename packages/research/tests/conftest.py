@@ -10,7 +10,10 @@ import pytest
 from fastapi import FastAPI
 
 # 연구 UI 테스트가 web-api의 가짜 서비스(test_admin_ui)를 재사용한다.
-_WEB_API_TESTS = Path(__file__).resolve().parents[2] / "web-api" / "tests"
+_RESEARCH_ROOT = Path(__file__).resolve().parents[1]
+_WEB_API_TESTS = _RESEARCH_ROOT.parent / "web-api" / "tests"
+if str(_RESEARCH_ROOT) not in sys.path:
+    sys.path.insert(0, str(_RESEARCH_ROOT))
 if str(_WEB_API_TESTS) not in sys.path:
     sys.path.append(str(_WEB_API_TESTS))
 
