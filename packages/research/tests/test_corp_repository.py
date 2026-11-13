@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.db.session import create_all, create_db_engine, create_sessionmaker
 from research.models.corp import Corp
 from app.models.disclosure import Disclosure
-from research.models.extraction_job import ExtractionJob
 from research.repositories.corp_repository import CorpRepository
 from app.repositories.disclosure_repository import DisclosureRepository
 from research.repositories.extraction_job_repository import ExtractionJobRepository

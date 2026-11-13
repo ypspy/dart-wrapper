@@ -375,7 +375,6 @@ def test_extract_activities_planning_schedule_splits_range_and_days() -> None:
     assert schedule["days"] == 3
 
 
-
 def test_extract_activities_inventory_visit_keeps_schedule_place_target() -> None:
     """재고 실사는 회차 1개이고 시기·장소·대상이 items에 있다."""
     activities, _status = extract_activities(_HTML)

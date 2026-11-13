@@ -198,8 +198,9 @@ async def test_reviews_page_opens_default_row_and_rejects_queue_six(
         missing.text,
     )
     assert (
-        'action="/admin/reviews/diagnose?page=1&amp;bundle=&amp;verdict=&amp;rcept_no=20200331000006&amp;dcm_no=11111&amp;key_bundle=accounts&amp;signal=iqr_high&amp;subject=total_equity"'
-        in missing.text
+        'action="/admin/reviews/diagnose?page=1&amp;bundle=&amp;verdict=&amp;'
+        "rcept_no=20200331000006&amp;dcm_no=11111&amp;key_bundle=accounts&amp;"
+        'signal=iqr_high&amp;subject=total_equity"' in missing.text
     )
 
 
@@ -298,8 +299,8 @@ async def test_diagnose_keeps_out_of_slice_natural_key(client_factory: ClientFac
     assert "이 행은 기본 검토 목록에 없습니다." in response.text
     assert "왼쪽에서 한 건을 고르세요." not in response.text
     assert (
-        'action="/admin/reviews/diagnose?page=1&amp;bundle=&amp;verdict=&amp;rcept_no=20200331000006'
-        in response.text
+        'action="/admin/reviews/diagnose?page=1&amp;bundle=&amp;verdict=&amp;'
+        "rcept_no=20200331000006" in response.text
     )
 
 

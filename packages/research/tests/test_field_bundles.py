@@ -6,7 +6,6 @@ from research.extracting.field_bundles import (
     classify_outcome,
     empty_field_bundle_counts,
     icfr_period_year,
-    is_icfr_expected_missing,
     is_listed_for_icfr,
 )
 from research.models.audit_report_fact import AuditReportFact
