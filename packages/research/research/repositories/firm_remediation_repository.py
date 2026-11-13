@@ -10,8 +10,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import Table, delete, select, update
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy import Table, delete, or_, select, update
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from app.models.base import Base
 from research.extracting.firm_remediation import PARSER_VERSION, PreparedDocument
@@ -21,6 +22,8 @@ from research.models.firm_remediation import (
     ExtractionFirmRemediationDocument,
     ExtractionFirmRemediationNote,
 )
+from research.schema import _add_column_if_missing
+from research.services.firm_remediation_loader import FirmRemediationError
 
 
 @dataclass(frozen=True)
@@ -44,8 +47,16 @@ def firm_tables() -> list[Table]:
     ]
 
 
+def _iso_rcept_dt(rcept_no: str) -> str | None:
+    """접수번호 앞 8자리 YYYYMMDD를 ISO 날짜로 바꾼다. 숫자가 아니면 None."""
+    prefix = rcept_no[:8]
+    if len(prefix) != 8 or not prefix.isdigit():
+        return None
+    return f"{prefix[:4]}-{prefix[4:6]}-{prefix[6:8]}"
+
+
 async def create_firm_remediation_tables(engine: AsyncEngine) -> None:
-    """대상 DB에 개선권고 테이블이 없으면 만든다. 카탈로그 테이블은 만들지 않는다."""
+    """대상 DB에 개선권고 테이블이 없으면 만들고, 구문서 테이블에는 rcept_dt를 추가한다."""
     tables = firm_tables()
 
     def _create(sync_conn: object) -> None:
@@ -53,6 +64,24 @@ async def create_firm_remediation_tables(engine: AsyncEngine) -> None:
 
     async with engine.begin() as connection:
         await connection.run_sync(_create)
+        await _add_document_rcept_dt(connection)
+
+
+async def _add_document_rcept_dt(connection: AsyncConnection) -> None:
+    """문서 테이블에 rcept_dt가 없으면 SQLite와 Postgres 모두 ALTER로 추가한다."""
+    dialect = connection.dialect.name
+    try:
+        await _add_column_if_missing(
+            connection,
+            ExtractionFirmRemediationDocument.__tablename__,
+            "rcept_dt",
+            "VARCHAR(16) NOT NULL DEFAULT ''",
+            dialect,
+        )
+    except SQLAlchemyError as exc:
+        raise FirmRemediationError(
+            "기존 문서 테이블에 rcept_dt 컬럼을 추가하지 못해 저장하지 않습니다."
+        ) from exc
 
 
 class FirmRemediationRepository:
@@ -139,7 +168,39 @@ class FirmRemediationRepository:
                 )
             )
         await self._session.flush()
+        await self._backfill_empty_rcept_dt()
         await self._recompute_is_latest(documents)
+
+    async def _backfill_empty_rcept_dt(self) -> None:
+        """rcept_dt가 비어 있는 문서를 접수번호 앞 8자리의 ISO 날짜로 채운다.
+
+        이번 입력에서 다시 넣은 문서는 이미 값이 있다. 구스키마에 남아 있던 같은 그룹만
+        비어 있으면 (rcept_dt, rcept_no) 승자가 뒤집히므로, 비교 전에 채운다.
+        """
+        try:
+            result = await self._session.execute(
+                select(ExtractionFirmRemediationDocument.rcept_no).where(
+                    or_(
+                        ExtractionFirmRemediationDocument.rcept_dt.is_(None),
+                        ExtractionFirmRemediationDocument.rcept_dt == "",
+                    )
+                )
+            )
+            for (rcept_no,) in result.all():
+                iso = _iso_rcept_dt(str(rcept_no))
+                if iso is None:
+                    continue
+                await self._session.execute(
+                    update(ExtractionFirmRemediationDocument)
+                    .where(ExtractionFirmRemediationDocument.rcept_no == rcept_no)
+                    .values(rcept_dt=iso)
+                )
+            await self._session.flush()
+            self._session.expire_all()
+        except SQLAlchemyError as exc:
+            raise FirmRemediationError(
+                "기존 문서의 rcept_dt를 접수번호로 채우지 못해 저장하지 않습니다."
+            ) from exc
 
     async def _recompute_is_latest(self, documents: Sequence[PreparedDocument]) -> None:
         """이번 입력의 (법인, 사업연도 말) 그룹만, DB에 있는 문서까지 포함해 다시 고른다."""

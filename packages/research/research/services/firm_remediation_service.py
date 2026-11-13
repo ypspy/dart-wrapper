@@ -15,7 +15,6 @@ from pathlib import Path
 
 from app.db.session import create_db_engine, create_sessionmaker
 from research.extracting.firm_remediation import (
-    IN_TABLE_UNPARSED_REASONS,
     PARSER_VERSION,
     PreparedDocument,
     normalize_firm_display_name,
@@ -126,7 +125,7 @@ def summarize(documents: list[PreparedDocument]) -> dict[str, int]:
             1
             for document in documents
             for note in document.notes
-            if note.in_table and note.reason in IN_TABLE_UNPARSED_REASONS
+            if note.in_table and note.kind == "unparsed"
         ),
         "unique_corp_codes": len({document.corp_code for document in documents}),
         "multi_receipt_groups": sum(count >= 2 for count in grouped.values()),

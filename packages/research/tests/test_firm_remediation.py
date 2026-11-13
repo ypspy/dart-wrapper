@@ -15,6 +15,7 @@ from sqlalchemy import text
 from app.db.session import create_db_engine, ensure_schema
 from research.extracting.firm_remediation import (
     PARSER_VERSION,
+    PreparedDocument,
     normalize_firm_display_name,
     parse_remediation,
 )
@@ -32,6 +33,7 @@ from research.services.firm_remediation_service import (
     SUMMARY_KEYS,
     prepare_documents,
     run_firm_remediation,
+    summarize,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "f004" / "f004_section6.jsonl"
@@ -258,8 +260,6 @@ def test_fixture_summary_and_latest_flag(tmp_path: Path) -> None:
     catalog = tmp_path / "catalog.db"
     _catalog(catalog)
     documents = prepare_documents(FIXTURE, _year_ends(catalog))
-    from research.services.firm_remediation_service import summarize
-
     summary = summarize(documents)
     assert list(summary) == list(SUMMARY_KEYS)
     assert summary == EXPECTED_SUMMARY
@@ -650,6 +650,39 @@ def test_orphan_line_is_kept_as_unparsed_note() -> None:
     assert all(note.kind == "unparsed" for note in result.notes)
 
 
+def test_open_table_orphan_line_counts_as_unparsed_in_table() -> None:
+    """열린 표의 비파이프 줄은 이유와 상관없이 unparsed_in_table에 센다."""
+    body = "\n".join(
+        (
+            "2. 품질관리 감리결과",
+            "게시 전 안내",
+            "구분 | 조치일자 | 개선권고사항 | 개선권고 이행상황",
+            "리더십 | 2022.04.27 | 권고 | 이행",
+            "게시할 예정입니다",
+        )
+    )
+    parsed = parse_remediation("synthetic-count", "00000000", body)
+    document = PreparedDocument(
+        rcept_no=parsed.rcept_no,
+        corp_code=parsed.corp_code,
+        corp_name="합성",
+        rcept_dt="2022-04-27",
+        period_key=None,
+        status=parsed.status,
+        n_tables=parsed.n_tables,
+        rows=parsed.rows,
+        notes=parsed.notes,
+    )
+    summary = summarize([document])
+    in_table = [note for note in parsed.notes if note.in_table and note.kind == "unparsed"]
+    assert summary["unparsed_in_table"] >= 1
+    assert summary["unparsed_in_table"] == len(in_table)
+    assert any(
+        note.reason == "orphan_line" and note.raw_text == "게시할 예정입니다" for note in in_table
+    )
+    assert any(note.reason == "outside_table" and note.in_table is False for note in parsed.notes)
+
+
 def test_dry_run_without_catalog_does_not_collapse_years(tmp_path: Path) -> None:
     """카탈로그가 없으면 다른 사업연도를 한 승자로 묶지 않는다."""
     documents = prepare_documents(FIXTURE, {})
@@ -657,8 +690,6 @@ def test_dry_run_without_catalog_does_not_collapse_years(tmp_path: Path) -> None
     samil = [item for item in documents if item.corp_code == "00260295"]
     assert len({item.rcept_no for item in samil}) == 3
     assert all(item.period_key is None for item in samil)
-    from research.services.firm_remediation_service import summarize
-
     summary = summarize(documents)
     assert summary["period_key_missing"] == len(documents)
     assert summary["documents"] == EXPECTED_SUMMARY["documents"]
@@ -812,6 +843,112 @@ async def test_partial_rewrite_recomputes_is_latest(tmp_path: Path) -> None:
         .fetchall()
     )
     assert dict(again) == {"20200630000215": 0, "20201202000259": 1}
+
+
+def _legacy_target_without_rcept_dt(path: Path) -> None:
+    """현재 연구 테이블을 만든 뒤 문서 테이블에서 rcept_dt만 빼 구스키마로 둔다."""
+    from sqlalchemy import create_engine
+
+    from app.models.base import Base
+    from research.repositories.firm_remediation_repository import firm_tables
+
+    engine = create_engine("sqlite:///" + path.resolve().as_posix())
+    Base.metadata.create_all(engine, tables=firm_tables())
+    engine.dispose()
+    connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE extraction_firm_remediation_documents DROP COLUMN rcept_dt")
+    connection.execute(
+        """
+        INSERT INTO extraction_firm_remediation_documents (
+            rcept_no, corp_code, period_key, status, n_tables, n_logical_rows,
+            n_notes, parser_version, extracted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "20201202000259",
+            "00607609",
+            "2020-03",
+            "table",
+            1,
+            1,
+            0,
+            "old",
+            "2020-12-02 00:00:00",
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO extraction_firm_remediation (
+            rcept_no, table_idx, row_idx, corp_code, period_key, component,
+            action_date, finding, action, is_latest, parse_status, source_cells,
+            parser_version, extracted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "20201202000259",
+            0,
+            0,
+            "00607609",
+            "2020-03",
+            "리더십",
+            "2020년 06월 15일",
+            "기존 권고",
+            "기존 이행",
+            0,
+            "ok",
+            4,
+            "old",
+            "2020-12-02 00:00:00",
+        ),
+    )
+    connection.commit()
+    columns = [
+        row[1]
+        for row in connection.execute("PRAGMA table_info(extraction_firm_remediation_documents)")
+    ]
+    connection.close()
+    assert "rcept_dt" not in columns
+
+
+async def test_write_adds_missing_rcept_dt_and_keeps_one_latest(tmp_path: Path) -> None:
+    """구스키마에 rcept_dt를 추가하고, 같은 그룹의 최신 접수는 한 건으로 남긴다."""
+    catalog = tmp_path / "catalog.db"
+    target = tmp_path / "legacy.db"
+    _catalog(catalog)
+    _legacy_target_without_rcept_dt(target)
+    earlier = next(
+        line
+        for line in FIXTURE.read_text(encoding="utf-8").splitlines()
+        if '"rcept_no": "20200630000215"' in line
+    )
+    folder = tmp_path / "earlier"
+    _write_manifest(folder, (earlier + "\n").encode("utf-8"), None)
+    await run_firm_remediation(
+        input_path=folder, catalog_path=catalog, write=True, target_db=target
+    )
+    connection = sqlite3.connect(target)
+    columns = [
+        row[1]
+        for row in connection.execute("PRAGMA table_info(extraction_firm_remediation_documents)")
+    ]
+    dates = dict(
+        connection.execute(
+            "SELECT rcept_no, rcept_dt FROM extraction_firm_remediation_documents "
+            "WHERE corp_code = '00607609'"
+        ).fetchall()
+    )
+    flags = dict(
+        connection.execute(
+            "SELECT rcept_no, is_latest FROM extraction_firm_remediation "
+            "WHERE corp_code = '00607609' GROUP BY rcept_no, is_latest"
+        ).fetchall()
+    )
+    connection.close()
+    assert "rcept_dt" in columns
+    assert dates["20201202000259"] == "2020-12-02"
+    assert dates["20200630000215"] == "2020-06-30"
+    assert flags == {"20201202000259": 1, "20200630000215": 0}
+    assert sum(flags.values()) == 1
 
 
 async def test_startup_schema_does_not_create_firm_tables() -> None:

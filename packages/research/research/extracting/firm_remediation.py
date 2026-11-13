@@ -68,7 +68,7 @@ _LEGAL_PREFIXES = (
     "(주)",
     "㈜",
 )
-# 개선권고 표 안에서 4칸으로 재조립하지 못한 행만 집계한다. 3) 블록은 제외한다.
+# 파이프 행을 4칸으로 재조립하지 못했을 때의 reason. 비파이프 고아 줄은 orphan_line이다.
 IN_TABLE_UNPARSED_REASONS = frozenset({"bad_cell_count", "date_in_first_cell", "not_group_label"})
 
 
