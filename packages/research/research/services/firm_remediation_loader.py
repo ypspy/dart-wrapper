@@ -117,8 +117,8 @@ def fetch_year_ends(catalog_path: Path, rcept_nos: Sequence[str]) -> dict[str, s
     return found
 
 
-def resolve_jsonl(input_path: Path) -> tuple[Path, Path | None]:
-    """디렉터리면 ``f004_section6.jsonl`` 또는 유일한 jsonl을 고른다."""
+def resolve_jsonl(input_path: Path) -> tuple[Path, Path]:
+    """디렉터리면 ``f004_section6.jsonl`` 또는 유일한 jsonl을 고른다. manifest는 필수다."""
     path = Path(input_path)
     if path.is_dir():
         preferred = path / "f004_section6.jsonl"
@@ -132,22 +132,32 @@ def resolve_jsonl(input_path: Path) -> tuple[Path, Path | None]:
                 )
             jsonl_path = found[0]
         manifest = path / "manifest.json"
-        return jsonl_path, manifest if manifest.is_file() else None
-    if path.is_file():
+    elif path.is_file():
+        jsonl_path = path
         manifest = path.parent / "manifest.json"
-        return path, manifest if manifest.is_file() else None
-    raise FirmRemediationLoadError(f"입력 경로를 찾지 못했습니다: {path}")
+    else:
+        raise FirmRemediationLoadError(f"입력 경로를 찾지 못했습니다: {path}")
+    if not manifest.is_file():
+        raise FirmRemediationLoadError(
+            "manifest.json이 없습니다. 부분 적재 없이 중단합니다. " f"기대 위치: {manifest}"
+        )
+    return jsonl_path, manifest
 
 
 def load_section_records(input_path: Path) -> list[SectionRecord]:
     """JSONL 전체를 검증한 뒤에만 반환한다. 중간 실패 시 결과를 돌려주지 않는다."""
     jsonl_path, manifest_path = resolve_jsonl(input_path)
     payload = jsonl_path.read_bytes()
-    if manifest_path is not None:
-        _check_manifest(manifest_path, payload)
-    text = payload.decode("utf-8")
+    _check_manifest(manifest_path, payload)
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise FirmRemediationLoadError(
+            "JSONL이 UTF-8이 아닙니다. 부분 적재 없이 중단합니다."
+        ) from exc
     records: list[SectionRecord] = []
-    for line_no, line in enumerate(text.splitlines(), start=1):
+    seen: dict[str, int] = {}
+    for line_no, line in enumerate(text.split("\n"), start=1):
         if not line.strip():
             continue
         try:
@@ -160,7 +170,15 @@ def load_section_records(input_path: Path) -> list[SectionRecord]:
             raise FirmRemediationLoadError(
                 f"{line_no}번째 줄이 객체가 아닙니다. 부분 적재 없이 중단합니다."
             )
-        records.append(_record_from_row(obj, line_no))
+        record = _record_from_row(obj, line_no)
+        previous = seen.get(record.rcept_no)
+        if previous is not None:
+            raise FirmRemediationLoadError(
+                f"접수번호 {record.rcept_no}가 중복입니다. "
+                f"첫 줄 {previous}, 다시 나온 줄 {line_no}. 부분 적재 없이 중단합니다."
+            )
+        seen[record.rcept_no] = line_no
+        records.append(record)
     return records
 
 
@@ -195,10 +213,17 @@ def _check_manifest(manifest_path: Path, payload: bytes) -> None:
             "manifest.json의 jsonl.sha256이 파일과 다릅니다. 부분 적재 없이 중단합니다."
         )
     size = _manifest_value(manifest, "bytes")
-    if size is not None and int(size) != len(payload):
-        raise FirmRemediationLoadError(
-            "manifest.json의 jsonl.bytes가 파일 크기와 다릅니다. 부분 적재 없이 중단합니다."
-        )
+    if size is not None:
+        try:
+            size_int = int(size)
+        except (TypeError, ValueError) as exc:
+            raise FirmRemediationLoadError(
+                "manifest.json의 jsonl.bytes가 정수가 아닙니다. 부분 적재 없이 중단합니다."
+            ) from exc
+        if isinstance(size, bool) or size_int != len(payload):
+            raise FirmRemediationLoadError(
+                "manifest.json의 jsonl.bytes가 파일 크기와 다릅니다. 부분 적재 없이 중단합니다."
+            )
 
 
 def _manifest_field_names(fields: Any) -> set[str] | None:

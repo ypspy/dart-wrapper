@@ -206,6 +206,10 @@ def parse_remediation(rcept_no: str, corp_code: str, body_text: str) -> Remediat
         if "|" not in line:
             if _is_comment(line):
                 add_note("comment", line, "comment", in_table=False)
+            elif active and header_seen:
+                add_note("unparsed", line, "orphan_line", in_table=True)
+            else:
+                add_note("unparsed", line, "outside_table", in_table=False)
             continue
 
         if _is_nonstandard_header(line):

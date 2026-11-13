@@ -58,6 +58,7 @@ class ExtractionFirmRemediationDocument(Base):
     rcept_no: Mapped[str] = mapped_column(String(32), primary_key=True)
     corp_code: Mapped[str] = mapped_column(String(16), nullable=False)
     period_key: Mapped[str | None] = mapped_column(String(16))
+    rcept_dt: Mapped[str] = mapped_column(String(16), nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     n_tables: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     n_logical_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

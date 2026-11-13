@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,7 @@ SUMMARY_KEYS = (
     "unparsed_in_table",
     "unique_corp_codes",
     "multi_receipt_groups",
+    "period_key_missing",
 )
 
 # 추측 병합은 하지 않는다. 동명 3쌍과 회사 마스터 미등재 6코드만 확인 목록에 둔다.
@@ -87,23 +89,29 @@ def prepare_documents(
 
 
 def apply_is_latest(documents: list[PreparedDocument]) -> None:
-    """같은 법인·사업연도 말에서 접수일·접수번호가 가장 큰 문서의 행만 1로 둔다."""
-    grouped: dict[tuple[str, str | None], list[PreparedDocument]] = defaultdict(list)
+    """같은 법인·사업연도 말에서 접수일·접수번호가 가장 큰 문서의 행만 1로 둔다.
+
+    ``period_key``가 없는 문서는 묶지 않고 ``is_latest``를 0으로 남긴다.
+    """
+    grouped: dict[tuple[str, str], list[PreparedDocument]] = defaultdict(list)
     for document in documents:
+        for row in document.rows:
+            row.is_latest = 0
+        if not document.period_key:
+            continue
         grouped[(document.corp_code, document.period_key)].append(document)
     for group in grouped.values():
         winner = max(group, key=lambda item: (item.rcept_dt, item.rcept_no))
-        for document in group:
-            flag = 1 if document.rcept_no == winner.rcept_no else 0
-            for row in document.rows:
-                row.is_latest = flag
+        for row in winner.rows:
+            row.is_latest = 1
 
 
 def summarize(documents: list[PreparedDocument]) -> dict[str, int]:
     """dry-run과 PR 대조에 쓰는 집계. 키 이름은 스냅샷 크기와 상관없이 같다."""
-    grouped: dict[tuple[str, str | None], int] = defaultdict(int)
+    grouped: dict[tuple[str, str], int] = defaultdict(int)
     for document in documents:
-        grouped[(document.corp_code, document.period_key)] += 1
+        if document.period_key:
+            grouped[(document.corp_code, document.period_key)] += 1
     return {
         "documents": len(documents),
         "table": sum(document.status == "table" for document in documents),
@@ -122,6 +130,7 @@ def summarize(documents: list[PreparedDocument]) -> dict[str, int]:
         ),
         "unique_corp_codes": len({document.corp_code for document in documents}),
         "multi_receipt_groups": sum(count >= 2 for count in grouped.values()),
+        "period_key_missing": sum(document.period_key is None for document in documents),
     }
 
 
@@ -135,7 +144,7 @@ def assert_write_targets(target_db: Path, catalog_path: Path | None, input_path:
         raise FirmRemediationError(
             "대상 DB는 카탈로그와 입력 JSONL과 다른 경로여야 합니다. 입력 파일은 바꾸지 않습니다."
         )
-    if target.name == "dart_catalog.db":
+    if target.name.casefold() == "dart_catalog.db":
         raise FirmRemediationError(
             "대상 DB 파일명이 dart_catalog.db 입니다. 카탈로그 파일에는 연구 테이블을 만들지 않습니다."
         )
@@ -147,16 +156,26 @@ def assert_write_targets(target_db: Path, catalog_path: Path | None, input_path:
 
 
 def _has_catalog_tables(path: Path) -> bool:
-    """이미 있는 SQLite에 카탈로그 테이블이 있는지 읽기 전용으로 확인한다."""
+    """이미 있는 SQLite에 카탈로그 테이블이 있는지 읽기 전용으로 확인한다.
+
+    연결이나 조회가 실패하면 통과시키지 않고 쓰기를 거부한다.
+    """
     uri = f"{path.resolve().as_uri()}?mode=ro"
     try:
         connection = sqlite3.connect(uri, uri=True)
-    except sqlite3.Error:
-        return False
+    except sqlite3.Error as exc:
+        raise FirmRemediationError(
+            f"대상 DB를 읽지 못해 저장하지 않습니다: {path} ({exc})"
+        ) from exc
     try:
-        rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    except sqlite3.Error:
-        return False
+        try:
+            rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise FirmRemediationError(
+                f"대상 DB를 읽지 못해 저장하지 않습니다: {path} ({exc})"
+            ) from exc
     finally:
         connection.close()
     names = {row[0] for row in rows}
@@ -175,6 +194,10 @@ async def run_firm_remediation(
         raise FirmRemediationError(
             "저장하려면 --write 와 --target-db 가 모두 필요합니다. 기본 실행은 dry-run입니다."
         )
+    if write and catalog_path is None:
+        raise FirmRemediationError(
+            "저장하려면 --catalog 가 필요합니다. 카탈로그 없이 period_key를 추측하지 않습니다."
+        )
     if write and target_db is not None:
         assert_write_targets(target_db, catalog_path, input_path)
 
@@ -187,11 +210,31 @@ async def run_firm_remediation(
             [record.rcept_no for record in records],
         )
     documents = _prepare_loaded(records, year_ends)
+    missing = [document.rcept_no for document in documents if document.period_key is None]
+    if write and missing:
+        joined = ", ".join(missing)
+        raise FirmRemediationError(
+            "period_key를 만들지 못한 접수가 있어 저장하지 않습니다. "
+            f"부분 적재 없이 중단합니다. 접수번호: {joined}"
+        )
+    if missing and not write:
+        _warn_missing_period_keys(missing)
     summary = summarize(documents)
     if not write or target_db is None:
         return summary
     await _write(target_db, documents)
     return summary
+
+
+def _warn_missing_period_keys(rcept_nos: list[str]) -> None:
+    """dry-run에서 기간 키를 못 찾은 접수번호를 알린다. 승자로 묶지 않는다."""
+    shown = ", ".join(rcept_nos[:20])
+    extra = "" if len(rcept_nos) <= 20 else f" 외 {len(rcept_nos) - 20}건"
+    print(
+        f"경고: period_key를 만들지 못한 문서 {len(rcept_nos)}건은 "
+        f"is_latest 계산에서 제외합니다. 접수번호: {shown}{extra}",
+        file=sys.stderr,
+    )
 
 
 def _prepare_loaded(

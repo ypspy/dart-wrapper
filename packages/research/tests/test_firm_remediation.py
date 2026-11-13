@@ -57,6 +57,7 @@ EXPECTED_SUMMARY = {
     "unparsed_in_table": 0,
     "unique_corp_codes": 4,
     "multi_receipt_groups": 1,
+    "period_key_missing": 0,
 }
 
 
@@ -277,17 +278,19 @@ def test_loader_stops_on_schema_hash_and_manifest(tmp_path: Path) -> None:
     original = json.loads(FIXTURE.read_text(encoding="utf-8").splitlines()[0])
     version = dict(original)
     version["schema_version"] = 2
-    bad_version = tmp_path / "version.jsonl"
-    bad_version.write_text(json.dumps(version, ensure_ascii=False) + "\n", encoding="utf-8")
+    version_dir = tmp_path / "version"
+    _write_manifest(
+        version_dir, (json.dumps(version, ensure_ascii=False) + "\n").encode("utf-8"), None
+    )
     with pytest.raises(FirmRemediationLoadError, match="schema_version"):
-        load_section_records(bad_version)
+        load_section_records(version_dir)
 
     hashed = dict(original)
     hashed["body_hash"] = "0" * 64
-    bad_hash = tmp_path / "hash.jsonl"
-    bad_hash.write_text(json.dumps(hashed, ensure_ascii=False) + "\n", encoding="utf-8")
+    hash_dir = tmp_path / "hash"
+    _write_manifest(hash_dir, (json.dumps(hashed, ensure_ascii=False) + "\n").encode("utf-8"), None)
     with pytest.raises(FirmRemediationLoadError, match="해시"):
-        load_section_records(bad_hash)
+        load_section_records(hash_dir)
 
     payload = FIXTURE.read_bytes()
     folder = tmp_path / "snap"
@@ -579,7 +582,9 @@ async def test_failed_load_does_not_create_target_and_paths_stay_separate(tmp_pa
     bad = tmp_path / "bad.jsonl"
     bad.write_text('{"schema_version": 2}\n', encoding="utf-8")
     with pytest.raises(FirmRemediationLoadError):
-        await run_firm_remediation(input_path=bad, write=True, target_db=target)
+        await run_firm_remediation(
+            input_path=bad, catalog_path=catalog, write=True, target_db=target
+        )
     assert not target.exists()
     with pytest.raises(FirmRemediationError, match="다른 경로"):
         await run_firm_remediation(
@@ -605,6 +610,208 @@ async def test_failed_load_does_not_create_target_and_paths_stay_separate(tmp_pa
             input_path=FIXTURE, catalog_path=catalog, write=True, target_db=copied
         )
     assert copied.read_bytes() == copied_before
+
+    junk = tmp_path / "junk.db"
+    junk.write_bytes(b"not a sqlite database")
+    junk_before = junk.read_bytes()
+    with pytest.raises(FirmRemediationError, match="읽지 못해"):
+        await run_firm_remediation(
+            input_path=FIXTURE, catalog_path=catalog, write=True, target_db=junk
+        )
+    assert junk.read_bytes() == junk_before
+    mixed_case = tmp_path / "Dart_catalog.db"
+    mixed_case.write_bytes(b"")
+    with pytest.raises(FirmRemediationError, match="dart_catalog"):
+        await run_firm_remediation(
+            input_path=FIXTURE, catalog_path=catalog, write=True, target_db=mixed_case
+        )
+    assert mixed_case.read_bytes() == b""
+
+
+def test_orphan_line_is_kept_as_unparsed_note() -> None:
+    """열린 표의 비파이프 줄은 버리지 않고, 논리 행으로는 올리지 않는다."""
+    body = "\n".join(
+        (
+            "서식 안내문",
+            "2. 품질관리 감리결과",
+            "게시 전 안내",
+            "구분 | 조치일자 | 개선권고사항 | 개선권고 이행상황",
+            "리더십 | 2022.04.27 | 권고 | 이행",
+            "게시할 예정입니다",
+        )
+    )
+    result = parse_remediation("synthetic-orphan", "00000000", body)
+    assert result.status == "table"
+    assert len(result.rows) == 1
+    assert result.rows[0].finding == "권고"
+    reasons = {note.reason: note.raw_text for note in result.notes}
+    assert reasons["outside_table"] == "게시 전 안내"
+    assert reasons["orphan_line"] == "게시할 예정입니다"
+    assert all(note.kind == "unparsed" for note in result.notes)
+
+
+def test_dry_run_without_catalog_does_not_collapse_years(tmp_path: Path) -> None:
+    """카탈로그가 없으면 다른 사업연도를 한 승자로 묶지 않는다."""
+    documents = prepare_documents(FIXTURE, {})
+    assert all(row.is_latest == 0 for document in documents for row in document.rows)
+    samil = [item for item in documents if item.corp_code == "00260295"]
+    assert len({item.rcept_no for item in samil}) == 3
+    assert all(item.period_key is None for item in samil)
+    from research.services.firm_remediation_service import summarize
+
+    summary = summarize(documents)
+    assert summary["period_key_missing"] == len(documents)
+    assert summary["documents"] == EXPECTED_SUMMARY["documents"]
+    assert summary["logical_rows"] == EXPECTED_SUMMARY["logical_rows"]
+    target = tmp_path / "should-not-exist.db"
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--input", str(FIXTURE.parent)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**__import__("os").environ, "DART_LLM_ENABLED": "false"},
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["period_key_missing"] == 8
+    assert "경고" in completed.stderr
+    assert "20220930000262" in completed.stderr
+    assert not target.exists()
+
+
+async def test_write_requires_complete_catalog(tmp_path: Path) -> None:
+    """쓰기에는 카탈로그가 필요하고, period_key가 비면 대상 DB를 만들기 전에 실패한다."""
+    target = tmp_path / "out" / "firm.db"
+    with pytest.raises(FirmRemediationError, match="catalog"):
+        await run_firm_remediation(input_path=FIXTURE, write=True, target_db=target)
+    assert not target.exists()
+
+    partial = tmp_path / "partial.db"
+    connection = sqlite3.connect(partial)
+    connection.execute(
+        "CREATE TABLE disclosures (rcept_no TEXT PRIMARY KEY, corp_code TEXT, year_end TEXT)"
+    )
+    connection.execute("INSERT INTO disclosures VALUES ('20160630000531', '00260295', '(2016.03)')")
+    connection.commit()
+    connection.close()
+    with pytest.raises(FirmRemediationError, match="period_key"):
+        await run_firm_remediation(
+            input_path=FIXTURE, catalog_path=partial, write=True, target_db=target
+        )
+    assert not target.exists()
+
+
+def test_duplicate_rcept_no_is_rejected(tmp_path: Path) -> None:
+    """같은 접수번호가 두 번이면 적재 단계에서 거부하고 DB 무결성 오류로 죽지 않는다."""
+    first = FIXTURE.read_text(encoding="utf-8").splitlines()[0]
+    payload = (first + "\n" + first + "\n").encode("utf-8")
+    folder = tmp_path / "dup"
+    _write_manifest(folder, payload, None)
+    with pytest.raises(FirmRemediationLoadError, match="20160630000531"):
+        load_section_records(folder)
+    target = tmp_path / "dup-out.db"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--input",
+            str(folder),
+            "--write",
+            "--target-db",
+            str(target),
+            "--catalog",
+            str(tmp_path / "unused.db"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**__import__("os").environ, "DART_LLM_ENABLED": "false"},
+    )
+    assert completed.returncode == 1
+    assert "중복" in completed.stderr
+    assert "IntegrityError" not in completed.stderr
+    assert "Traceback" not in completed.stderr
+    assert not target.exists()
+
+
+def test_manifest_is_required_and_bad_bytes_are_wrapped(tmp_path: Path) -> None:
+    """manifest가 없거나 인코딩·bytes가 깨지면 FirmRemediationLoadError로 감싼다."""
+    alone = tmp_path / "alone"
+    alone.mkdir()
+    (alone / "f004_section6.jsonl").write_bytes(FIXTURE.read_bytes())
+    with pytest.raises(FirmRemediationLoadError, match="manifest.json"):
+        load_section_records(alone)
+
+    garbage = b"\xff\xfe not utf-8"
+    bad_encoding = tmp_path / "encoding"
+    _write_manifest(bad_encoding, garbage, None)
+    with pytest.raises(FirmRemediationLoadError, match="UTF-8"):
+        load_section_records(bad_encoding)
+
+    payload = FIXTURE.read_bytes()
+    bad_size = tmp_path / "bad-size"
+    bad_size.mkdir()
+    (bad_size / "f004_section6.jsonl").write_bytes(payload)
+    (bad_size / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "jsonl": {
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "bytes": "not-an-int",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(FirmRemediationLoadError, match="bytes"):
+        load_section_records(bad_size)
+
+
+async def test_partial_rewrite_recomputes_is_latest(tmp_path: Path) -> None:
+    """일부 접수만 다시 써도 같은 사업연도의 기존 문서와 함께 최신 접수를 다시 고른다."""
+    catalog = tmp_path / "catalog.db"
+    target = tmp_path / "firm.db"
+    _catalog(catalog)
+    await run_firm_remediation(
+        input_path=FIXTURE, catalog_path=catalog, write=True, target_db=target
+    )
+    first = FIXTURE.read_text(encoding="utf-8").splitlines()
+    older = next(line for line in first if '"rcept_no": "20200630000215"' in line)
+    folder = tmp_path / "partial"
+    _write_manifest(folder, (older + "\n").encode("utf-8"), None)
+    await run_firm_remediation(
+        input_path=folder, catalog_path=catalog, write=True, target_db=target
+    )
+    rows = (
+        sqlite3.connect(target)
+        .execute(
+            "SELECT rcept_no, is_latest FROM extraction_firm_remediation "
+            "WHERE corp_code = '00607609' GROUP BY rcept_no, is_latest"
+        )
+        .fetchall()
+    )
+    assert dict(rows) == {"20200630000215": 0, "20201202000259": 1}
+    samil = (
+        sqlite3.connect(target)
+        .execute(
+            "SELECT DISTINCT is_latest FROM extraction_firm_remediation "
+            "WHERE rcept_no = '20220930000262'"
+        )
+        .fetchone()
+    )
+    assert samil == (1,)
+    await run_firm_remediation(
+        input_path=FIXTURE, catalog_path=catalog, write=True, target_db=target
+    )
+    again = (
+        sqlite3.connect(target)
+        .execute(
+            "SELECT rcept_no, is_latest FROM extraction_firm_remediation "
+            "WHERE corp_code = '00607609' GROUP BY rcept_no, is_latest"
+        )
+        .fetchall()
+    )
+    assert dict(again) == {"20200630000215": 0, "20201202000259": 1}
 
 
 async def test_startup_schema_does_not_create_firm_tables() -> None:
@@ -641,7 +848,18 @@ def test_new_modules_do_not_call_network_llm_or_section_db() -> None:
         root / "services" / "firm_remediation_service.py",
         Path(__file__).resolve().parents[1] / "scripts" / "extract_firm_remediation.py",
     ]
-    banned = ("import httpx", "openai", "anthropic", "dart.fss.or.kr", "playwright")
+    banned = (
+        "import httpx",
+        "openai",
+        "anthropic",
+        "dart.fss.or.kr",
+        "playwright",
+        "requests",
+        "urllib",
+        "http.client",
+        "aiohttp",
+        "opendart",
+    )
     for path in paths:
         source = path.read_text(encoding="utf-8")
         for token in banned:

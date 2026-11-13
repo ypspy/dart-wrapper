@@ -5,11 +5,12 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import Table, delete
+from sqlalchemy import Table, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.models.base import Base
@@ -81,6 +82,7 @@ class FirmRemediationRepository:
                     rcept_no=document.rcept_no,
                     corp_code=document.corp_code,
                     period_key=document.period_key,
+                    rcept_dt=document.rcept_dt,
                     status=document.status,
                     n_tables=document.n_tables,
                     n_logical_rows=len(document.rows),
@@ -136,6 +138,41 @@ class FirmRemediationRepository:
                     extracted_at=extracted_at,
                 )
             )
+        await self._session.flush()
+        await self._recompute_is_latest(documents)
+
+    async def _recompute_is_latest(self, documents: Sequence[PreparedDocument]) -> None:
+        """이번 입력의 (법인, 사업연도 말) 그룹만, DB에 있는 문서까지 포함해 다시 고른다."""
+        groups = {
+            (document.corp_code, document.period_key)
+            for document in documents
+            if document.period_key
+        }
+        if not groups:
+            return
+        corp_codes = list({corp_code for corp_code, _period in groups})
+        result = await self._session.execute(
+            select(ExtractionFirmRemediationDocument).where(
+                ExtractionFirmRemediationDocument.corp_code.in_(corp_codes)
+            )
+        )
+        stored = [
+            row
+            for row in result.scalars().all()
+            if row.period_key and (row.corp_code, row.period_key) in groups
+        ]
+        by_group: dict[tuple[str, str], list[ExtractionFirmRemediationDocument]] = defaultdict(list)
+        for row in stored:
+            by_group[(row.corp_code, row.period_key or "")].append(row)
+        for members in by_group.values():
+            winner = max(members, key=lambda item: (item.rcept_dt, item.rcept_no))
+            for item in members:
+                flag = 1 if item.rcept_no == winner.rcept_no else 0
+                await self._session.execute(
+                    update(ExtractionFirmRemediation)
+                    .where(ExtractionFirmRemediation.rcept_no == item.rcept_no)
+                    .values(is_latest=flag)
+                )
         await self._session.flush()
 
     async def _delete_rcepts(self, model: type, rcept_nos: Sequence[str]) -> None:
