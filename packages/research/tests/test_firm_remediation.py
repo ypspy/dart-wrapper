@@ -334,6 +334,114 @@ def test_loader_stops_on_schema_hash_and_manifest(tmp_path: Path) -> None:
     assert len(load_section_records(flat)) == 8
 
 
+def _write_manifest(folder: Path, payload: bytes, fields: object) -> None:
+    """해시가 맞는 manifest.json을 만든다."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "f004_section6.jsonl").write_bytes(payload)
+    manifest = {
+        "schema_version": 1,
+        "jsonl": {"sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)},
+        "fields": fields,
+    }
+    (folder / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def test_manifest_object_fields_match_required_names(tmp_path: Path) -> None:
+    """공식 스냅샷처럼 fields가 {name, description} 배열이어도 이름 집합이 같으면 읽는다."""
+    payload = FIXTURE.read_bytes()
+    names = [{"name": name, "description": "snapshot field"} for name in REQUIRED_FIELDS]
+    folder = tmp_path / "objects"
+    _write_manifest(folder, payload, names)
+    assert len(load_section_records(folder)) == 8
+
+    skipped = tmp_path / "null-fields"
+    _write_manifest(skipped, payload, None)
+    assert len(load_section_records(skipped)) == 8
+
+    renamed = list(names)
+    renamed[0] = {"name": "not_a_real_field", "description": "다름"}
+    mismatch = tmp_path / "mismatch"
+    _write_manifest(mismatch, payload, renamed)
+    with pytest.raises(FirmRemediationLoadError, match="fields"):
+        load_section_records(mismatch)
+
+    broken = tmp_path / "bad-element"
+    _write_manifest(broken, payload, [{"description": "name 없음"}, 1])
+    with pytest.raises(FirmRemediationLoadError, match="원소"):
+        load_section_records(broken)
+
+
+def test_repeated_standard_header_opens_another_table() -> None:
+    """1)/2) 없이 표준 헤더가 두 번 나오면 table_idx를 올린다. 앞 표 구분은 이어지지 않는다."""
+    note = (
+        "(주) 당 회계법인에 흡수합병된 회계법인 세일원의 "
+        "최근 3개 사업연도 감사인 감리 결과는 다음과 같습니다."
+    )
+    body = "\n".join(
+        (
+            "2. 감사인 감리결과",
+            "구분 | 조치일자 | 개선권고사항 | 개선권고 이행상황",
+            "품질관리 구성요소 | 리더십 | 2022.01.01 | 권고A | 이행A",
+            note,
+            "구분 | 조치일자 | 개선권고사항 | 개선권고 이행상황",
+            "품질관리 구성요소 | 윤리 | 2022.01.02 | 권고B | 이행B",
+        )
+    )
+    result = parse_remediation("20260630000660", "00000000", body)
+    assert result.n_tables == 2
+    assert [row.table_idx for row in result.rows] == [0, 1]
+    assert result.rows[0].component == "리더십"
+    assert result.rows[1].component == "윤리"
+    assert result.rows[1].row_idx == 0
+    assert result.rows[0].component not in result.rows[1].component
+
+
+def test_quoted_absence_keeps_document_empty() -> None:
+    """따옴표로 감싼 해당 없음은 빈칸이다. 따옴표 안 실질 권고는 table로 남긴다."""
+    empty_body = "\n".join(
+        (
+            "2. 품질관리 감리결과",
+            "구분 | 조치일자 | 개선권고사항 | 개선권고 이행상황",
+            '리더십 | 2020.06.15 | "해당 없음" | -',
+            "윤리 | 2020.06.15 | “해당사항 없음” | -",
+        )
+    )
+    empty = parse_remediation("20200630000075", "00000000", empty_body)
+    assert empty.status == "empty"
+    assert empty.rows
+    assert all(row.parse_status == "empty" for row in empty.rows)
+
+    documents = {item.rcept_no: item for item in load_section_records(FIXTURE)}
+    kept = parse_remediation(
+        "20220930000262",
+        "00260295",
+        documents["20220930000262"].body_text,
+    )
+    assert kept.status == "table"
+    assert any(row.parse_status == "ok" for row in kept.rows)
+
+
+def test_piped_parenthetical_line_is_a_comment() -> None:
+    """파이프가 있어도 첫 칸이 (주)이면 표 안 미조립이 아니라 주석이다."""
+    body = "\n".join(
+        (
+            "2. 품질관리 감리결과",
+            "구분 | 조치일자 | 개선권고사항 | 개선권고 이행상황",
+            "리더십 | 2022.04.27 | 권고 | 이행",
+            "(주) | 조치일자(2022년 4월 27일)로부터 이행기간이 미도래하였습니다.",
+        )
+    )
+    result = parse_remediation("20220630000397", "00000000", body)
+    assert result.status == "table"
+    assert len(result.rows) == 1
+    assert len(result.notes) == 1
+    assert result.notes[0].kind == "comment"
+    assert result.notes[0].in_table is False
+    assert result.notes[0].raw_text.startswith("(주) |")
+
+
 def test_catalog_connection_is_read_only(tmp_path: Path) -> None:
     catalog = tmp_path / "catalog.db"
     _catalog(catalog)
@@ -479,6 +587,24 @@ async def test_failed_load_does_not_create_target_and_paths_stay_separate(tmp_pa
         )
     count = sqlite3.connect(catalog).execute("SELECT count(*) FROM disclosures").fetchone()[0]
     assert count == len(CATALOG_ROWS)
+
+    named = tmp_path / "elsewhere" / "dart_catalog.db"
+    named.parent.mkdir()
+    _catalog(named)
+    before = named.read_bytes()
+    with pytest.raises(FirmRemediationError, match="dart_catalog"):
+        await run_firm_remediation(
+            input_path=FIXTURE, catalog_path=catalog, write=True, target_db=named
+        )
+    assert named.read_bytes() == before
+    copied = tmp_path / "copied-catalog.db"
+    _catalog(copied)
+    copied_before = copied.read_bytes()
+    with pytest.raises(FirmRemediationError, match="disclosures"):
+        await run_firm_remediation(
+            input_path=FIXTURE, catalog_path=catalog, write=True, target_db=copied
+        )
+    assert copied.read_bytes() == copied_before
 
 
 async def test_startup_schema_does_not_create_firm_tables() -> None:

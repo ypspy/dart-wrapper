@@ -56,6 +56,8 @@ _BLANK_VALUES = {
     "해당사항이없습니다",
     "해당없습니다",
 }
+_WRAPPING_QUOTES = set("\"'“”‘’＂＇「」『』")
+_COMMENT_HEADS = {"(주)", "（주）", "주)", "(*)", "※", "*", "주석"}
 _LEGAL_PREFIXES = (
     "유한책임회사",
     "주식회사",
@@ -213,19 +215,22 @@ def parse_remediation(rcept_no: str, corp_code: str, body_text: str) -> Remediat
             continue
 
         if _is_standard_header(line):
-            if not active:
+            # 헤더를 이미 본 표에서 표준 헤더가 다시 나오면 새 표다. 1)/2)와 같다.
+            if header_seen or not active:
                 open_table()
-            else:
-                component = ""
             header_seen = True
             tables_with_header.add(table_idx)
+            continue
+
+        cells = _split_cells(line)
+        if _is_pipe_comment(cells):
+            add_note("comment", line, "comment", in_table=False)
             continue
 
         if not header_seen:
             add_note("unparsed", line, "before_header", in_table=False)
             continue
 
-        cells = _split_cells(line)
         assembled = _assemble(cells, component)
         if assembled is None:
             add_note("unparsed", line, _unparsed_reason(cells), in_table=True)
@@ -305,6 +310,16 @@ def _is_comment(line: str) -> bool:
     return _STAR_LINE.match(line) is not None or _COMMENT.search(line) is not None
 
 
+def _is_pipe_comment(cells: list[str]) -> bool:
+    """첫 칸이 ``(주)`` 같은 주석 표식인 파이프 줄. 긴 권고 문장은 빼지 않는다."""
+    if not cells:
+        return False
+    head = _compact(cells[0])
+    if head in _COMMENT_HEADS:
+        return True
+    return len(head) <= 8 and _is_comment(cells[0])
+
+
 def _is_standard_header(line: str) -> bool:
     """표준 개선권고 헤더. 첫 칸이 구성요소명인 데이터 행은 제외한다."""
     compact = _compact(line)
@@ -330,8 +345,11 @@ def _is_date(cell: str) -> bool:
 
 
 def is_blank_cell(cell: str) -> bool:
-    """권고·이행 칸이 비어 있는지. 긴 문장 안의 단어는 빈칸으로 보지 않는다."""
-    return _compact(cell) in _BLANK_VALUES
+    """권고·이행 칸이 비어 있는지. 감싼 따옴표만 걷고, 긴 문장 안은 건드리지 않는다."""
+    text = cell.strip()
+    while len(text) >= 2 and text[0] in _WRAPPING_QUOTES and text[-1] in _WRAPPING_QUOTES:
+        text = text[1:-1].strip()
+    return _compact(text) in _BLANK_VALUES
 
 
 def _filled_status(finding: str, action: str, filled: str) -> str:

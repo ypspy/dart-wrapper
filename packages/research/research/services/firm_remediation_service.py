@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,7 +126,7 @@ def summarize(documents: list[PreparedDocument]) -> dict[str, int]:
 
 
 def assert_write_targets(target_db: Path, catalog_path: Path | None, input_path: Path) -> None:
-    """읽기 전용 입력과 같은 경로에는 쓰지 않는다."""
+    """읽기 전용 입력·카탈로그 파일에는 쓰지 않는다."""
     target = target_db.resolve()
     blocked = [Path(input_path).resolve()]
     if catalog_path is not None:
@@ -134,6 +135,32 @@ def assert_write_targets(target_db: Path, catalog_path: Path | None, input_path:
         raise FirmRemediationError(
             "대상 DB는 카탈로그와 입력 JSONL과 다른 경로여야 합니다. 입력 파일은 바꾸지 않습니다."
         )
+    if target.name == "dart_catalog.db":
+        raise FirmRemediationError(
+            "대상 DB 파일명이 dart_catalog.db 입니다. 카탈로그 파일에는 연구 테이블을 만들지 않습니다."
+        )
+    if target.is_file() and _has_catalog_tables(target):
+        raise FirmRemediationError(
+            "대상 DB에 disclosures 또는 entries 테이블이 있습니다. "
+            "카탈로그 파일에는 연구 테이블을 만들지 않습니다."
+        )
+
+
+def _has_catalog_tables(path: Path) -> bool:
+    """이미 있는 SQLite에 카탈로그 테이블이 있는지 읽기 전용으로 확인한다."""
+    uri = f"{path.resolve().as_uri()}?mode=ro"
+    try:
+        connection = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error:
+        return False
+    try:
+        rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    except sqlite3.Error:
+        return False
+    finally:
+        connection.close()
+    names = {row[0] for row in rows}
+    return "disclosures" in names or "entries" in names
 
 
 async def run_firm_remediation(

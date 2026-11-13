@@ -178,8 +178,8 @@ def _check_manifest(manifest_path: Path, payload: bytes) -> None:
         raise FirmRemediationLoadError(
             "manifest.json의 schema_version이 1이 아닙니다. 부분 적재 없이 중단합니다."
         )
-    fields = manifest.get("fields")
-    if fields is not None and set(fields) != set(REQUIRED_FIELDS):
+    field_names = _manifest_field_names(manifest.get("fields"))
+    if field_names is not None and field_names != set(REQUIRED_FIELDS):
         raise FirmRemediationLoadError(
             "manifest.json의 fields가 이 로더가 아는 필드와 다릅니다. "
             "이름을 추측하지 않고 중단합니다."
@@ -199,6 +199,28 @@ def _check_manifest(manifest_path: Path, payload: bytes) -> None:
         raise FirmRemediationLoadError(
             "manifest.json의 jsonl.bytes가 파일 크기와 다릅니다. 부분 적재 없이 중단합니다."
         )
+
+
+def _manifest_field_names(fields: Any) -> set[str] | None:
+    """fields가 없으면 대조를 건너뛴다. 문자열 또는 ``{name}`` 객체만 이름으로 본다."""
+    if fields is None:
+        return None
+    if not isinstance(fields, list):
+        raise FirmRemediationLoadError(
+            "manifest.json의 fields가 목록이 아닙니다. 이름을 추측하지 않고 중단합니다."
+        )
+    names: list[str] = []
+    for item in fields:
+        if isinstance(item, str):
+            names.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("name"), str):
+            names.append(item["name"])
+        else:
+            raise FirmRemediationLoadError(
+                "manifest.json의 fields 원소를 해석할 수 없습니다. "
+                "이름을 추측하지 않고 중단합니다."
+            )
+    return set(names)
 
 
 def _manifest_value(manifest: dict[str, Any], name: str) -> Any:
