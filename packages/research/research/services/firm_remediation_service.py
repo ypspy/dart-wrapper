@@ -15,6 +15,7 @@ from pathlib import Path
 
 from app.db.session import create_db_engine, create_sessionmaker
 from research.extracting.firm_remediation import (
+    FINDING_VI_STATUSES,
     PARSER_VERSION,
     PreparedDocument,
     normalize_firm_display_name,
@@ -176,7 +177,7 @@ def summarize(documents: list[PreparedDocument]) -> dict[str, int]:
 
 
 def _vi_summary_counts(documents: list[PreparedDocument]) -> dict[str, int]:
-    """발견행(기존 ok·continuation_merged)만 새 열 기준으로 센다."""
+    """발견행은 ``FINDING_VI_STATUSES``만 센다. 빈 행은 placeholder다."""
     counts = {
         "finding_rows": 0,
         "placeholder_rows": 0,
@@ -194,13 +195,12 @@ def _vi_summary_counts(documents: list[PreparedDocument]) -> dict[str, int]:
     }
     for document in documents:
         for row in document.rows:
-            if row.parse_status == "empty":
-                counts["placeholder_rows"] += 1
-                continue
-            if row.parse_status not in ("ok", "continuation_merged"):
+            fields = vi_row_fields(row, rcept_dt=document.rcept_dt)
+            if fields.vi_status not in FINDING_VI_STATUSES:
+                if fields.vi_status == "empty":
+                    counts["placeholder_rows"] += 1
                 continue
             counts["finding_rows"] += 1
-            fields = vi_row_fields(row, rcept_dt=document.rcept_dt)
             status_key = f"vi_status_{fields.vi_status}"
             if status_key in counts:
                 counts[status_key] += 1

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 PARSER_VERSION = "f004-remediation-0.2"
+FINDING_VI_STATUSES = ("ok", "merged", "partial")
 
 _SUBSECTION_LINE = re.compile(r"^2\.\s*(품질관리|감사인)\s*감리\s*결과\s*$")
 _SUBSECTION_PHRASES = (
@@ -507,6 +508,7 @@ def _recommend_date(action_date: str, rcept_dt: str) -> tuple[str, str | None, s
     """조치일자 칸을 (원문, ISO, 형식, 부분 사유)로 해석한다.
 
     부분 사유가 없으면 날짜 때문에 partial이 되지 않는다. 공란은 partial이 아니다.
+    접수연도를 알 수 없으면 상한 검사만 건너뛴다. 하한 2010과 달력 검사는 유지한다.
     """
     raw = normalize_spaced_text(action_date)
     matched = _YMD_KOR.match(raw)
@@ -521,8 +523,10 @@ def _recommend_date(action_date: str, rcept_dt: str) -> tuple[str, str | None, s
         iso = _iso_calendar_date(year, month, day)
         if iso is None:
             return raw, None, date_format, "recommend_date_invalid"
+        if year < 2010:
+            return raw, None, date_format, "recommend_date_out_of_range"
         limit = _rcept_year(rcept_dt)
-        if limit is None or year < 2010 or year > limit:
+        if limit is not None and year > limit:
             return raw, None, date_format, "recommend_date_out_of_range"
         return raw, iso, date_format, None
     if is_blank_cell(action_date):

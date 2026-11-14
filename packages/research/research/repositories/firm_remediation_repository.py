@@ -15,7 +15,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from app.models.base import Base
-from research.extracting.firm_remediation import PARSER_VERSION, PreparedDocument, vi_row_fields
+from research.extracting.firm_remediation import (
+    FINDING_VI_STATUSES,
+    PARSER_VERSION,
+    PreparedDocument,
+    vi_row_fields,
+)
 from research.models.firm_remediation import (
     ExtractionFirmMatchReview,
     ExtractionFirmRemediation,
@@ -78,8 +83,14 @@ _VI_DOCUMENT_COLUMNS = (
     ("inspection_year_note", "TEXT"),
 )
 _VI_VIEW_NAME = "v_f004_vi_findings"
-_VI_VIEW_SELECT = """
+_VI_STATUS_LIST = ", ".join(f"'{status}'" for status in FINDING_VI_STATUSES)
+# is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님.
+# empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다.
+_VI_VIEW_SELECT = f"""
 SELECT
+    -- is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님.
+    -- empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다.
+    -- parse_status='stale' / parse_reason='rerun_required'는 0.1 행이며 같은 스냅샷으로 --write를 다시 하면 사라진다.
     d.rcept_no AS rcept_no,
     d.rcept_dt AS rcept_dt,
     d.corp_code AS corp_code,
@@ -103,14 +114,14 @@ SELECT
     d.inspection_year_note AS inspection_year_note,
     r.multi_finding_flag AS multi_finding_flag,
     r.source_line_raw AS source_line_raw,
-    r.vi_status AS parse_status,
-    r.vi_status_reason AS parse_reason,
+    CASE WHEN r.vi_status IS NULL THEN 'stale' ELSE r.vi_status END AS parse_status,
+    CASE WHEN r.vi_status IS NULL THEN 'rerun_required' ELSE r.vi_status_reason END AS parse_reason,
     r.is_latest AS is_latest,
     d.body_hash AS body_hash,
     r.parser_version AS parser_version
 FROM extraction_firm_remediation AS r
 JOIN extraction_firm_remediation_documents AS d ON d.rcept_no = r.rcept_no
-WHERE r.vi_status IN ('ok', 'merged', 'partial')
+WHERE r.vi_status IN ({_VI_STATUS_LIST})
    OR (r.vi_status IS NULL AND r.parse_status <> 'empty')
 UNION ALL
 SELECT
@@ -138,8 +149,24 @@ SELECT
     CAST(NULL AS INTEGER),
     CAST(NULL AS TEXT),
     'empty',
-    'no_findings',
-    CAST(NULL AS INTEGER),
+    CASE WHEN d.subsection IS NULL THEN 'rerun_required' ELSE 'no_findings' END,
+    COALESCE(
+        (SELECT MAX(r2.is_latest) FROM extraction_firm_remediation AS r2
+         WHERE r2.rcept_no = d.rcept_no),
+        CASE
+            WHEN d.period_key IS NULL OR d.period_key = '' THEN 0
+            WHEN EXISTS (
+                SELECT 1 FROM extraction_firm_remediation_documents AS d2
+                WHERE d2.corp_code = d.corp_code
+                  AND d2.period_key = d.period_key
+                  AND (
+                      d2.rcept_dt > d.rcept_dt
+                      OR (d2.rcept_dt = d.rcept_dt AND d2.rcept_no > d.rcept_no)
+                  )
+            ) THEN 0
+            ELSE 1
+        END
+    ),
     d.body_hash,
     d.parser_version
 FROM extraction_firm_remediation_documents AS d
@@ -206,15 +233,21 @@ async def _add_vi_columns(connection: AsyncConnection) -> None:
 
 
 async def _ensure_vi_view(connection: AsyncConnection) -> None:
-    """쓰기 대상 DB에만 소비용 뷰를 만든다. 0.1 행의 NULL은 그대로 둔다."""
+    """쓰기 대상 DB에만 소비용 뷰를 만든다.
+
+    is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님.
+    empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다.
+    SQLite와 Postgres 모두 같은 트랜잭션에서 뷰를 지운 뒤 다시 만든다.
+    """
+    drop_view = text(f"DROP VIEW IF EXISTS {_VI_VIEW_NAME}")
+    create_view = text(f"CREATE VIEW {_VI_VIEW_NAME} AS {_VI_VIEW_SELECT}")
     try:
         if connection.dialect.name == "sqlite":
-            await connection.execute(text(f"DROP VIEW IF EXISTS {_VI_VIEW_NAME}"))
-            await connection.execute(text(f"CREATE VIEW {_VI_VIEW_NAME} AS {_VI_VIEW_SELECT}"))
-            return
-        await connection.execute(
-            text(f"CREATE OR REPLACE VIEW {_VI_VIEW_NAME} AS {_VI_VIEW_SELECT}")
-        )
+            await connection.execute(drop_view)
+            await connection.execute(create_view)
+        else:
+            await connection.execute(drop_view)
+            await connection.execute(create_view)
     except SQLAlchemyError as exc:
         raise FirmRemediationLoadError("개선권고 소비 뷰를 만들지 못해 저장하지 않습니다.") from exc
 
