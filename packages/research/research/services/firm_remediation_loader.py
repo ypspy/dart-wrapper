@@ -54,6 +54,7 @@ class SectionRecord:
     corp_name: str
     rcept_dt: str
     body_text: str
+    body_hash: str
 
 
 def readonly_file_uri(path: Path) -> str:
@@ -286,10 +287,12 @@ def _record_from_row(obj: dict[str, Any], line_no: int) -> SectionRecord:
         raise FirmRemediationLoadError(
             f"{line_no}번째 줄의 body_chars가 본문 길이와 다릅니다. 부분 적재 없이 중단합니다."
         )
+    # body_hash는 검증에 쓴 소문자 digest를 저장한다. 대문자 hex도 소문자로 둔다.
     return SectionRecord(
         rcept_no=str(obj["rcept_no"]),
         corp_code=str(obj["corp_code"]),
         corp_name="" if obj.get("corp_name") is None else str(obj["corp_name"]),
         rcept_dt="" if obj.get("rcept_dt") is None else str(obj["rcept_dt"]),
         body_text=body_text,
+        body_hash=digest,
     )

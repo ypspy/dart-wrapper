@@ -15,10 +15,13 @@ from pathlib import Path
 
 from app.db.session import create_db_engine, create_sessionmaker
 from research.extracting.firm_remediation import (
+    FINDING_VI_STATUSES,
     PARSER_VERSION,
     PreparedDocument,
     normalize_firm_display_name,
+    normalize_spaced_text,
     parse_remediation,
+    vi_row_fields,
 )
 from research.repositories.firm_remediation_repository import (
     MatchReviewSeed,
@@ -45,6 +48,23 @@ SUMMARY_KEYS = (
     "unique_corp_codes",
     "multi_receipt_groups",
     "period_key_missing",
+    "subsection_quality_control",
+    "subsection_auditor",
+    "finding_rows",
+    "placeholder_rows",
+    "view_rows",
+    "vi_status_ok",
+    "vi_status_merged",
+    "vi_status_partial",
+    "category_inherited_rows",
+    "date_ymd_kor",
+    "date_ymd_dot",
+    "date_blank",
+    "date_other",
+    "multi_finding_rows",
+    "action_date_in_text_rows",
+    "inspection_year_note_documents",
+    "second_table_rows",
 )
 
 # 추측 병합은 하지 않는다. 동명 3쌍과 회사 마스터 미등재 6코드만 확인 목록에 둔다.
@@ -108,13 +128,15 @@ def apply_is_latest(documents: list[PreparedDocument]) -> None:
 def summarize(documents: list[PreparedDocument]) -> dict[str, int]:
     """dry-run과 PR 대조에 쓰는 집계. 키 이름은 스냅샷 크기와 상관없이 같다."""
     grouped: dict[tuple[str, str], int] = defaultdict(int)
+    counts = _vi_summary_counts(documents)
     for document in documents:
         if document.period_key:
             grouped[(document.corp_code, document.period_key)] += 1
+    empty_documents = sum(document.status == "empty" for document in documents)
     return {
         "documents": len(documents),
         "table": sum(document.status == "table" for document in documents),
-        "empty": sum(document.status == "empty" for document in documents),
+        "empty": empty_documents,
         "no_subsection": sum(document.status == "no_subsection" for document in documents),
         "comment_documents": sum(
             any(note.kind == "comment" for note in document.notes) for document in documents
@@ -130,7 +152,67 @@ def summarize(documents: list[PreparedDocument]) -> dict[str, int]:
         "unique_corp_codes": len({document.corp_code for document in documents}),
         "multi_receipt_groups": sum(count >= 2 for count in grouped.values()),
         "period_key_missing": sum(document.period_key is None for document in documents),
+        "subsection_quality_control": sum(
+            document.subsection == "quality_control" for document in documents
+        ),
+        "subsection_auditor": sum(document.subsection == "auditor" for document in documents),
+        "finding_rows": counts["finding_rows"],
+        "placeholder_rows": counts["placeholder_rows"],
+        "view_rows": counts["finding_rows"] + empty_documents,
+        "vi_status_ok": counts["vi_status_ok"],
+        "vi_status_merged": counts["vi_status_merged"],
+        "vi_status_partial": counts["vi_status_partial"],
+        "category_inherited_rows": counts["category_inherited_rows"],
+        "date_ymd_kor": counts["date_ymd_kor"],
+        "date_ymd_dot": counts["date_ymd_dot"],
+        "date_blank": counts["date_blank"],
+        "date_other": counts["date_other"],
+        "multi_finding_rows": counts["multi_finding_rows"],
+        "action_date_in_text_rows": counts["action_date_in_text_rows"],
+        "inspection_year_note_documents": sum(
+            document.inspection_year_note is not None for document in documents
+        ),
+        "second_table_rows": counts["second_table_rows"],
     }
+
+
+def _vi_summary_counts(documents: list[PreparedDocument]) -> dict[str, int]:
+    """발견행은 ``FINDING_VI_STATUSES``만 센다. 빈 행은 placeholder다."""
+    counts = {
+        "finding_rows": 0,
+        "placeholder_rows": 0,
+        "vi_status_ok": 0,
+        "vi_status_merged": 0,
+        "vi_status_partial": 0,
+        "category_inherited_rows": 0,
+        "date_ymd_kor": 0,
+        "date_ymd_dot": 0,
+        "date_blank": 0,
+        "date_other": 0,
+        "multi_finding_rows": 0,
+        "action_date_in_text_rows": 0,
+        "second_table_rows": 0,
+    }
+    for document in documents:
+        for row in document.rows:
+            fields = vi_row_fields(row, rcept_dt=document.rcept_dt)
+            if fields.vi_status not in FINDING_VI_STATUSES:
+                if fields.vi_status == "empty":
+                    counts["placeholder_rows"] += 1
+                continue
+            counts["finding_rows"] += 1
+            status_key = f"vi_status_{fields.vi_status}"
+            if status_key in counts:
+                counts[status_key] += 1
+            counts["category_inherited_rows"] += fields.category_inherited
+            date_key = f"date_{fields.recommend_date_format}"
+            if date_key in counts:
+                counts[date_key] += 1
+            counts["multi_finding_rows"] += fields.multi_finding_flag
+            counts["action_date_in_text_rows"] += fields.action_date_in_text
+            if row.table_idx == 1:
+                counts["second_table_rows"] += 1
+    return counts
 
 
 def assert_write_targets(target_db: Path, catalog_path: Path | None, input_path: Path) -> None:
@@ -247,13 +329,16 @@ def _prepare_loaded(
             PreparedDocument(
                 rcept_no=record.rcept_no,
                 corp_code=record.corp_code,
-                corp_name=record.corp_name,
+                corp_name=normalize_spaced_text(record.corp_name),
                 rcept_dt=record.rcept_dt,
                 period_key=period_key_from_year_end(year_ends.get(record.rcept_no)),
                 status=parsed.status,
                 n_tables=parsed.n_tables,
                 rows=parsed.rows,
                 notes=parsed.notes,
+                body_hash=record.body_hash,
+                subsection=parsed.subsection,
+                inspection_year_note=parsed.inspection_year_note,
             )
         )
     apply_is_latest(prepared)
