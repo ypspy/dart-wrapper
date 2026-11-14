@@ -8,11 +8,25 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import date
 
-PARSER_VERSION = "f004-remediation-0.1"
+PARSER_VERSION = "f004-remediation-0.2"
 
-_SUBSECTION_LINE = re.compile(r"^2\.\s*(품질관리 감리결과|감사인 감리결과)\s*$")
-_SUBSECTION_PHRASES = ("2. 품질관리 감리결과", "2. 감사인 감리결과")
+_SUBSECTION_LINE = re.compile(r"^2\.\s*(품질관리|감사인)\s*감리\s*결과\s*$")
+_SUBSECTION_PHRASES = (
+    ("2. 품질관리 감리결과", "quality_control"),
+    ("2. 감사인 감리결과", "auditor"),
+)
+_YMD_KOR = re.compile(r"^(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일$")
+_YMD_DOT = re.compile(r"^(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\.?$")
+_ACTION_DATE_IN_TEXT = re.compile(r"20\d{2}\s*[.년]\s*\d{1,2}")
+_MULTI_FINDING = re.compile(r"외\s*\d+\s*(개|건)|^\s*-.*\s-\s|①.*②|\d\.\s.*\s\d\.\s")
+_INSPECTION_YEAR_BOILERPLATE = re.compile(r"이후\s*시행되는|이후\s*개시하는")
+_INSPECTION_YEAR_NOTE = re.compile(
+    r"((20\d{2}|'\d{2})\s*(년|회계연도|사업연도)\s*(도)?"
+    r"[^|\n]{0,20}감리(?!결과부터|\s*결과\s*증권)"
+    r"|감리\s*(기간|를\s*받|를\s*수검|수검)[^|\n]{0,40}20\d{2})"
+)
 _SUBHEAD = re.compile(r"^(\d+)\)\s*")
 _DATE = re.compile(
     r"^(?:\d{4}\s*[.\-/]\s*\d{1,2}(?:\s*[.\-/]\s*\d{1,2})?|\d{4}\s*년\s*\d{1,2}\s*월)"
@@ -85,6 +99,8 @@ class LogicalRow:
     parse_status: str
     source_cells: int
     is_latest: int = 0
+    source_line_raw: str = ""
+    leading_blank: bool = False
 
 
 @dataclass
@@ -109,6 +125,8 @@ class RemediationParseResult:
     n_tables: int
     rows: list[LogicalRow] = field(default_factory=list)
     notes: list[Note] = field(default_factory=list)
+    subsection: str | None = None
+    inspection_year_note: str | None = None
 
 
 @dataclass
@@ -124,6 +142,16 @@ class PreparedDocument:
     n_tables: int
     rows: list[LogicalRow]
     notes: list[Note]
+    body_hash: str = ""
+    subsection: str | None = None
+    inspection_year_note: str | None = None
+
+
+def normalize_spaced_text(value: str) -> str:
+    """NFC로 맞추고 특수 공백·연속 공백을 한 칸으로 줄인다. 법정 접두는 남긴다."""
+    text = unicodedata.normalize("NFC", value)
+    text = text.replace("\u00a0", " ").replace("\u3000", " ")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_firm_display_name(name: str) -> str:
@@ -143,14 +171,15 @@ def normalize_firm_display_name(name: str) -> str:
 
 def parse_remediation(rcept_no: str, corp_code: str, body_text: str) -> RemediationParseResult:
     """문서 하나. 파일/DB/네트워크에 접근하지 않는다."""
-    lines = _subsection_lines(body_text)
-    if lines is None:
+    located = _subsection_lines(body_text)
+    if located is None:
         return RemediationParseResult(
             rcept_no=rcept_no,
             corp_code=corp_code,
             status="no_subsection",
             n_tables=0,
         )
+    lines, subsection = located
 
     rows: list[LogicalRow] = []
     notes: list[Note] = []
@@ -251,6 +280,8 @@ def parse_remediation(rcept_no: str, corp_code: str, body_text: str) -> Remediat
                 action=assembled[3],
                 parse_status=status,
                 source_cells=source_cells,
+                source_line_raw=line,
+                leading_blank=len(cells) == 4 and is_blank_cell(cells[0]),
             )
         )
         row_idx += 1
@@ -263,25 +294,35 @@ def parse_remediation(rcept_no: str, corp_code: str, body_text: str) -> Remediat
         n_tables=len(tables_with_header),
         rows=rows,
         notes=notes,
+        subsection=subsection,
+        inspection_year_note=inspection_year_note_from_lines(lines),
     )
 
 
-def _subsection_lines(body_text: str) -> list[str] | None:
-    """소제목 2 다음 줄부터 반환한다. 소제목이 없으면 None."""
+def _subsection_kind(label: str) -> str:
+    """소제목 2의 표기를 저장용 키로 바꾼다."""
+    return "quality_control" if label == "품질관리" else "auditor"
+
+
+def _subsection_lines(body_text: str) -> tuple[list[str], str] | None:
+    """소제목 2 다음 줄과 소제목 종류를 반환한다. 소제목이 없으면 None."""
     lines = body_text.splitlines()
     for index, line in enumerate(lines):
-        if _SUBSECTION_LINE.match(_clean_line(line)):
-            return lines[index + 1 :]
+        match = _SUBSECTION_LINE.match(_clean_line(line))
+        if match is not None:
+            return lines[index + 1 :], _subsection_kind(match.group(1))
     earliest: int | None = None
     phrase_length = 0
-    for phrase in _SUBSECTION_PHRASES:
+    kind = ""
+    for phrase, phrase_kind in _SUBSECTION_PHRASES:
         found = body_text.find(phrase)
         if found != -1 and (earliest is None or found < earliest):
             earliest = found
             phrase_length = len(phrase)
+            kind = phrase_kind
     if earliest is None:
         return None
-    return body_text[earliest + phrase_length :].splitlines()
+    return body_text[earliest + phrase_length :].splitlines(), kind
 
 
 def _clean_line(line: str) -> str:
@@ -399,3 +440,119 @@ def _document_status(rows: list[LogicalRow]) -> str:
         if not is_blank_cell(row.finding) or not is_blank_cell(row.action):
             return "table"
     return "empty"
+
+
+def inspection_year_note_from_lines(lines: list[str]) -> str | None:
+    """소제목 2 뒤 산문에만 적힌 감리연도 줄을 `` ⏎ ``로 잇는다.
+
+    2019 서식의 ``이후 시행되는`` ``이후 개시하는`` 상투문은 빼 둔다.
+    """
+    kept: list[str] = []
+    for raw_line in lines:
+        line = _clean_line(raw_line)
+        if not line or _INSPECTION_YEAR_BOILERPLATE.search(line):
+            continue
+        if _INSPECTION_YEAR_NOTE.search(line):
+            kept.append(line)
+    if not kept:
+        return None
+    return " ⏎ ".join(kept)
+
+
+@dataclass(frozen=True)
+class ViRowFields:
+    """논리 행 하나에 붙는 Ⅵ 소비용 열. 기존 열의 의미를 바꾸지 않는다."""
+
+    category_raw: str
+    category_inherited: int
+    finding_text: str
+    action_text: str
+    recommend_date_raw: str
+    recommend_date_iso: str | None
+    recommend_date_format: str
+    action_date_in_text: int
+    multi_finding_flag: int
+    source_line_raw: str
+    vi_status: str
+    vi_status_reason: str | None
+
+
+def vi_row_fields(row: LogicalRow, *, rcept_dt: str) -> ViRowFields:
+    """개선권고 논리 행의 구분·날짜·상태 열을 계산한다. 행을 나누지 않는다."""
+    category_raw = normalize_spaced_text(row.component)
+    finding_text = normalize_spaced_text(row.finding)
+    action_text = normalize_spaced_text(row.action)
+    recommend_date_raw, recommend_date_iso, recommend_date_format, date_reason = _recommend_date(
+        row.action_date, rcept_dt
+    )
+    inherited = row.source_cells == 3 or (row.source_cells == 4 and row.leading_blank)
+    vi_status, vi_status_reason = _vi_status(row.parse_status, date_reason)
+    return ViRowFields(
+        category_raw=category_raw,
+        category_inherited=1 if inherited else 0,
+        finding_text=finding_text,
+        action_text=action_text,
+        recommend_date_raw=recommend_date_raw,
+        recommend_date_iso=recommend_date_iso,
+        recommend_date_format=recommend_date_format,
+        action_date_in_text=1 if _ACTION_DATE_IN_TEXT.search(action_text) else 0,
+        multi_finding_flag=1 if _MULTI_FINDING.search(row.finding.strip()) else 0,
+        source_line_raw=row.source_line_raw,
+        vi_status=vi_status,
+        vi_status_reason=vi_status_reason,
+    )
+
+
+def _recommend_date(action_date: str, rcept_dt: str) -> tuple[str, str | None, str, str | None]:
+    """조치일자 칸을 (원문, ISO, 형식, 부분 사유)로 해석한다.
+
+    부분 사유가 없으면 날짜 때문에 partial이 되지 않는다. 공란은 partial이 아니다.
+    """
+    raw = normalize_spaced_text(action_date)
+    matched = _YMD_KOR.match(raw)
+    date_format = "ymd_kor"
+    if matched is None:
+        matched = _YMD_DOT.match(raw)
+        date_format = "ymd_dot"
+    if matched is not None:
+        year = int(matched.group(1))
+        month = int(matched.group(2))
+        day = int(matched.group(3))
+        iso = _iso_calendar_date(year, month, day)
+        if iso is None:
+            return raw, None, date_format, "recommend_date_invalid"
+        limit = _rcept_year(rcept_dt)
+        if limit is None or year < 2010 or year > limit:
+            return raw, None, date_format, "recommend_date_out_of_range"
+        return raw, iso, date_format, None
+    if is_blank_cell(action_date):
+        return raw, None, "blank", None
+    return raw, None, "other", "recommend_date_unrecognized"
+
+
+def _iso_calendar_date(year: int, month: int, day: int) -> str | None:
+    """달력에 있는 날짜만 ``YYYY-MM-DD``로 바꾼다."""
+    try:
+        date(year, month, day)
+    except ValueError:
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _rcept_year(rcept_dt: str) -> int | None:
+    """접수일 문자열의 연도. 앞 4자리가 숫자가 아니면 None."""
+    match = re.match(r"(\d{4})", rcept_dt.strip())
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _vi_status(parse_status: str, date_reason: str | None) -> tuple[str, str | None]:
+    """기존 parse_status와 날짜 사유를 vi_status로 올린다. partial이 우선한다."""
+    if parse_status == "empty":
+        return "empty", "placeholder_row"
+    if date_reason is not None:
+        return "partial", date_reason
+    if parse_status == "continuation_merged":
+        return "merged", "continuation_row"
+    return "ok", None

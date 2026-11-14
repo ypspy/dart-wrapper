@@ -54,6 +54,7 @@ class SectionRecord:
     corp_name: str
     rcept_dt: str
     body_text: str
+    body_hash: str
 
 
 def readonly_file_uri(path: Path) -> str:
@@ -292,4 +293,5 @@ def _record_from_row(obj: dict[str, Any], line_no: int) -> SectionRecord:
         corp_name="" if obj.get("corp_name") is None else str(obj["corp_name"]),
         rcept_dt="" if obj.get("rcept_dt") is None else str(obj["rcept_dt"]),
         body_text=body_text,
+        body_hash=str(obj["body_hash"]),
     )

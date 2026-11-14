@@ -60,6 +60,23 @@ EXPECTED_SUMMARY = {
     "unique_corp_codes": 4,
     "multi_receipt_groups": 1,
     "period_key_missing": 0,
+    "subsection_quality_control": 5,
+    "subsection_auditor": 2,
+    "finding_rows": 16,
+    "placeholder_rows": 17,
+    "view_rows": 18,
+    "vi_status_ok": 11,
+    "vi_status_merged": 5,
+    "vi_status_partial": 0,
+    "category_inherited_rows": 5,
+    "date_ymd_kor": 6,
+    "date_ymd_dot": 10,
+    "date_blank": 0,
+    "date_other": 0,
+    "multi_finding_rows": 0,
+    "action_date_in_text_rows": 0,
+    "inspection_year_note_documents": 0,
+    "second_table_rows": 3,
 }
 
 

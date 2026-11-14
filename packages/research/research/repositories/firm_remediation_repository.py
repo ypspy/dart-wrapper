@@ -10,12 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import Table, delete, or_, select, update
+from sqlalchemy import Table, delete, or_, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from app.models.base import Base
-from research.extracting.firm_remediation import PARSER_VERSION, PreparedDocument
+from research.extracting.firm_remediation import PARSER_VERSION, PreparedDocument, vi_row_fields
 from research.models.firm_remediation import (
     ExtractionFirmMatchReview,
     ExtractionFirmRemediation,
@@ -23,7 +23,7 @@ from research.models.firm_remediation import (
     ExtractionFirmRemediationNote,
 )
 from research.schema import _add_column_if_missing
-from research.services.firm_remediation_loader import FirmRemediationError
+from research.services.firm_remediation_loader import FirmRemediationError, FirmRemediationLoadError
 
 
 @dataclass(frozen=True)
@@ -55,8 +55,100 @@ def _iso_rcept_dt(rcept_no: str) -> str | None:
     return f"{prefix[:4]}-{prefix[4:6]}-{prefix[6:8]}"
 
 
+_VI_ROW_COLUMNS = (
+    ("category_raw", "TEXT"),
+    ("category_inherited", "INTEGER"),
+    ("finding_text", "TEXT"),
+    ("action_text", "TEXT"),
+    ("recommend_date_raw", "TEXT"),
+    ("recommend_date_iso", "TEXT"),
+    ("recommend_date_format", "TEXT"),
+    ("action_date_in_text", "INTEGER"),
+    ("multi_finding_flag", "INTEGER"),
+    ("source_line_raw", "TEXT"),
+    ("vi_status", "TEXT"),
+    ("vi_status_reason", "TEXT"),
+)
+_VI_DOCUMENT_COLUMNS = (
+    ("subsection", "TEXT"),
+    ("corp_name", "TEXT"),
+    ("body_hash", "TEXT"),
+    ("fiscal_year", "INTEGER"),
+    ("fiscal_year_src", "TEXT"),
+    ("inspection_year_note", "TEXT"),
+)
+_VI_VIEW_NAME = "v_f004_vi_findings"
+_VI_VIEW_SELECT = """
+SELECT
+    d.rcept_no AS rcept_no,
+    d.rcept_dt AS rcept_dt,
+    d.corp_code AS corp_code,
+    d.corp_name AS corp_name,
+    d.fiscal_year AS fiscal_year,
+    d.fiscal_year_src AS fiscal_year_src,
+    d.period_key AS period_key,
+    d.subsection AS subsection,
+    r.table_idx AS table_idx,
+    r.row_idx AS row_idx,
+    r.category_raw AS category_raw,
+    r.category_inherited AS category_inherited,
+    r.finding_text AS finding_text,
+    r.action_text AS action_text,
+    r.recommend_date_raw AS recommend_date_raw,
+    r.recommend_date_iso AS recommend_date_iso,
+    r.recommend_date_format AS recommend_date_format,
+    CAST(NULL AS TEXT) AS action_date,
+    r.action_date_in_text AS action_date_in_text,
+    CAST(NULL AS TEXT) AS inspection_year,
+    d.inspection_year_note AS inspection_year_note,
+    r.multi_finding_flag AS multi_finding_flag,
+    r.source_line_raw AS source_line_raw,
+    r.vi_status AS parse_status,
+    r.vi_status_reason AS parse_reason,
+    r.is_latest AS is_latest,
+    d.body_hash AS body_hash,
+    r.parser_version AS parser_version
+FROM extraction_firm_remediation AS r
+JOIN extraction_firm_remediation_documents AS d ON d.rcept_no = r.rcept_no
+WHERE r.vi_status IN ('ok', 'merged', 'partial')
+   OR (r.vi_status IS NULL AND r.parse_status <> 'empty')
+UNION ALL
+SELECT
+    d.rcept_no,
+    d.rcept_dt,
+    d.corp_code,
+    d.corp_name,
+    d.fiscal_year,
+    d.fiscal_year_src,
+    d.period_key,
+    d.subsection,
+    CAST(NULL AS INTEGER),
+    CAST(NULL AS INTEGER),
+    CAST(NULL AS TEXT),
+    CAST(NULL AS INTEGER),
+    CAST(NULL AS TEXT),
+    CAST(NULL AS TEXT),
+    CAST(NULL AS TEXT),
+    CAST(NULL AS TEXT),
+    CAST(NULL AS TEXT),
+    CAST(NULL AS TEXT),
+    CAST(NULL AS INTEGER),
+    CAST(NULL AS TEXT),
+    d.inspection_year_note,
+    CAST(NULL AS INTEGER),
+    CAST(NULL AS TEXT),
+    'empty',
+    'no_findings',
+    CAST(NULL AS INTEGER),
+    d.body_hash,
+    d.parser_version
+FROM extraction_firm_remediation_documents AS d
+WHERE d.status = 'empty'
+"""
+
+
 async def create_firm_remediation_tables(engine: AsyncEngine) -> None:
-    """대상 DB에 개선권고 테이블이 없으면 만들고, 구문서 테이블에는 rcept_dt를 추가한다."""
+    """대상 DB에 개선권고 테이블이 없으면 만들고, 빠진 열과 소비 뷰를 붙인다."""
     tables = firm_tables()
 
     def _create(sync_conn: object) -> None:
@@ -65,6 +157,8 @@ async def create_firm_remediation_tables(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.run_sync(_create)
         await _add_document_rcept_dt(connection)
+        await _add_vi_columns(connection)
+        await _ensure_vi_view(connection)
 
 
 async def _add_document_rcept_dt(connection: AsyncConnection) -> None:
@@ -82,6 +176,47 @@ async def _add_document_rcept_dt(connection: AsyncConnection) -> None:
         raise FirmRemediationError(
             "기존 문서 테이블에 rcept_dt 컬럼을 추가하지 못해 저장하지 않습니다."
         ) from exc
+
+
+def fiscal_from_period_key(period_key: str | None) -> tuple[int | None, str | None]:
+    """``YYYY-MM`` 기간 키의 연도와 출처. 키가 없으면 둘 다 비운다."""
+    if not period_key or len(period_key) < 5 or period_key[4] != "-":
+        return None, None
+    year_text = period_key[:4]
+    if not year_text.isdigit():
+        return None, None
+    return int(year_text), "catalog.year_end"
+
+
+async def _add_vi_columns(connection: AsyncConnection) -> None:
+    """0.1 테이블에 Ⅵ 열을 NULL 허용으로 붙인다. 이미 있으면 건너뛴다."""
+    dialect = connection.dialect.name
+    patches = (
+        (ExtractionFirmRemediation.__tablename__, _VI_ROW_COLUMNS),
+        (ExtractionFirmRemediationDocument.__tablename__, _VI_DOCUMENT_COLUMNS),
+    )
+    try:
+        for table, columns in patches:
+            for name, column_ddl in columns:
+                await _add_column_if_missing(connection, table, name, column_ddl, dialect)
+    except SQLAlchemyError as exc:
+        raise FirmRemediationLoadError(
+            "기존 개선권고 테이블에 Ⅵ 열을 추가하지 못해 저장하지 않습니다."
+        ) from exc
+
+
+async def _ensure_vi_view(connection: AsyncConnection) -> None:
+    """쓰기 대상 DB에만 소비용 뷰를 만든다. 0.1 행의 NULL은 그대로 둔다."""
+    try:
+        if connection.dialect.name == "sqlite":
+            await connection.execute(text(f"DROP VIEW IF EXISTS {_VI_VIEW_NAME}"))
+            await connection.execute(text(f"CREATE VIEW {_VI_VIEW_NAME} AS {_VI_VIEW_SELECT}"))
+            return
+        await connection.execute(
+            text(f"CREATE OR REPLACE VIEW {_VI_VIEW_NAME} AS {_VI_VIEW_SELECT}")
+        )
+    except SQLAlchemyError as exc:
+        raise FirmRemediationLoadError("개선권고 소비 뷰를 만들지 못해 저장하지 않습니다.") from exc
 
 
 class FirmRemediationRepository:
@@ -106,6 +241,7 @@ class FirmRemediationRepository:
         await self._session.flush()
 
         for document in documents:
+            fiscal_year, fiscal_year_src = fiscal_from_period_key(document.period_key)
             self._session.add(
                 ExtractionFirmRemediationDocument(
                     rcept_no=document.rcept_no,
@@ -116,11 +252,18 @@ class FirmRemediationRepository:
                     n_tables=document.n_tables,
                     n_logical_rows=len(document.rows),
                     n_notes=len(document.notes),
+                    subsection=document.subsection,
+                    corp_name=document.corp_name,
+                    body_hash=document.body_hash,
+                    fiscal_year=fiscal_year,
+                    fiscal_year_src=fiscal_year_src,
+                    inspection_year_note=document.inspection_year_note,
                     parser_version=parser_version,
                     extracted_at=extracted_at,
                 )
             )
             for row in document.rows:
+                fields = vi_row_fields(row, rcept_dt=document.rcept_dt)
                 self._session.add(
                     ExtractionFirmRemediation(
                         rcept_no=document.rcept_no,
@@ -135,6 +278,18 @@ class FirmRemediationRepository:
                         is_latest=row.is_latest,
                         parse_status=row.parse_status,
                         source_cells=row.source_cells,
+                        category_raw=fields.category_raw,
+                        category_inherited=fields.category_inherited,
+                        finding_text=fields.finding_text,
+                        action_text=fields.action_text,
+                        recommend_date_raw=fields.recommend_date_raw,
+                        recommend_date_iso=fields.recommend_date_iso,
+                        recommend_date_format=fields.recommend_date_format,
+                        action_date_in_text=fields.action_date_in_text,
+                        multi_finding_flag=fields.multi_finding_flag,
+                        source_line_raw=fields.source_line_raw,
+                        vi_status=fields.vi_status,
+                        vi_status_reason=fields.vi_status_reason,
                         parser_version=parser_version,
                         extracted_at=extracted_at,
                     )
