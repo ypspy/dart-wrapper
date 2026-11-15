@@ -27,7 +27,7 @@ from research.models.firm_remediation import (
     ExtractionFirmRemediationDocument,
     ExtractionFirmRemediationNote,
 )
-from research.schema import _add_column_if_missing
+from research.schema import add_column_if_missing
 from research.services.firm_remediation_loader import FirmRemediationError, FirmRemediationLoadError
 
 
@@ -219,7 +219,7 @@ async def _add_document_rcept_dt(connection: AsyncConnection) -> None:
     """문서 테이블에 rcept_dt가 없으면 SQLite와 Postgres 모두 ALTER로 추가한다."""
     dialect = connection.dialect.name
     try:
-        await _add_column_if_missing(
+        await add_column_if_missing(
             connection,
             ExtractionFirmRemediationDocument.__tablename__,
             "rcept_dt",
@@ -252,7 +252,7 @@ async def _add_vi_columns(connection: AsyncConnection) -> None:
     try:
         for table, columns in patches:
             for name, column_ddl in columns:
-                await _add_column_if_missing(connection, table, name, column_ddl, dialect)
+                await add_column_if_missing(connection, table, name, column_ddl, dialect)
     except SQLAlchemyError as exc:
         raise FirmRemediationLoadError(
             "기존 개선권고 테이블에 Ⅵ 열을 추가하지 못해 저장하지 않습니다."
