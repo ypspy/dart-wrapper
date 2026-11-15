@@ -113,11 +113,9 @@ _VI_VIEW_NAME = "v_f004_vi_findings"
 _VI_STATUS_LIST = ", ".join(f"'{status}'" for status in FINDING_VI_STATUSES)
 # is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님.
 # empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다.
+# parse_status='stale' / parse_reason='rerun_required'는 0.1 행이며 같은 스냅샷으로 --write를 다시 하면 사라진다.
 _VI_VIEW_SELECT = f"""
 SELECT
-    -- is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님.
-    -- empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다.
-    -- parse_status='stale' / parse_reason='rerun_required'는 0.1 행이며 같은 스냅샷으로 --write를 다시 하면 사라진다.
     d.rcept_no AS rcept_no,
     d.rcept_dt AS rcept_dt,
     d.corp_code AS corp_code,
@@ -264,6 +262,7 @@ async def _ensure_vi_view(connection: AsyncConnection) -> None:
 
     is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님.
     empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다.
+    parse_status='stale' / parse_reason='rerun_required'는 0.1 행이며 같은 스냅샷으로 --write를 다시 하면 사라진다.
     SQLite와 Postgres 모두 같은 트랜잭션에서 뷰를 지운 뒤 다시 만든다.
     """
     drop_view = text(f"DROP VIEW IF EXISTS {_VI_VIEW_NAME}")

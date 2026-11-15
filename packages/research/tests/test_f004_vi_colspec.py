@@ -887,17 +887,6 @@ async def test_empty_view_is_latest_follows_period_group(tmp_path: Path) -> None
     }
     summary = summarize(documents)
     connection = sqlite3.connect(target)
-    view_sql = connection.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'v_f004_vi_findings'"
-    ).fetchone()[0]
-    assert (
-        "is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님."
-        in view_sql
-    )
-    assert (
-        "empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다." in view_sql
-    )
-    assert "parse_status='stale'" in view_sql
     flags = dict(
         connection.execute(
             "SELECT rcept_no, MAX(is_latest) FROM v_f004_vi_findings GROUP BY rcept_no"
@@ -919,6 +908,20 @@ async def test_empty_view_is_latest_follows_period_group(tmp_path: Path) -> None
         "WHERE parse_status = 'empty' AND is_latest IS NULL"
     ).fetchone()[0]
     assert empty_null == 0
+    empty_vs_base = connection.execute(
+        """
+        SELECT v.is_latest, base.flag
+        FROM v_f004_vi_findings AS v
+        JOIN (
+            SELECT rcept_no, MAX(is_latest) AS flag
+            FROM extraction_firm_remediation
+            GROUP BY rcept_no
+        ) AS base ON base.rcept_no = v.rcept_no
+        WHERE v.parse_status = 'empty'
+        """
+    ).fetchall()
+    assert empty_vs_base
+    assert all(view_flag == base_flag for view_flag, base_flag in empty_vs_base)
     groups = _view_groups(connection)
     assert len(groups) == 6
     assert all(row[2] == 1 for row in groups)
@@ -1053,17 +1056,7 @@ async def test_view_ddl_drops_then_creates_for_sqlite_and_postgres() -> None:
         in before_select
     )
     assert (
-        "empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다."
-        in before_select
-    )
-    assert _ensure_vi_view.__doc__ is not None
-    assert (
-        "is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님."
-        in _ensure_vi_view.__doc__
-    )
-    assert (
-        "empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다."
-        in _ensure_vi_view.__doc__
+        "empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다." in before_select
     )
     for name in ("sqlite", "postgresql"):
         connection = _Connection(name)
@@ -1072,12 +1065,3 @@ async def test_view_ddl_drops_then_creates_for_sqlite_and_postgres() -> None:
         assert connection.statements[0] == "DROP VIEW IF EXISTS v_f004_vi_findings"
         assert connection.statements[1].startswith("CREATE VIEW v_f004_vi_findings AS")
         assert "CREATE OR REPLACE" not in connection.statements[1]
-        assert (
-            "is_latest = 결산기(corp_code, period_key)별 최신 정정 공시이며, 법인 전체나 지적 키 기준이 아님."
-            in connection.statements[1]
-        )
-        assert (
-            "empty 문서 행도 같은 정의이며, 그 문서 기본 행의 MAX(is_latest)에서 가져온다."
-            in connection.statements[1]
-        )
-        assert "parse_status='stale'" in connection.statements[1]
