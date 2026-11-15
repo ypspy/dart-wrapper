@@ -12,12 +12,16 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from app.db.session import create_db_engine, ensure_schema
+from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
 from research.extracting.firm_remediation import (
     PARSER_VERSION,
     PreparedDocument,
     normalize_firm_display_name,
     parse_remediation,
+)
+from research.repositories.firm_remediation_repository import (
+    FirmRemediationRepository,
+    _iso_rcept_dt,
 )
 from research.schema import ensure_research_schema
 from research.services.firm_remediation_loader import (
@@ -966,6 +970,77 @@ async def test_write_adds_missing_rcept_dt_and_keeps_one_latest(tmp_path: Path) 
     assert dates["20200630000215"] == "2020-06-30"
     assert flags == {"20201202000259": 1, "20200630000215": 0}
     assert sum(flags.values()) == 1
+
+
+async def test_backfill_empty_rcept_dt_matches_iso_reference(tmp_path: Path) -> None:
+    """구스키마의 빈 rcept_dt는 단일 SQL 결과가 접수번호 기준값과 행마다 같다."""
+    target = tmp_path / "legacy-nulls.db"
+    connection = sqlite3.connect(target)
+    connection.execute("""
+        CREATE TABLE extraction_firm_remediation_documents (
+            rcept_no TEXT PRIMARY KEY,
+            corp_code TEXT NOT NULL,
+            period_key TEXT,
+            rcept_dt TEXT,
+            status TEXT NOT NULL,
+            n_tables INTEGER NOT NULL,
+            n_logical_rows INTEGER NOT NULL,
+            n_notes INTEGER NOT NULL,
+            parser_version TEXT NOT NULL,
+            extracted_at TEXT NOT NULL
+        )
+        """)
+    seeded = (
+        ("20200630000215", ""),
+        ("20201202000259", None),
+        ("NOTDIGIT000001", ""),
+        ("ABCDEFGH", None),
+        ("1234567", ""),
+        ("1234", None),
+        ("20200101000099", "1999-01-01"),
+    )
+    connection.executemany(
+        """
+        INSERT INTO extraction_firm_remediation_documents (
+            rcept_no, corp_code, period_key, rcept_dt, status, n_tables,
+            n_logical_rows, n_notes, parser_version, extracted_at
+        ) VALUES (?, '00607609', '2020-03', ?, 'table', 1, 1, 0, 'old', '2020-01-01')
+        """,
+        seeded,
+    )
+    connection.commit()
+    connection.close()
+
+    engine = create_db_engine("sqlite+aiosqlite:///" + target.resolve().as_posix())
+    sessionmaker = create_sessionmaker(engine)
+    async with sessionmaker() as session:
+        async with session.begin():
+            await FirmRemediationRepository(session)._backfill_empty_rcept_dt()
+    await engine.dispose()
+
+    stored = dict(
+        sqlite3.connect(target)
+        .execute(
+            "SELECT rcept_no, rcept_dt FROM extraction_firm_remediation_documents "
+            "ORDER BY rcept_no"
+        )
+        .fetchall()
+    )
+    expected: dict[str, str | None] = {}
+    for rcept_no, original in seeded:
+        if original in (None, ""):
+            iso = _iso_rcept_dt(rcept_no)
+            expected[rcept_no] = original if iso is None else iso
+        else:
+            expected[rcept_no] = original
+    assert stored == expected
+    assert stored["20200630000215"] == "2020-06-30"
+    assert stored["20201202000259"] == "2020-12-02"
+    assert stored["NOTDIGIT000001"] == ""
+    assert stored["ABCDEFGH"] is None
+    assert stored["1234567"] == ""
+    assert stored["1234"] is None
+    assert stored["20200101000099"] == "1999-01-01"
 
 
 async def test_startup_schema_does_not_create_firm_tables() -> None:

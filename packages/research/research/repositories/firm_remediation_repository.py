@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import Table, delete, or_, select, text, update
+from sqlalchemy import Table, delete, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
@@ -53,11 +53,38 @@ def firm_tables() -> list[Table]:
 
 
 def _iso_rcept_dt(rcept_no: str) -> str | None:
-    """접수번호 앞 8자리 YYYYMMDD를 ISO 날짜로 바꾼다. 숫자가 아니면 None."""
+    """접수번호 앞 8자리 YYYYMMDD를 ISO 날짜로 바꾼다. 숫자가 아니면 None.
+
+    저장 경로에서는 더 이상 행마다 호출하지 않는다. 단일 UPDATE의 결과 정의와
+    테스트 기준값으로 남긴다.
+    """
     prefix = rcept_no[:8]
     if len(prefix) != 8 or not prefix.isdigit():
         return None
     return f"{prefix[:4]}-{prefix[4:6]}-{prefix[6:8]}"
+
+
+def _rcept_dt_backfill_sql(dialect: str) -> str:
+    """빈 rcept_dt를 접수번호 앞 8자리 ISO 날짜로 채우는 UPDATE 한 문장.
+
+    숫자 8자리 판별만 SQLite GLOB와 Postgres 정규식이 다르다. 채워지는 값은
+    ``_iso_rcept_dt``와 같다. 앞 8자리가 숫자가 아니면 행을 바꾸지 않는다.
+    """
+    iso = "substr(rcept_no, 1, 4) || '-' || substr(rcept_no, 5, 2) || '-' || substr(rcept_no, 7, 2)"
+    if dialect == "postgresql":
+        digits = "substr(rcept_no, 1, 8) ~ '^[0-9]{8}$'"
+    elif dialect == "sqlite":
+        digits = "substr(rcept_no, 1, 8) GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'"
+    else:
+        raise FirmRemediationError(
+            "기존 문서의 rcept_dt를 접수번호로 채우지 못해 저장하지 않습니다."
+        )
+    return (
+        "UPDATE extraction_firm_remediation_documents "
+        f"SET rcept_dt = {iso} "
+        "WHERE (rcept_dt IS NULL OR rcept_dt = '') "
+        f"AND {digits}"
+    )
 
 
 _VI_ROW_COLUMNS = (
@@ -363,26 +390,11 @@ class FirmRemediationRepository:
         """rcept_dt가 비어 있는 문서를 접수번호 앞 8자리의 ISO 날짜로 채운다.
 
         이번 입력에서 다시 넣은 문서는 이미 값이 있다. 구스키마에 남아 있던 같은 그룹만
-        비어 있으면 (rcept_dt, rcept_no) 승자가 뒤집히므로, 비교 전에 채운다.
+        비어 있으면 (rcept_dt, rcept_no) 승자가 뒤집히므로, 비교 전에 UPDATE 한 문장으로 채운다.
         """
         try:
-            result = await self._session.execute(
-                select(ExtractionFirmRemediationDocument.rcept_no).where(
-                    or_(
-                        ExtractionFirmRemediationDocument.rcept_dt.is_(None),
-                        ExtractionFirmRemediationDocument.rcept_dt == "",
-                    )
-                )
-            )
-            for (rcept_no,) in result.all():
-                iso = _iso_rcept_dt(str(rcept_no))
-                if iso is None:
-                    continue
-                await self._session.execute(
-                    update(ExtractionFirmRemediationDocument)
-                    .where(ExtractionFirmRemediationDocument.rcept_no == rcept_no)
-                    .values(rcept_dt=iso)
-                )
+            connection = await self._session.connection()
+            await self._session.execute(text(_rcept_dt_backfill_sql(connection.dialect.name)))
             await self._session.flush()
             self._session.expire_all()
         except SQLAlchemyError as exc:
