@@ -83,8 +83,6 @@ _LEGAL_PREFIXES = (
     "(주)",
     "㈜",
 )
-# 파이프 행을 4칸으로 재조립하지 못했을 때의 reason. 비파이프 고아 줄은 orphan_line이다.
-IN_TABLE_UNPARSED_REASONS = frozenset({"bad_cell_count", "date_in_first_cell", "not_group_label"})
 
 
 @dataclass
