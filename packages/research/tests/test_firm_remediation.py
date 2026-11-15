@@ -1043,6 +1043,114 @@ async def test_backfill_empty_rcept_dt_matches_iso_reference(tmp_path: Path) -> 
     assert stored["20200101000099"] == "1999-01-01"
 
 
+def _clone_fixture_row(rcept_no: str, rcept_dt: object, *, drop_rcept_dt: bool = False) -> dict:
+    """픽스처 첫 줄을 복사한다. 본문은 그대로라 해시는 다시 계산하지 않는다."""
+    row = json.loads(FIXTURE.read_text(encoding="utf-8").splitlines()[0])
+    row["rcept_no"] = rcept_no
+    if drop_rcept_dt:
+        row.pop("rcept_dt", None)
+    else:
+        row["rcept_dt"] = rcept_dt
+    return row
+
+
+def _seed_firm_rows(path: Path) -> None:
+    """적재가 거부될 때 남아 있어야 하는 기존 행을 넣는다."""
+    connection = sqlite3.connect(path)
+    connection.executescript("""
+        CREATE TABLE extraction_firm_remediation (rcept_no TEXT);
+        INSERT INTO extraction_firm_remediation VALUES ('keep');
+        CREATE TABLE extraction_firm_remediation_documents (rcept_no TEXT);
+        INSERT INTO extraction_firm_remediation_documents VALUES ('keep');
+        CREATE TABLE extraction_firm_remediation_notes (rcept_no TEXT);
+        INSERT INTO extraction_firm_remediation_notes VALUES ('keep');
+        CREATE TABLE extraction_firm_match_review (corp_code TEXT);
+        INSERT INTO extraction_firm_match_review VALUES ('keep');
+        """)
+    connection.commit()
+    connection.close()
+
+
+def _firm_row_counts(path: Path) -> dict[str, list[tuple]]:
+    """문서·행·주석·확인 목록의 현재 행을 읽는다."""
+    connection = sqlite3.connect(path)
+    tables = {
+        "extraction_firm_remediation": "SELECT rcept_no FROM extraction_firm_remediation",
+        "extraction_firm_remediation_documents": (
+            "SELECT rcept_no FROM extraction_firm_remediation_documents"
+        ),
+        "extraction_firm_remediation_notes": (
+            "SELECT rcept_no FROM extraction_firm_remediation_notes"
+        ),
+        "extraction_firm_match_review": "SELECT corp_code FROM extraction_firm_match_review",
+    }
+    found = {name: connection.execute(statement).fetchall() for name, statement in tables.items()}
+    connection.close()
+    return found
+
+
+async def test_blank_rcept_dt_stops_load_without_partial_write(tmp_path: Path) -> None:
+    """빈 접수일은 dry-run과 저장을 모두 멈추고, 대상 DB에는 아무것도 쓰지 않는다."""
+    kept = _clone_fixture_row("20200630000215", "2020-06-30 ")
+    spaced = tmp_path / "spaced"
+    _write_manifest(spaced, (json.dumps(kept, ensure_ascii=False) + "\n").encode("utf-8"), None)
+    assert load_section_records(spaced)[0].rcept_dt == "2020-06-30 "
+
+    for index, value in enumerate(("", "   ", "\n\t", None)):
+        folder = tmp_path / f"blank-{index}"
+        row = _clone_fixture_row("20200630009999", value)
+        _write_manifest(folder, (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"), None)
+        with pytest.raises(FirmRemediationLoadError, match="rcept_dt가 비어 있습니다") as raised:
+            load_section_records(folder)
+        message = str(raised.value)
+        assert "1번째 줄(rcept_no=20200630009999)" in message
+        assert "부분 적재 없이 중단합니다." in message
+
+    missing = _clone_fixture_row("20200630009999", None, drop_rcept_dt=True)
+    missing_dir = tmp_path / "missing-key"
+    _write_manifest(
+        missing_dir, (json.dumps(missing, ensure_ascii=False) + "\n").encode("utf-8"), None
+    )
+    with pytest.raises(FirmRemediationLoadError, match=r"1번째 줄\(rcept_no=20200630009999\)"):
+        load_section_records(missing_dir)
+
+    first = json.loads(FIXTURE.read_text(encoding="utf-8").splitlines()[0])
+    second = _clone_fixture_row("20200630009999", "")
+    payload = (
+        json.dumps(first, ensure_ascii=False) + "\n" + json.dumps(second, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    folder = tmp_path / "two-lines"
+    _write_manifest(folder, payload, None)
+    catalog = tmp_path / "catalog.db"
+    _catalog(catalog)
+    target = tmp_path / "existing.db"
+    _seed_firm_rows(target)
+    before = _firm_row_counts(target)
+    for write in (False, True):
+        with pytest.raises(FirmRemediationLoadError, match="2번째 줄") as raised:
+            await run_firm_remediation(
+                input_path=folder,
+                catalog_path=catalog,
+                write=write,
+                target_db=target,
+            )
+        assert "rcept_no=20200630009999" in str(raised.value)
+        assert "부분 적재 없이 중단합니다." in str(raised.value)
+    fresh = tmp_path / "not-created.db"
+    with pytest.raises(FirmRemediationLoadError, match="부분 적재 없이 중단합니다"):
+        await run_firm_remediation(
+            input_path=folder, catalog_path=catalog, write=True, target_db=fresh
+        )
+    assert not fresh.exists()
+    assert _firm_row_counts(target) == before
+    assert before == {
+        "extraction_firm_remediation": [("keep",)],
+        "extraction_firm_remediation_documents": [("keep",)],
+        "extraction_firm_remediation_notes": [("keep",)],
+        "extraction_firm_match_review": [("keep",)],
+    }
+
+
 async def test_startup_schema_does_not_create_firm_tables() -> None:
     """연구 모델이 메타에 있어도 기동 스키마와 연구 열 보정은 테이블을 만들지 않는다."""
     import research.models.firm_remediation  # noqa: F401
