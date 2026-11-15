@@ -24,6 +24,8 @@ class ResearchSettings(BaseSettings):
     date_resolver_api_key: str = ""
     date_resolver_model: str = "gpt-4o-mini"
     date_resolver_prompt_version: str = "v1"
+    # true면 연구 앱 기동이 예전처럼 1층 스키마 보강과 catalog_jobs 정리를 한다. 기본은 끔.
+    research_allow_catalog_writes: bool = False
 
     # 골드 검수. 카탈로그와 다른 파일이고, 기본 앱은 이 경로를 만들지 않는다.
     gold_db_path: str = "C:/dev/dart-wrapper/data/gold/gold.db"
