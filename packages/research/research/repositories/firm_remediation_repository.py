@@ -269,12 +269,8 @@ async def _ensure_vi_view(connection: AsyncConnection) -> None:
     drop_view = text(f"DROP VIEW IF EXISTS {_VI_VIEW_NAME}")
     create_view = text(f"CREATE VIEW {_VI_VIEW_NAME} AS {_VI_VIEW_SELECT}")
     try:
-        if connection.dialect.name == "sqlite":
-            await connection.execute(drop_view)
-            await connection.execute(create_view)
-        else:
-            await connection.execute(drop_view)
-            await connection.execute(create_view)
+        await connection.execute(drop_view)
+        await connection.execute(create_view)
     except SQLAlchemyError as exc:
         raise FirmRemediationLoadError("개선권고 소비 뷰를 만들지 못해 저장하지 않습니다.") from exc
 
