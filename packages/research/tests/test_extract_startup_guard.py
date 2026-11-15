@@ -1,0 +1,373 @@
+"""연구 추출 앱 기동이 1층에 쓰지 않는지, 추출 잡은 2층만 쓰는지 고정한다."""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import sqlite3
+from pathlib import Path
+
+import pytest
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from app.config import get_settings
+from app.db.catalog_guard import (
+    FIRST_LAYER_TABLES,
+    CatalogSchemaError,
+    CatalogWriteBlocked,
+    assert_no_first_layer_write,
+    block_first_layer_writes,
+)
+from app.db.session import (
+    _CATALOG_TABLES,
+    create_all,
+    create_db_engine,
+    create_sessionmaker,
+)
+from app.models.base import Base
+from research.config import get_research_settings
+from research.local_app import create_app
+from research.models.audit_report_fact import AuditReportFact
+from research.models.extraction_job import ExtractionJob, ExtractionJobLog
+from research.models.extraction_review import ExtractionReview
+from research.models.firm_remediation import (
+    ExtractionFirmMatchReview,
+    ExtractionFirmRemediation,
+    ExtractionFirmRemediationDocument,
+    ExtractionFirmRemediationNote,
+)
+from research.schema import ensure_research_schema
+from test_extraction_service import _f001_leaves, _seed_entries, _service
+
+_RESEARCH_TABLES = {
+    AuditReportFact.__tablename__,
+    ExtractionJob.__tablename__,
+    ExtractionJobLog.__tablename__,
+    ExtractionReview.__tablename__,
+    ExtractionFirmRemediation.__tablename__,
+    ExtractionFirmRemediationNote.__tablename__,
+    ExtractionFirmRemediationDocument.__tablename__,
+    ExtractionFirmMatchReview.__tablename__,
+}
+_LEGACY_FACT_DDL = """
+CREATE TABLE audit_report_facts (
+    rcept_no VARCHAR(32) NOT NULL,
+    dcm_no VARCHAR(32) NOT NULL,
+    source_report_type VARCHAR(16) NOT NULL,
+    fs_scope VARCHAR(16) NOT NULL,
+    fetch_status VARCHAR(32) NOT NULL,
+    conflicts TEXT NOT NULL DEFAULT '[]',
+    extractor_version VARCHAR(32) NOT NULL,
+    PRIMARY KEY (rcept_no, dcm_no)
+)
+"""
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """유료 키를 비우고 설정 캐시가 다른 테스트로 새지 않게 한다."""
+    monkeypatch.setenv("OPENDART_API_KEY", "")
+    monkeypatch.setenv("OPENDART_API_KEY_2", "")
+    monkeypatch.setenv("DATE_RESOLVER_API_KEY", "")
+    monkeypatch.setenv("DART_LLM_ENABLED", "false")
+    get_settings.cache_clear()
+    get_research_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+    get_research_settings.cache_clear()
+
+
+def _url(path: Path) -> str:
+    return f"sqlite+aiosqlite:///{path.resolve().as_posix()}"
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _connect_ro(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+
+
+def _master_rows(path: Path) -> list[tuple[str, str, str | None]]:
+    connection = _connect_ro(path)
+    try:
+        rows = connection.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        ).fetchall()
+    finally:
+        connection.close()
+    return [(row[0], row[1], row[2]) for row in rows]
+
+
+def _first_layer_master(path: Path) -> list[tuple[str, str, str | None]]:
+    kept: list[tuple[str, str, str | None]] = []
+    for type_, name, sql in _master_rows(path):
+        if name in FIRST_LAYER_TABLES:
+            kept.append((type_, name, sql))
+            continue
+        if type_ == "index" and _index_on_first_layer(name, sql):
+            kept.append((type_, name, sql))
+    return kept
+
+
+def _index_on_first_layer(name: str, sql: str | None) -> bool:
+    folded = name.casefold()
+    for table in FIRST_LAYER_TABLES:
+        if folded.startswith(f"sqlite_autoindex_{table}_"):
+            return True
+    if not sql:
+        return False
+    upper = sql.casefold()
+    return any(f" on {table}" in upper or f' on "{table}"' in upper for table in FIRST_LAYER_TABLES)
+
+
+def _pragma_columns(path: Path, table: str) -> list[tuple[object, ...]]:
+    connection = _connect_ro(path)
+    try:
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    finally:
+        connection.close()
+    return [tuple(row) for row in rows]
+
+
+def _column_names(path: Path, table: str) -> set[str]:
+    return {str(row[1]) for row in _pragma_columns(path, table)}
+
+
+def _table_rows(path: Path, table: str) -> list[tuple[object, ...]]:
+    connection = _connect_ro(path)
+    try:
+        rows = connection.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+    finally:
+        connection.close()
+    return [tuple(row) for row in rows]
+
+
+async def _build_catalog(path: Path) -> AsyncEngine:
+    engine = create_db_engine(_url(path))
+    await create_all(engine)
+    return engine
+
+
+def _prepare_app(monkeypatch: pytest.MonkeyPatch, path: Path, *, allow_writes: bool) -> object:
+    monkeypatch.setenv("DATABASE_URL", _url(path))
+    monkeypatch.setenv("RESEARCH_ALLOW_CATALOG_WRITES", "true" if allow_writes else "false")
+    get_settings.cache_clear()
+    get_research_settings.cache_clear()
+    return create_app()
+
+
+async def test_startup_leaves_active_catalog_job_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """진행 중 수집 잡은 연구 앱을 켜고 꺼도 행·파일·로그가 그대로다."""
+    path = tmp_path / "active.db"
+    engine = await _build_catalog(path)
+    async with engine.begin() as connection:
+        await connection.execute(text("""
+                INSERT INTO catalog_jobs (
+                    job_id, status, mode, params, params_key,
+                    total_entries, saved_entries, created_at
+                ) VALUES
+                (
+                    'running-job-0001', 'running', 'collect', '{}', 'k-run',
+                    0, 0, '2020-01-01'
+                ),
+                (
+                    'pending-job-0001', 'pending', 'collect', '{}', 'k-pend',
+                    0, 0, '2020-01-02'
+                )
+                """))
+    await engine.dispose()
+    before_hash = _file_sha256(path)
+    before_jobs = _table_rows(path, "catalog_jobs")
+    before_logs = _table_rows(path, "catalog_job_logs")
+    app = _prepare_app(monkeypatch, path, allow_writes=False)
+
+    with caplog.at_level(logging.WARNING, logger="app.apps"):
+        async with app.router.lifespan_context(app):
+            pass
+
+    assert "그대로 둡니다" in caplog.text
+    assert _table_rows(path, "catalog_jobs") == before_jobs
+    assert _table_rows(path, "catalog_job_logs") == before_logs
+    assert _file_sha256(path) == before_hash
+
+
+@pytest.mark.parametrize(
+    ("table", "column"),
+    [
+        ("catalog_jobs", "mode"),
+        ("slice_progress", "empty_confirmations"),
+        ("entries", "ordinal"),
+    ],
+)
+async def test_startup_missing_first_layer_column_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table: str, column: str
+) -> None:
+    """빠진 1층 열이 있으면 기동이 실패하고 ALTER도 하지 않는다."""
+    path = tmp_path / f"missing-{column}.db"
+    engine = await _build_catalog(path)
+    async with engine.begin() as connection:
+        await connection.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+    await engine.dispose()
+    before_hash = _file_sha256(path)
+    before_master = _master_rows(path)
+    before_columns = _pragma_columns(path, table)
+    app = _prepare_app(monkeypatch, path, allow_writes=False)
+
+    with pytest.raises(CatalogSchemaError, match=f"{table}.{column}"):
+        async with app.router.lifespan_context(app):
+            pass
+
+    assert _master_rows(path) == before_master
+    assert _pragma_columns(path, table) == before_columns
+    assert _file_sha256(path) == before_hash
+
+
+async def test_second_layer_schema_still_created_and_migrated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """가드 기동 뒤에도 2층 테이블 생성과 열 보강은 되고 1층 정의는 그대로다."""
+    path = tmp_path / "second.db"
+    engine = await _build_catalog(path)
+    async with engine.begin() as connection:
+        await connection.execute(text("PRAGMA foreign_keys=OFF"))
+        await connection.execute(text("DROP TABLE IF EXISTS extraction_job_logs"))
+        await connection.execute(text("DROP TABLE IF EXISTS extraction_jobs"))
+        await connection.execute(text("DROP TABLE IF EXISTS audit_report_facts"))
+        await connection.execute(text(_LEGACY_FACT_DDL))
+    await engine.dispose()
+    app = _prepare_app(monkeypatch, path, allow_writes=False)
+    async with app.router.lifespan_context(app):
+        pass
+    assert "hours" not in _column_names(path, "audit_report_facts")
+    before_first = _first_layer_master(path)
+
+    engine = create_db_engine(_url(path))
+    tables = [
+        AuditReportFact.__table__,
+        ExtractionJob.__table__,
+        ExtractionJobLog.__table__,
+    ]
+    with block_first_layer_writes(engine.sync_engine):
+        async with engine.begin() as connection:
+            await connection.run_sync(
+                lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables)
+            )
+        await ensure_research_schema(engine)
+    await engine.dispose()
+
+    assert "hours" in _column_names(path, "audit_report_facts")
+    assert _first_layer_master(path) == before_first
+
+
+async def test_extraction_job_path_writes_only_second_layer(tmp_path: Path) -> None:
+    """추출 start·run_job의 SQL은 1층 쓰기가 아니고 1층 행 수도 그대로다."""
+    path = tmp_path / "extract.db"
+    engine = await _build_catalog(path)
+    sessionmaker = create_sessionmaker(engine)
+    await _seed_entries(sessionmaker, _f001_leaves())
+
+    async def _counts() -> dict[str, int]:
+        counts: dict[str, int] = {}
+        async with sessionmaker() as session:
+            for table in (*_CATALOG_TABLES, "corps"):
+                result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                counts[table] = int(result.scalar_one())
+        return counts
+
+    before = await _counts()
+    captured: list[str] = []
+
+    def _capture(
+        conn: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        captured.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", _capture)
+    try:
+        service, client = _service(sessionmaker)
+        async with client:
+            job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+            await service.run_job(job_id)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _capture)
+
+    for statement in captured:
+        try:
+            assert_no_first_layer_write(statement)
+        except CatalogWriteBlocked as exc:
+            pytest.fail(f"{exc}\nSQL: {statement}")
+    assert await _counts() == before
+    async with sessionmaker() as session:
+        facts = int(
+            (await session.execute(text("SELECT COUNT(*) FROM audit_report_facts"))).scalar_one()
+        )
+        jobs = int(
+            (await session.execute(text("SELECT COUNT(*) FROM extraction_jobs"))).scalar_one()
+        )
+    await engine.dispose()
+    assert facts >= 1
+    assert jobs == 1
+
+
+async def test_allow_catalog_writes_opt_in_restores_previous_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RESEARCH_ALLOW_CATALOG_WRITES=true면 열 보강과 활성 잡 마감이 돌아온다."""
+    path = tmp_path / "opt-in.db"
+    engine = await _build_catalog(path)
+    async with engine.begin() as connection:
+        await connection.execute(text("""
+                INSERT INTO catalog_jobs (
+                    job_id, status, mode, params, params_key,
+                    total_entries, saved_entries, created_at
+                ) VALUES
+                (
+                    'running-job-0001', 'running', 'collect', '{}', 'k-run',
+                    0, 0, '2020-01-01'
+                ),
+                (
+                    'pending-job-0001', 'pending', 'collect', '{}', 'k-pend',
+                    0, 0, '2020-01-02'
+                )
+                """))
+        await connection.execute(text("ALTER TABLE catalog_jobs DROP COLUMN mode"))
+        await connection.execute(text("ALTER TABLE slice_progress DROP COLUMN empty_confirmations"))
+        await connection.execute(text("ALTER TABLE entries DROP COLUMN ordinal"))
+    await engine.dispose()
+    app = _prepare_app(monkeypatch, path, allow_writes=True)
+
+    async with app.router.lifespan_context(app):
+        pass
+
+    assert "mode" in _column_names(path, "catalog_jobs")
+    assert "empty_confirmations" in _column_names(path, "slice_progress")
+    assert "ordinal" in _column_names(path, "entries")
+    jobs = _table_rows(path, "catalog_jobs")
+    assert len(jobs) == 2
+    connection = _connect_ro(path)
+    try:
+        statuses = {
+            row[0] for row in connection.execute("SELECT status FROM catalog_jobs").fetchall()
+        }
+        logs = connection.execute("SELECT level FROM catalog_job_logs").fetchall()
+    finally:
+        connection.close()
+    assert statuses == {"partial"}
+    assert len(logs) == 2
+    assert {row[0] for row in logs} == {"warning"}
+
+
+def test_first_layer_tables_cover_catalog_tables_and_corps() -> None:
+    """1층 목록은 카탈로그 6개와 corps이고 연구 테이블과 겹치지 않는다."""
+    assert FIRST_LAYER_TABLES == set(_CATALOG_TABLES) | {"corps"}
+    assert FIRST_LAYER_TABLES.isdisjoint(_RESEARCH_TABLES)
