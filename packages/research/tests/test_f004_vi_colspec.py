@@ -909,8 +909,7 @@ async def test_empty_view_is_latest_follows_period_group(tmp_path: Path) -> None
         "WHERE parse_status = 'empty' AND is_latest IS NULL"
     ).fetchone()[0]
     assert empty_null == 0
-    empty_vs_base = connection.execute(
-        """
+    empty_vs_base = connection.execute("""
         SELECT v.is_latest, base.flag
         FROM v_f004_vi_findings AS v
         JOIN (
@@ -919,8 +918,7 @@ async def test_empty_view_is_latest_follows_period_group(tmp_path: Path) -> None
             GROUP BY rcept_no
         ) AS base ON base.rcept_no = v.rcept_no
         WHERE v.parse_status = 'empty'
-        """
-    ).fetchall()
+        """).fetchall()
     assert empty_vs_base
     assert all(view_flag == base_flag for view_flag, base_flag in empty_vs_base)
     groups = _view_groups(connection)
