@@ -260,7 +260,20 @@ def _manifest_value(manifest: dict[str, Any], name: str) -> Any:
     return None
 
 
+def _rcept_dt_is_blank(value: Any) -> bool:
+    """접수일이 없거나 공백만이면 참. 점·하이픈·자릿수 형식은 보지 않는다."""
+    if value is None:
+        return True
+    return isinstance(value, str) and value.strip() == ""
+
+
 def _record_from_row(obj: dict[str, Any], line_no: int) -> SectionRecord:
+    if _rcept_dt_is_blank(obj.get("rcept_dt")):
+        rcept_no = obj.get("rcept_no")
+        raise FirmRemediationLoadError(
+            f"{line_no}번째 줄(rcept_no={rcept_no})의 rcept_dt가 비어 있습니다. "
+            "부분 적재 없이 중단합니다."
+        )
     missing = [name for name in REQUIRED_FIELDS if name not in obj]
     if missing:
         joined = ", ".join(missing)
@@ -292,7 +305,7 @@ def _record_from_row(obj: dict[str, Any], line_no: int) -> SectionRecord:
         rcept_no=str(obj["rcept_no"]),
         corp_code=str(obj["corp_code"]),
         corp_name="" if obj.get("corp_name") is None else str(obj["corp_name"]),
-        rcept_dt="" if obj.get("rcept_dt") is None else str(obj["rcept_dt"]),
+        rcept_dt=str(obj["rcept_dt"]),
         body_text=body_text,
         body_hash=digest,
     )

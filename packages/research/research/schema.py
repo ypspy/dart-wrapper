@@ -171,10 +171,10 @@ async def ensure_research_schema(engine: AsyncEngine) -> None:
         dialect = connection.dialect.name
         for table, column, sqlite_ddl, postgres_ddl in _COLUMN_PATCHES:
             ddl = sqlite_ddl if dialect == "sqlite" else postgres_ddl
-            await _add_column_if_missing(connection, table, column, ddl, dialect)
+            await add_column_if_missing(connection, table, column, ddl, dialect)
 
 
-async def _add_column_if_missing(
+async def add_column_if_missing(
     connection: AsyncConnection,
     table: str,
     column: str,
