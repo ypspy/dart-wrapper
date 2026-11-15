@@ -162,9 +162,7 @@ async def test_verify_catalog_schema_missing_table_raises(tmp_path: Path) -> Non
         ("CREATE INDEX ix ON entries (rcept_no)", "entries", "CREATE INDEX"),
     ],
 )
-def test_assert_no_first_layer_write_blocks(
-    statement: str, table: str, operation: str
-) -> None:
+def test_assert_no_first_layer_write_blocks(statement: str, table: str, operation: str) -> None:
     """1층 쓰기 문장은 테이블과 동작 종류를 밝혀 막는다."""
     with pytest.raises(CatalogWriteBlocked, match=rf"{table} \({operation}\)"):
         assert_no_first_layer_write(statement)
@@ -278,9 +276,7 @@ async def test_local_lifespan_default_keeps_catalog_maintenance(
 
     connection = _connect_ro(path)
     try:
-        columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(catalog_jobs)")
-        }
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(catalog_jobs)")}
         status = connection.execute("SELECT status FROM catalog_jobs").fetchone()
         logs = connection.execute("SELECT level FROM catalog_job_logs").fetchall()
     finally:

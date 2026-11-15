@@ -120,10 +120,7 @@ def _index_on_first_layer(name: str, sql: str | None) -> bool:
     if not sql:
         return False
     upper = sql.casefold()
-    return any(
-        f" on {table}" in upper or f' on "{table}"' in upper
-        for table in FIRST_LAYER_TABLES
-    )
+    return any(f" on {table}" in upper or f' on "{table}"' in upper for table in FIRST_LAYER_TABLES)
 
 
 def _pragma_columns(path: Path, table: str) -> list[tuple[object, ...]]:
@@ -154,13 +151,9 @@ async def _build_catalog(path: Path) -> AsyncEngine:
     return engine
 
 
-def _prepare_app(
-    monkeypatch: pytest.MonkeyPatch, path: Path, *, allow_writes: bool
-) -> object:
+def _prepare_app(monkeypatch: pytest.MonkeyPatch, path: Path, *, allow_writes: bool) -> object:
     monkeypatch.setenv("DATABASE_URL", _url(path))
-    monkeypatch.setenv(
-        "RESEARCH_ALLOW_CATALOG_WRITES", "true" if allow_writes else "false"
-    )
+    monkeypatch.setenv("RESEARCH_ALLOW_CATALOG_WRITES", "true" if allow_writes else "false")
     get_settings.cache_clear()
     get_research_settings.cache_clear()
     return create_app()
@@ -316,14 +309,10 @@ async def test_extraction_job_path_writes_only_second_layer(tmp_path: Path) -> N
     assert await _counts() == before
     async with sessionmaker() as session:
         facts = int(
-            (
-                await session.execute(text("SELECT COUNT(*) FROM audit_report_facts"))
-            ).scalar_one()
+            (await session.execute(text("SELECT COUNT(*) FROM audit_report_facts"))).scalar_one()
         )
         jobs = int(
-            (
-                await session.execute(text("SELECT COUNT(*) FROM extraction_jobs"))
-            ).scalar_one()
+            (await session.execute(text("SELECT COUNT(*) FROM extraction_jobs"))).scalar_one()
         )
     await engine.dispose()
     assert facts >= 1
@@ -352,9 +341,7 @@ async def test_allow_catalog_writes_opt_in_restores_previous_startup(
                 )
                 """))
         await connection.execute(text("ALTER TABLE catalog_jobs DROP COLUMN mode"))
-        await connection.execute(
-            text("ALTER TABLE slice_progress DROP COLUMN empty_confirmations")
-        )
+        await connection.execute(text("ALTER TABLE slice_progress DROP COLUMN empty_confirmations"))
         await connection.execute(text("ALTER TABLE entries DROP COLUMN ordinal"))
     await engine.dispose()
     app = _prepare_app(monkeypatch, path, allow_writes=True)
@@ -370,8 +357,7 @@ async def test_allow_catalog_writes_opt_in_restores_previous_startup(
     connection = _connect_ro(path)
     try:
         statuses = {
-            row[0]
-            for row in connection.execute("SELECT status FROM catalog_jobs").fetchall()
+            row[0] for row in connection.execute("SELECT status FROM catalog_jobs").fetchall()
         }
         logs = connection.execute("SELECT level FROM catalog_job_logs").fetchall()
     finally:

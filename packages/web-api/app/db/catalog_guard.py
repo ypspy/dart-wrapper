@@ -121,11 +121,7 @@ def _check_statement(tokens: list[Token]) -> None:
     keyword = tokens[0][1].casefold()
     if keyword == "explain":
         rest = tokens[1:]
-        if (
-            len(rest) >= 2
-            and rest[0][1].casefold() == "query"
-            and rest[1][1].casefold() == "plan"
-        ):
+        if len(rest) >= 2 and rest[0][1].casefold() == "query" and rest[1][1].casefold() == "plan":
             rest = rest[2:]
         _check_statement(rest)
         return
@@ -168,8 +164,7 @@ def _reject_table(table: str, operation: str) -> None:
     if normalized not in FIRST_LAYER_TABLES:
         return
     raise CatalogWriteBlocked(
-        "연구 추출 앱은 1층 테이블에 쓰지 않습니다: "
-        f"{normalized} ({operation}). " + _SEAWEED
+        "연구 추출 앱은 1층 테이블에 쓰지 않습니다: " f"{normalized} ({operation}). " + _SEAWEED
     )
 
 
@@ -407,8 +402,7 @@ def _tokenize(statement: str) -> list[Token]:
         if char.isascii() and (char.isalpha() or char == "_"):
             end = index + 1
             while end < length and (
-                statement[end].isascii()
-                and (statement[end].isalnum() or statement[end] in "_$")
+                statement[end].isascii() and (statement[end].isalnum() or statement[end] in "_$")
             ):
                 end += 1
             tokens.append(("word", statement[index:end]))
@@ -438,8 +432,7 @@ def _scan_quoted(statement: str, index: int) -> tuple[str, int]:
         chars.append(statement[index])
         index += 1
     raise CatalogWriteBlocked(
-        "연구 추출 앱은 식별자가 닫히지 않은 SQL의 쓰기 대상을 확인하지 못해 막습니다. "
-        + _SEAWEED
+        "연구 추출 앱은 식별자가 닫히지 않은 SQL의 쓰기 대상을 확인하지 못해 막습니다. " + _SEAWEED
     )
 
 
@@ -453,14 +446,12 @@ def _skip_string(statement: str, index: int) -> int:
             return index + 1
         index += 1
     raise CatalogWriteBlocked(
-        "연구 추출 앱은 문자열이 닫히지 않은 SQL의 쓰기 대상을 확인하지 못해 막습니다. "
-        + _SEAWEED
+        "연구 추출 앱은 문자열이 닫히지 않은 SQL의 쓰기 대상을 확인하지 못해 막습니다. " + _SEAWEED
     )
 
 
 def _block_unknown(tokens: list[Token]) -> None:
     preview = " ".join(value for _kind, value in tokens[:8] if value)
     raise CatalogWriteBlocked(
-        "연구 추출 앱은 SQL의 쓰기 대상을 확인하지 못해 막습니다: "
-        f"{preview}. " + _SEAWEED
+        "연구 추출 앱은 SQL의 쓰기 대상을 확인하지 못해 막습니다: " f"{preview}. " + _SEAWEED
     )

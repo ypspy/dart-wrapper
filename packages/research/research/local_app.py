@@ -27,9 +27,7 @@ def create_app() -> FastAPI:
     기본은 1층 카탈로그를 읽기만 하고, 스키마 보강과 수집 작업 정리는 하지 않는다.
     """
     os.environ.setdefault("DART_LLM_ENABLED", "false")
-    app = create_local_app(
-        catalog_writes=get_research_settings().research_allow_catalog_writes
-    )
+    app = create_local_app(catalog_writes=get_research_settings().research_allow_catalog_writes)
     app.include_router(admin_corps.router)
     app.include_router(admin_extract.router)
     app.include_router(admin_extract_ui.router)

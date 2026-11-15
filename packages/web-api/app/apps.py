@@ -35,9 +35,7 @@ _DEFAULT_HEADERS = {
 def require_postgres_url(database_url: str) -> None:
     """공개 프로세스는 PostgreSQL URL만 받는다."""
     if not database_url.startswith("postgresql+asyncpg://"):
-        raise RuntimeError(
-            "공개 서버의 DATABASE_URL은 postgresql+asyncpg:// 로 시작해야 합니다."
-        )
+        raise RuntimeError("공개 서버의 DATABASE_URL은 postgresql+asyncpg:// 로 시작해야 합니다.")
 
 
 def _read_routers(app: FastAPI) -> None:
@@ -80,9 +78,7 @@ async def public_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 @asynccontextmanager
-async def local_lifespan(
-    app: FastAPI, *, catalog_writes: bool = True
-) -> AsyncIterator[None]:
+async def local_lifespan(app: FastAPI, *, catalog_writes: bool = True) -> AsyncIterator[None]:
     """수집용 Node 수집기와 열람용 DART 클라이언트를 연다.
 
     catalog_writes가 거짓이면 1층 스키마를 보강하지 않고 진행 중 수집 작업도 그대로 둔다.
@@ -123,9 +119,7 @@ async def local_lifespan(
         await engine.dispose()
 
 
-async def _prepare_readonly_catalog(
-    app: FastAPI, engine: AsyncEngine, settings: Settings
-) -> None:
+async def _prepare_readonly_catalog(app: FastAPI, engine: AsyncEngine, settings: Settings) -> None:
     """1층은 읽기만 확인한다. 실패하면 엔진과 HTTP 클라이언트를 닫고 예외를 다시 올린다."""
     from app.adapters.node_entry_collector import NodeEntryCollector
     from app.repositories.job_repository import JobRepository
