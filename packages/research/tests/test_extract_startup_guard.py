@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import sqlite3
 from pathlib import Path
 
 import pytest
 from sqlalchemy import event, text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.config import get_settings
 from app.db.catalog_guard import (
@@ -21,7 +18,6 @@ from app.db.catalog_guard import (
 )
 from app.db.session import (
     _CATALOG_TABLES,
-    create_all,
     create_db_engine,
     create_sessionmaker,
 )
@@ -36,6 +32,14 @@ from research.models.firm_remediation import (
     ExtractionFirmRemediation,
     ExtractionFirmRemediationDocument,
     ExtractionFirmRemediationNote,
+)
+from catalog_db_helpers import (
+    build_catalog,
+    connect_ro,
+    file_sha256,
+    master_rows,
+    pragma_columns,
+    url_for,
 )
 from research.schema import ensure_research_schema
 from test_extraction_service import _f001_leaves, _seed_entries, _service
@@ -78,32 +82,9 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
     get_research_settings.cache_clear()
 
 
-def _url(path: Path) -> str:
-    return f"sqlite+aiosqlite:///{path.resolve().as_posix()}"
-
-
-def _file_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _connect_ro(path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-
-
-def _master_rows(path: Path) -> list[tuple[str, str, str | None]]:
-    connection = _connect_ro(path)
-    try:
-        rows = connection.execute(
-            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
-        ).fetchall()
-    finally:
-        connection.close()
-    return [(row[0], row[1], row[2]) for row in rows]
-
-
 def _first_layer_master(path: Path) -> list[tuple[str, str, str | None]]:
     kept: list[tuple[str, str, str | None]] = []
-    for type_, name, sql in _master_rows(path):
+    for type_, name, sql in master_rows(path):
         if name in FIRST_LAYER_TABLES:
             kept.append((type_, name, sql))
             continue
@@ -123,21 +104,12 @@ def _index_on_first_layer(name: str, sql: str | None) -> bool:
     return any(f" on {table}" in upper or f' on "{table}"' in upper for table in FIRST_LAYER_TABLES)
 
 
-def _pragma_columns(path: Path, table: str) -> list[tuple[object, ...]]:
-    connection = _connect_ro(path)
-    try:
-        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
-    finally:
-        connection.close()
-    return [tuple(row) for row in rows]
-
-
 def _column_names(path: Path, table: str) -> set[str]:
-    return {str(row[1]) for row in _pragma_columns(path, table)}
+    return {str(row[1]) for row in pragma_columns(path, table)}
 
 
 def _table_rows(path: Path, table: str) -> list[tuple[object, ...]]:
-    connection = _connect_ro(path)
+    connection = connect_ro(path)
     try:
         rows = connection.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
     finally:
@@ -145,14 +117,8 @@ def _table_rows(path: Path, table: str) -> list[tuple[object, ...]]:
     return [tuple(row) for row in rows]
 
 
-async def _build_catalog(path: Path) -> AsyncEngine:
-    engine = create_db_engine(_url(path))
-    await create_all(engine)
-    return engine
-
-
 def _prepare_app(monkeypatch: pytest.MonkeyPatch, path: Path, *, allow_writes: bool) -> object:
-    monkeypatch.setenv("DATABASE_URL", _url(path))
+    monkeypatch.setenv("DATABASE_URL", url_for(path))
     monkeypatch.setenv("RESEARCH_ALLOW_CATALOG_WRITES", "true" if allow_writes else "false")
     get_settings.cache_clear()
     get_research_settings.cache_clear()
@@ -164,7 +130,7 @@ async def test_startup_leaves_active_catalog_job_untouched(
 ) -> None:
     """진행 중 수집 잡은 연구 앱을 켜고 꺼도 행·파일·로그가 그대로다."""
     path = tmp_path / "active.db"
-    engine = await _build_catalog(path)
+    engine = await build_catalog(path, keep_engine=True)
     async with engine.begin() as connection:
         await connection.execute(text("""
                 INSERT INTO catalog_jobs (
@@ -181,7 +147,7 @@ async def test_startup_leaves_active_catalog_job_untouched(
                 )
                 """))
     await engine.dispose()
-    before_hash = _file_sha256(path)
+    before_hash = file_sha256(path)
     before_jobs = _table_rows(path, "catalog_jobs")
     before_logs = _table_rows(path, "catalog_job_logs")
     app = _prepare_app(monkeypatch, path, allow_writes=False)
@@ -193,7 +159,7 @@ async def test_startup_leaves_active_catalog_job_untouched(
     assert "그대로 둡니다" in caplog.text
     assert _table_rows(path, "catalog_jobs") == before_jobs
     assert _table_rows(path, "catalog_job_logs") == before_logs
-    assert _file_sha256(path) == before_hash
+    assert file_sha256(path) == before_hash
 
 
 @pytest.mark.parametrize(
@@ -209,22 +175,22 @@ async def test_startup_missing_first_layer_column_fails_closed(
 ) -> None:
     """빠진 1층 열이 있으면 기동이 실패하고 ALTER도 하지 않는다."""
     path = tmp_path / f"missing-{column}.db"
-    engine = await _build_catalog(path)
+    engine = await build_catalog(path, keep_engine=True)
     async with engine.begin() as connection:
         await connection.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
     await engine.dispose()
-    before_hash = _file_sha256(path)
-    before_master = _master_rows(path)
-    before_columns = _pragma_columns(path, table)
+    before_hash = file_sha256(path)
+    before_master = master_rows(path)
+    before_columns = pragma_columns(path, table)
     app = _prepare_app(monkeypatch, path, allow_writes=False)
 
     with pytest.raises(CatalogSchemaError, match=f"{table}.{column}"):
         async with app.router.lifespan_context(app):
             pass
 
-    assert _master_rows(path) == before_master
-    assert _pragma_columns(path, table) == before_columns
-    assert _file_sha256(path) == before_hash
+    assert master_rows(path) == before_master
+    assert pragma_columns(path, table) == before_columns
+    assert file_sha256(path) == before_hash
 
 
 async def test_guarded_manual_second_layer_migration_keeps_first_layer(
@@ -235,7 +201,7 @@ async def test_guarded_manual_second_layer_migration_keeps_first_layer(
     가드 아래 수동 create_all·ensure_research_schema는 1층 정의를 바꾸지 않고 2층을 보강한다.
     """
     path = tmp_path / "second.db"
-    engine = await _build_catalog(path)
+    engine = await build_catalog(path, keep_engine=True)
     async with engine.begin() as connection:
         await connection.execute(text("PRAGMA foreign_keys=OFF"))
         await connection.execute(text("DROP TABLE IF EXISTS extraction_job_logs"))
@@ -249,7 +215,7 @@ async def test_guarded_manual_second_layer_migration_keeps_first_layer(
     assert "hours" not in _column_names(path, "audit_report_facts")
     before_first = _first_layer_master(path)
 
-    engine = create_db_engine(_url(path))
+    engine = create_db_engine(url_for(path))
     tables = [
         AuditReportFact.__table__,
         ExtractionJob.__table__,
@@ -270,7 +236,7 @@ async def test_guarded_manual_second_layer_migration_keeps_first_layer(
 async def test_extraction_job_path_writes_only_second_layer(tmp_path: Path) -> None:
     """추출 start·run_job의 SQL은 1층 쓰기가 아니고 1층 행 수도 그대로다."""
     path = tmp_path / "extract.db"
-    engine = await _build_catalog(path)
+    engine = await build_catalog(path, keep_engine=True)
     sessionmaker = create_sessionmaker(engine)
     await _seed_entries(sessionmaker, _f001_leaves())
 
@@ -327,7 +293,7 @@ async def test_allow_catalog_writes_opt_in_restores_previous_startup(
 ) -> None:
     """RESEARCH_ALLOW_CATALOG_WRITES=true면 열 보강과 활성 잡 마감이 돌아온다."""
     path = tmp_path / "opt-in.db"
-    engine = await _build_catalog(path)
+    engine = await build_catalog(path, keep_engine=True)
     async with engine.begin() as connection:
         await connection.execute(text("""
                 INSERT INTO catalog_jobs (
@@ -357,7 +323,7 @@ async def test_allow_catalog_writes_opt_in_restores_previous_startup(
     assert "ordinal" in _column_names(path, "entries")
     jobs = _table_rows(path, "catalog_jobs")
     assert len(jobs) == 2
-    connection = _connect_ro(path)
+    connection = connect_ro(path)
     try:
         statuses = {
             row[0] for row in connection.execute("SELECT status FROM catalog_jobs").fetchall()
