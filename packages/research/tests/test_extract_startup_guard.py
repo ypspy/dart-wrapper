@@ -227,10 +227,13 @@ async def test_startup_missing_first_layer_column_fails_closed(
     assert _file_sha256(path) == before_hash
 
 
-async def test_second_layer_schema_still_created_and_migrated(
+async def test_guarded_manual_second_layer_migration_keeps_first_layer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """가드 기동 뒤에도 2층 테이블 생성과 열 보강은 되고 1층 정의는 그대로다."""
+    """연구 앱 기동은 2층 스키마를 만들거나 보강하지 않는다(master와 같음).
+
+    가드 아래 수동 create_all·ensure_research_schema는 1층 정의를 바꾸지 않고 2층을 보강한다.
+    """
     path = tmp_path / "second.db"
     engine = await _build_catalog(path)
     async with engine.begin() as connection:
