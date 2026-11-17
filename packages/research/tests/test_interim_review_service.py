@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -445,6 +446,96 @@ async def test_interim_job_blocks_audit_start(sessionmaker_fixture) -> None:
     async with client:
         with pytest.raises(CatalogConflict, match="검토보고서 추출 작업이 이미 진행 중"):
             await audit.start("20250801", "20250831", ["A002"], "extract")
+
+
+_OLD_EXTRACTED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _stored_fact(**overrides: object) -> InterimReviewFact:
+    values: dict[str, object] = {
+        "rcept_no": "20250814000001",
+        "dcm_no": "90001",
+        "source_report_type": "A002",
+        "review_kind": "half",
+        "fs_scope": "separate",
+        "doc_kind": "review",
+        "fetch_status": "fetch_failed",
+        "conflicts": [],
+        "review_report_date_candidates": [],
+        "emphasis_of_matter": False,
+        "going_concern": False,
+        "extracted_at": _OLD_EXTRACTED_AT,
+        "extractor_version": INTERIM_EXTRACTOR_VERSION,
+    }
+    values.update(overrides)
+    return InterimReviewFact(**values)  # type: ignore[arg-type]
+
+
+async def test_reextract_fetch_failed_to_ok_refreshes_extracted_at(sessionmaker_fixture) -> None:
+    """fetch_failed 행을 다시 추출해 ok로 쓰면 extracted_at이 그 시각이 된다."""
+    started = datetime.now(timezone.utc)
+    await _seed(sessionmaker_fixture, _leaves())
+    async with sessionmaker_fixture() as session:
+        await InterimFactRepository(session).upsert(_stored_fact())
+        await session.commit()
+    service, client, _calls = _client(_ok_handler, sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20250801", "20250831", ["A002"], "extract")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        fact = await InterimFactRepository(session).get("20250814000001", "90001")
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert _as_utc(fact.extracted_at) >= started
+
+
+async def test_repeated_fetch_failed_keeps_extracted_at(sessionmaker_fixture) -> None:
+    """이미 fetch_failed인 행이 다시 실패하면 extracted_at은 2020-01-01 그대로다."""
+    await _seed(sessionmaker_fixture, _leaves())
+    async with sessionmaker_fixture() as session:
+        await InterimFactRepository(session).upsert(_stored_fact())
+        await session.commit()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="오류")
+
+    service, client, _calls = _client(handler, sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20250801", "20250831", ["A002"], "extract")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        fact = await InterimFactRepository(session).get("20250814000001", "90001")
+    assert fact is not None
+    assert fact.fetch_status == "fetch_failed"
+    assert _as_utc(fact.extracted_at) == _OLD_EXTRACTED_AT
+
+
+async def test_blocked_to_fetch_failed_refreshes_extracted_at(sessionmaker_fixture) -> None:
+    """blocked 행이 fetch_failed로 바뀌면 extracted_at을 갱신한다."""
+    started = datetime.now(timezone.utc)
+    await _seed(sessionmaker_fixture, _leaves())
+    async with sessionmaker_fixture() as session:
+        await InterimFactRepository(session).upsert(_stored_fact(fetch_status="blocked"))
+        await session.commit()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="오류")
+
+    service, client, _calls = _client(handler, sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20250801", "20250831", ["A002"], "extract")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        fact = await InterimFactRepository(session).get("20250814000001", "90001")
+    assert fact is not None
+    assert fact.fetch_status == "fetch_failed"
+    assert _as_utc(fact.extracted_at) >= started
 
 
 def _snapshot(path: Path) -> dict[str, object]:

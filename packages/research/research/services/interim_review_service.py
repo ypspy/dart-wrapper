@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -29,7 +30,7 @@ from research.extracting.interim_selector import (
 )
 from research.extracting.selector import SelectorEntry
 from research.models.extraction_job import ExtractionJob
-from research.models.interim_review_fact import InterimReviewFact
+from research.models.interim_review_fact import InterimReviewFact, _now
 from research.repositories.extraction_job_repository import ExtractionJobRepository
 from research.repositories.interim_fact_repository import InterimFactRepository
 from research.services.dart_job_lock import INTERIM_EXTRACTOR_ID, assert_dart_idle
@@ -43,6 +44,23 @@ _TABLE_MISSING = "interim_review_facts 테이블이 없습니다. 생성 스크�
 
 class _BlockStreakExceeded(Exception):
     """연속 차단 응답으로 추출 잡을 멈출 때 쓴다."""
+
+
+def _stamp_extracted_at(
+    fact: InterimReviewFact,
+    *,
+    previous_status: str | None,
+    previous_extracted_at: datetime | None,
+) -> None:
+    """이미 fetch_failed인 행이 다시 fetch_failed이면 시각을 유지한다.
+
+    그 밖의 쓰기(성공, blocked에서 실패로 바뀜, 새 행)는 지금 시각으로 둔다.
+    """
+    if previous_status == "fetch_failed" and fact.fetch_status == "fetch_failed":
+        if previous_extracted_at is not None:
+            fact.extracted_at = previous_extracted_at
+        return
+    fact.extracted_at = _now()
 
 
 def _should_skip(fact: InterimReviewFact | None, mode: str) -> bool:
@@ -281,12 +299,22 @@ class InterimReviewService:
         selectors = [selector for entry in rows if (selector := _to_selector(entry)) is not None]
         leaves = select_interim_leaves(selectors)
 
+        previous_status: str | None = None
+        previous_extracted_at = None
         async with self._sessionmaker() as session:
             existing = await InterimFactRepository(session).get(named.rcept_no, named.dcm_no)
             if _should_skip(existing, mode):
                 return None
+            if existing is not None:
+                previous_status = existing.fetch_status
+                previous_extracted_at = existing.extracted_at
 
         fact = await self._build_fact(named, rows, leaves)
+        _stamp_extracted_at(
+            fact,
+            previous_status=previous_status,
+            previous_extracted_at=previous_extracted_at,
+        )
         await self._save(job_id, fact)
         return fact.fetch_status
 
@@ -339,6 +367,12 @@ class InterimReviewService:
     async def _save(self, job_id: str, fact: InterimReviewFact) -> None:
         """문서 하나를 커밋하고 완료 로그를 남긴다."""
         async with self._sessionmaker() as session:
+            existing = await InterimFactRepository(session).get(fact.rcept_no, fact.dcm_no)
+            _stamp_extracted_at(
+                fact,
+                previous_status=existing.fetch_status if existing is not None else None,
+                previous_extracted_at=existing.extracted_at if existing is not None else None,
+            )
             await InterimFactRepository(session).upsert(fact)
             await ExtractionJobRepository(session).add_log(
                 job_id,
@@ -377,9 +411,16 @@ class InterimReviewService:
         )
         async with self._sessionmaker() as session:
             existing = await InterimFactRepository(session).get(rcept_no, dcm_no)
+            previous_status = existing.fetch_status if existing is not None else None
+            previous_extracted_at = existing.extracted_at if existing is not None else None
             if existing is not None:
                 existing.fetch_status = "fetch_failed"
                 fact = existing
+            _stamp_extracted_at(
+                fact,
+                previous_status=previous_status,
+                previous_extracted_at=previous_extracted_at,
+            )
             await InterimFactRepository(session).upsert(fact)
             await ExtractionJobRepository(session).add_log(
                 job_id,
