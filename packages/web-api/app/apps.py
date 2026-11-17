@@ -148,7 +148,8 @@ async def _prepare_readonly_catalog(app: FastAPI, engine: AsyncEngine, settings:
             logger.warning(
                 "연구 추출 앱은 catalog_jobs를 바꾸지 않습니다. "
                 "진행 중 수집 작업 %d건(%s)을 그대로 둡니다. "
-                "정리는 수집 쪽에서 하세요.",
+                "정리는 수집 쪽에서 하세요(uvicorn app.local:app 재기동 또는 야간 abandon_idle). "
+                "그 전까지 추출 시작은 409로 거절됩니다.",
                 len(active),
                 preview,
             )

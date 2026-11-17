@@ -5,8 +5,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import event, text
+
+from app.adapters.dart_http import DartHttpClient
 
 from app.config import get_settings
 from app.db.catalog_guard import (
@@ -160,6 +163,62 @@ async def test_startup_leaves_active_catalog_job_untouched(
     assert _table_rows(path, "catalog_jobs") == before_jobs
     assert _table_rows(path, "catalog_job_logs") == before_logs
     assert file_sha256(path) == before_hash
+
+
+async def test_extract_post_conflicts_while_catalog_job_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """진행 중 수집 잡이 있으면 추출 POST는 409이고 1층 행과 DART 호출은 그대로다."""
+    path = tmp_path / "active-extract.db"
+    engine = await build_catalog(path, keep_engine=True)
+    async with engine.begin() as connection:
+        await connection.execute(text("""
+                INSERT INTO catalog_jobs (
+                    job_id, status, mode, params, params_key,
+                    total_entries, saved_entries, created_at
+                ) VALUES
+                (
+                    'running-job-0001', 'running', 'collect', '{}', 'k-run',
+                    0, 0, '2020-01-01'
+                ),
+                (
+                    'pending-job-0001', 'pending', 'collect', '{}', 'k-pend',
+                    0, 0, '2020-01-02'
+                )
+                """))
+    await engine.dispose()
+    before = {table: _table_rows(path, table) for table in (*_CATALOG_TABLES, "corps")}
+    app = _prepare_app(monkeypatch, path, allow_writes=False)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(500, text="호출되면 안 됩니다")
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as dart_client:
+            app.state.dart_http = DartHttpClient(
+                dart_client, max_retries=0, retry_backoff_seconds=0.0
+            )
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/admin/extract/audit-opinion",
+                    json={
+                        "start_date": "20200301",
+                        "end_date": "20200331",
+                        "report_types": ["F001"],
+                        "mode": "extract",
+                    },
+                    headers={"X-Admin-Token": "dev-admin-token"},
+                )
+    assert response.status_code == 409
+    assert "다른 수집 작업이 이미 진행 중입니다" in response.json()["detail"]
+    assert calls["n"] == 0
+    assert _table_rows(path, "extraction_jobs") == []
+    assert _table_rows(path, "audit_report_facts") == []
+    for table, rows in before.items():
+        assert _table_rows(path, table) == rows
 
 
 @pytest.mark.parametrize(
