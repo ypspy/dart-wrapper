@@ -11,6 +11,7 @@ from typing import TypeGuard
 
 from research.extracting.dates import parse_year_end
 from research.extracting.field_bundles import classify_outcome, icfr_period_year, status_attr
+from research.extracting.hours_period import total_cells
 
 _NEGATIVE_ACCOUNTS = frozenset(
     {
@@ -335,20 +336,12 @@ def _iso_date(value: object) -> date | None:
 
 
 def _hour_cells(hours: object) -> list[dict[str, object]] | None:
-    """당기 감사 합계 칸. 리스트가 아니면 None."""
-    if not isinstance(hours, list):
-        return None
-    cells: list[dict[str, object]] = []
-    for item in hours:
-        if not isinstance(item, dict):
-            continue
-        if (
-            item.get("role") == "total"
-            and item.get("metric") == "audit"
-            and item.get("period") == "current"
-        ):
-            cells.append(item)
-    return cells
+    """감사 합계 칸. 리스트가 아니면 None.
+
+    단일 기간 가드가 참이면 unknown 합계를, 아니면 당기 합계만 본다.
+    반환은 없음(None)·빈 목록·1칸·2칸 이상이고, 이후 분기는 바꾸지 않는다.
+    """
+    return total_cells(hours, "audit")
 
 
 def _collect_hours(fact: FactView, bag: _Bag) -> None:
