@@ -24,6 +24,7 @@ from research.services.corp_industry_service import CorpIndustryService
 from research.services.date_resolver_service import DateResolverService
 from research.services.extraction_service import ExtractionService
 from research.services.fact_query_service import FactQueryService
+from research.services.interim_review_service import InterimReviewService
 
 __all__ = [
     "ADMIN_TOKEN_COOKIE",
@@ -34,6 +35,7 @@ __all__ = [
     "get_date_resolver_service",
     "get_extraction_service",
     "get_fact_query_service",
+    "get_interim_review_service",
     "get_fact_repository",
     "get_research_settings_dep",
     "get_session",
@@ -77,6 +79,27 @@ def get_extraction_service(
             block_wait_seconds=settings.block_wait_seconds,
         )
         request.app.state.extraction_service = service
+    return service
+
+
+def get_interim_review_service(
+    request: Request,
+    settings: Settings = Depends(get_settings_dep),
+) -> InterimReviewService:
+    """반기·분기 검토보고서 추출 서비스를 제공한다.
+
+    백그라운드 작업이 요청 세션에 묶이지 않도록 세션메이커를 직접 넘긴다.
+    DART HTML 클라이언트는 앱 수명 동안 하나다.
+    """
+    service = getattr(request.app.state, "interim_review_service", None)
+    if service is None:
+        service = InterimReviewService(
+            request.app.state.sessionmaker,
+            request.app.state.dart_http,
+            block_streak_threshold=settings.block_streak_threshold,
+            block_wait_seconds=settings.block_wait_seconds,
+        )
+        request.app.state.interim_review_service = service
     return service
 
 

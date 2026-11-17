@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 
 from research.api.deps import (
     get_completeness_service,
     get_date_resolver_service,
     get_extraction_service,
+    get_interim_review_service,
     get_research_settings_dep,
     require_admin,
 )
+from app.config import get_settings
 from research.config import ResearchSettings
 from app.errors import BadRequest
 from research.extracting.field_bundles import EXPORT_PAGE_SIZE
+from research.models.extraction_job import ExtractionJob
 from research.schemas.extract import (
     CompletenessResponse,
     DateOverrideRequest,
     DateOverrideResponse,
     ExtractAuditRequest,
     ExtractAuditResponse,
+    ExtractInterimReviewRequest,
     ExtractJobStatusResponse,
     FieldBundleCountsResponse,
     FieldBundleFailListResponse,
@@ -28,7 +32,9 @@ from research.schemas.extract import (
 )
 from research.services.completeness_service import CompletenessService
 from research.services.date_resolver_service import DateResolverService
+from research.services.dart_job_lock import INTERIM_EXTRACTOR_ID
 from research.services.extraction_service import ExtractionService
+from research.services.interim_review_service import InterimReviewService
 
 router = APIRouter(
     prefix="/admin/extract",
@@ -59,6 +65,38 @@ async def extract_audit_opinion(
     return ExtractAuditResponse(job_id=job_id, status="pending", mode=payload.mode)
 
 
+@router.post(
+    "/interim-review",
+    response_model=ExtractAuditResponse,
+    status_code=202,
+    summary="반기·분기 검토보고서 추출 트리거",
+)
+async def extract_interim_review(
+    payload: ExtractInterimReviewRequest,
+    background_tasks: BackgroundTasks,
+    service: InterimReviewService = Depends(get_interim_review_service),
+) -> ExtractAuditResponse:
+    """검토보고서 추출 작업을 등록하고 job_id를 바로 돌려준다."""
+    job_id = await service.start(
+        payload.start_date,
+        payload.end_date,
+        list(payload.report_types),
+        payload.mode,
+    )
+    background_tasks.add_task(service.run_job, job_id)
+    return ExtractAuditResponse(job_id=job_id, status="pending", mode=payload.mode)
+
+
+async def _uses_interim_service(request: Request, job_id: str) -> bool:
+    """세션이 있고 잡이 interim_review일 때만 검토 서비스로 보낸다."""
+    sessionmaker = getattr(request.app.state, "sessionmaker", None)
+    if sessionmaker is None:
+        return False
+    async with sessionmaker() as session:
+        job = await session.get(ExtractionJob, job_id)
+    return job is not None and job.extractor_id == INTERIM_EXTRACTOR_ID
+
+
 @router.get(
     "/status",
     response_model=ExtractJobStatusResponse,
@@ -79,10 +117,15 @@ async def read_extract_status(
 )
 async def soft_stop_extract_job(
     job_id: str,
+    request: Request,
     service: ExtractionService = Depends(get_extraction_service),
 ) -> dict[str, str]:
     """다음 접수 경계에서 추출을 멈춘다. 이미 저장한 문서는 유지된다."""
-    await service.request_soft_stop(job_id)
+    if await _uses_interim_service(request, job_id):
+        interim = get_interim_review_service(request, get_settings())
+        await interim.request_soft_stop(job_id)
+    else:
+        await service.request_soft_stop(job_id)
     return {"job_id": job_id, "detail": "중단을 요청했습니다."}
 
 
@@ -93,10 +136,15 @@ async def soft_stop_extract_job(
 )
 async def force_finish_extract_job(
     job_id: str,
+    request: Request,
     service: ExtractionService = Depends(get_extraction_service),
 ) -> dict[str, str]:
     """워커가 죽은 추출 잡을 부분 종료해 DART 잠금을 푼다."""
-    await service.force_finish(job_id)
+    if await _uses_interim_service(request, job_id):
+        interim = get_interim_review_service(request, get_settings())
+        await interim.force_finish(job_id)
+    else:
+        await service.force_finish(job_id)
     return {"job_id": job_id, "detail": "작업을 강제 종료했습니다."}
 
 
