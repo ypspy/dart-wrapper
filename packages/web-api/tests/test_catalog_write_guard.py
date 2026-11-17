@@ -220,6 +220,21 @@ async def test_verify_catalog_schema_postgres_branch_reads_only() -> None:
             "UPDATE",
         ),
         ("CREATE INDEX ix ON entries (rcept_no)", "entries", "CREATE INDEX"),
+        ("UPDATE ONLY entries SET x=1", "entries", "UPDATE"),
+        ("DELETE FROM ONLY entries", "entries", "DELETE"),
+        ("ALTER TABLE IF EXISTS entries ADD COLUMN x INT", "entries", "ALTER"),
+        ("ALTER TABLE ONLY catalog_jobs ADD COLUMN x INT", "catalog_jobs", "ALTER"),
+        (
+            "WITH d AS (DELETE FROM entries RETURNING *) SELECT * FROM d",
+            "entries",
+            "DELETE",
+        ),
+        (
+            "WITH u AS (UPDATE disclosures SET x=1 RETURNING *) SELECT 1",
+            "disclosures",
+            "UPDATE",
+        ),
+        ("SELECT * INTO corps FROM x", "corps", "CREATE TABLE"),
     ],
 )
 def test_assert_no_first_layer_write_blocks(statement: str, table: str, operation: str) -> None:
@@ -241,11 +256,40 @@ def test_assert_no_first_layer_write_blocks(statement: str, table: str, operatio
             "(SELECT rcept_dt FROM disclosures WHERE rcept_no = '1')"
         ),
         "INSERT INTO entries_backup (entry_id) VALUES ('x')",
+        "PRAGMA table_info(entries)",
+        "PRAGMA read_uncommitted",
+        "PRAGMA foreign_keys=OFF",
+        "PRAGMA busy_timeout = 60000",
+        "PRAGMA user_version",
+        "UPDATE ONLY extraction_jobs SET status='x'",
+        "WITH d AS (DELETE FROM extraction_job_logs RETURNING *) SELECT 1",
     ],
 )
 def test_assert_no_first_layer_write_allows(statement: str) -> None:
     """2층 쓰기와 1층 읽기, 이름이 다른 테이블은 통과한다."""
     assert_no_first_layer_write(statement)
+
+
+@pytest.mark.parametrize(
+    ("statement", "name"),
+    [
+        ("PRAGMA writable_schema=1", "writable_schema"),
+        ("PRAGMA user_version=5", "user_version"),
+        ("PRAGMA main.user_version = 5", "user_version"),
+        ("PRAGMA journal_mode=WAL", "journal_mode"),
+        ("PRAGMA optimize", "optimize"),
+        ("PRAGMA wal_checkpoint", "wal_checkpoint"),
+        ("PRAGMA wal_checkpoint(TRUNCATE)", "wal_checkpoint"),
+        ("PRAGMA incremental_vacuum", "incremental_vacuum"),
+        ('PRAGMA "user_version"=5', "user_version"),
+        ('PRAGMA main."user_version"=5', "user_version"),
+    ],
+)
+def test_assert_no_first_layer_write_blocks_file_pragmas(statement: str, name: str) -> None:
+    """파일을 바꾸거나 허용 목록 밖인 PRAGMA는 값 없는 형태까지 막는다."""
+    with pytest.raises(CatalogWriteBlocked, match="허용 목록 밖의 PRAGMA") as caught:
+        assert_no_first_layer_write(statement)
+    assert f": {name}." in str(caught.value)
 
 
 async def test_block_first_layer_writes_raises_inside_and_releases_after() -> None:
