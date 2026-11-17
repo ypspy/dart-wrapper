@@ -22,6 +22,7 @@ from research.extracting.firm_remediation import (
 from research.repositories.firm_remediation_repository import (
     FirmRemediationRepository,
     _iso_rcept_dt,
+    _rcept_dt_backfill_sql,
 )
 from research.schema import ensure_research_schema
 from research.services.firm_remediation_loader import (
@@ -1041,6 +1042,48 @@ async def test_backfill_empty_rcept_dt_matches_iso_reference(tmp_path: Path) -> 
     assert stored["1234567"] == ""
     assert stored["1234"] is None
     assert stored["20200101000099"] == "1999-01-01"
+
+
+_BACKFILL_ISO = (
+    "substr(rcept_no, 1, 4) || '-' || substr(rcept_no, 5, 2) || '-' || substr(rcept_no, 7, 2)"
+)
+_BACKFILL_POSTGRES_DIGITS = "substr(rcept_no, 1, 8) ~ '^[0-9]{8}$'"
+_BACKFILL_SQLITE_DIGITS = "substr(rcept_no, 1, 8) GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'"
+_BACKFILL_SQL_POSTGRES = (
+    "UPDATE extraction_firm_remediation_documents "
+    f"SET rcept_dt = {_BACKFILL_ISO} "
+    "WHERE (rcept_dt IS NULL OR rcept_dt = '') "
+    f"AND {_BACKFILL_POSTGRES_DIGITS}"
+)
+_BACKFILL_SQL_SQLITE = (
+    "UPDATE extraction_firm_remediation_documents "
+    f"SET rcept_dt = {_BACKFILL_ISO} "
+    "WHERE (rcept_dt IS NULL OR rcept_dt = '') "
+    f"AND {_BACKFILL_SQLITE_DIGITS}"
+)
+
+
+def test_rcept_dt_backfill_sql_postgres_uses_regex() -> None:
+    """Postgres 백필 SQL은 세미콜론 없는 한 문장이고, sqlite와 숫자 조건만 다르다."""
+    postgres = _rcept_dt_backfill_sql("postgresql")
+    sqlite_sql = _rcept_dt_backfill_sql("sqlite")
+    assert ";" not in postgres
+    assert postgres.count("UPDATE") == 1
+    assert postgres.startswith("UPDATE extraction_firm_remediation_documents")
+    assert "~ '^[0-9]{8}$'" in postgres
+    assert "GLOB" not in postgres
+    assert "WHERE (rcept_dt IS NULL OR rcept_dt = '')" in postgres
+    assert postgres.replace(_BACKFILL_POSTGRES_DIGITS, "DIGITS") == sqlite_sql.replace(
+        _BACKFILL_SQLITE_DIGITS, "DIGITS"
+    )
+    assert postgres == _BACKFILL_SQL_POSTGRES
+    assert sqlite_sql == _BACKFILL_SQL_SQLITE
+
+
+def test_rcept_dt_backfill_sql_rejects_unknown_dialect() -> None:
+    """mysql처럼 지원하지 않는 방언은 저장하지 않고 FirmRemediationError를 낸다."""
+    with pytest.raises(FirmRemediationError, match="rcept_dt를 접수번호로 채우지 못해"):
+        _rcept_dt_backfill_sql("mysql")
 
 
 def _clone_fixture_row(rcept_no: str, rcept_dt: object, *, drop_rcept_dt: bool = False) -> dict:

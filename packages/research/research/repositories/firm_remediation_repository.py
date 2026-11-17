@@ -69,8 +69,11 @@ def _rcept_dt_backfill_sql(dialect: str) -> str:
 
     숫자 8자리 판별만 SQLite GLOB와 Postgres 정규식이 다르다. 채워지는 값은
     ``_iso_rcept_dt``와 같다. 앞 8자리가 숫자가 아니면 행을 바꾸지 않는다.
+    지원 방언은 sqlite와 postgresql뿐이며, 그 밖의 방언은 FirmRemediationError로
+    저장하지 않는다(무음 오동작 없음).
     """
     iso = "substr(rcept_no, 1, 4) || '-' || substr(rcept_no, 5, 2) || '-' || substr(rcept_no, 7, 2)"
+    table = ExtractionFirmRemediationDocument.__tablename__
     if dialect == "postgresql":
         digits = "substr(rcept_no, 1, 8) ~ '^[0-9]{8}$'"
     elif dialect == "sqlite":
@@ -80,7 +83,7 @@ def _rcept_dt_backfill_sql(dialect: str) -> str:
             "기존 문서의 rcept_dt를 접수번호로 채우지 못해 저장하지 않습니다."
         )
     return (
-        "UPDATE extraction_firm_remediation_documents "
+        f"UPDATE {table} "
         f"SET rcept_dt = {iso} "
         "WHERE (rcept_dt IS NULL OR rcept_dt = '') "
         f"AND {digits}"

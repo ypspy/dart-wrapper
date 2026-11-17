@@ -2,6 +2,7 @@
 
 1층은 Seaweed 수집(nightly_catalog.py·app.local)만 바꾼다.
 판단이 애매한 SQL은 통과시키지 않는다.
+raw DBAPI 커서와 이 리스너를 붙이지 않은 다른 엔진은 검사를 우회한다.
 """
 
 from __future__ import annotations
@@ -16,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.db.session import (
     _CATALOG_TABLES,
     _COLUMN_PATCHES,
-    _column_exists,
-    _table_exists,
+    column_exists,
+    table_exists,
 )
 
 # 카탈로그 6개에 corps를 더한다. corps 모델은 연구 패키지에 있지만 1층으로 본다.
@@ -25,8 +26,6 @@ FIRST_LAYER_TABLES: frozenset[str] = frozenset(_CATALOG_TABLES) | {"corps"}
 
 _READ_OR_TRANSACTION = frozenset(
     {
-        "select",
-        "pragma",
         "begin",
         "commit",
         "rollback",
@@ -36,6 +35,59 @@ _READ_OR_TRANSACTION = frozenset(
         "values",
     }
 )
+# 값 없이 실행하면 현재 값만 돌려주는 PRAGMA.
+_PRAGMA_READ_ALLOW = frozenset(
+    {
+        "read_uncommitted",
+        "foreign_keys",
+        "busy_timeout",
+        "query_only",
+        "cache_size",
+        "temp_store",
+        "user_version",
+        "application_id",
+        "schema_version",
+        "journal_mode",
+        "synchronous",
+        "auto_vacuum",
+        "page_size",
+        "page_count",
+        "freelist_count",
+        "encoding",
+        "data_version",
+        "database_list",
+        "compile_options",
+        "collation_list",
+        "function_list",
+        "table_list",
+    }
+)
+# 괄호 인자는 조회용으로만 허용한다.
+_PRAGMA_PAREN_ALLOW = frozenset(
+    {
+        "table_info",
+        "table_xinfo",
+        "index_list",
+        "index_info",
+        "index_xinfo",
+        "foreign_key_list",
+        "foreign_key_check",
+        "integrity_check",
+        "quick_check",
+    }
+)
+# 등호 형태는 연결 안에서만 바뀌는 설정만 허용한다.
+_PRAGMA_ASSIGN_ALLOW = frozenset(
+    {
+        "foreign_keys",
+        "busy_timeout",
+        "query_only",
+        "read_uncommitted",
+        "cache_size",
+        "temp_store",
+    }
+)
+_CTE_READ_BODIES = frozenset({"select", "values", "with"})
 _OR_CONFLICT = frozenset({"ignore", "replace", "abort", "fail", "rollback"})
 _SEAWEED = "1층은 Seaweed 수집(nightly_catalog.py·app.local)만 바꿉니다."
 
@@ -92,14 +144,16 @@ async def verify_catalog_schema(engine: AsyncEngine) -> None:
         dialect = connection.dialect.name
         present: set[str] = set()
         for table in _CATALOG_TABLES:
-            if await _table_exists(connection, table, dialect):
+            if await table_exists(connection, table, dialect):
                 present.add(table)
             else:
                 missing.append(f"{table} 없음")
+        if not await table_exists(connection, "corps", dialect):
+            missing.append("corps 없음")
         for table, column, _sqlite_ddl, _postgres_ddl in _COLUMN_PATCHES:
             if table not in present:
                 continue
-            if not await _column_exists(connection, table, column, dialect):
+            if not await column_exists(connection, table, column, dialect):
                 missing.append(f"{table}.{column} 없음")
     if not missing:
         return
@@ -130,6 +184,12 @@ def _check_statement(tokens: list[Token]) -> None:
         if not rest:
             _block_unknown(tokens)
         _check_statement(rest)
+        return
+    if keyword == "select":
+        _check_select_into(tokens)
+        return
+    if keyword == "pragma":
+        _check_pragma(tokens)
         return
     if keyword in _READ_OR_TRANSACTION:
         return
@@ -185,6 +245,8 @@ def _parse_replace(tokens: list[Token]) -> str:
 
 def _parse_update(tokens: list[Token]) -> str:
     index = _skip_or_conflict(tokens, 1)
+    if _is_word_at(tokens, index, "only"):
+        index += 1
     name, _index = _read_qualified(tokens, index)
     return name
 
@@ -192,14 +254,20 @@ def _parse_update(tokens: list[Token]) -> str:
 def _parse_delete(tokens: list[Token]) -> str:
     if not _is_word_at(tokens, 1, "from"):
         _block_unknown(tokens)
-    name, _index = _read_qualified(tokens, 2)
+    index = 2
+    if _is_word_at(tokens, index, "only"):
+        index += 1
+    name, _index = _read_qualified(tokens, index)
     return name
 
 
 def _parse_alter(tokens: list[Token]) -> str:
     if not _is_word_at(tokens, 1, "table"):
         _block_unknown(tokens)
-    name, _index = _read_qualified(tokens, 2)
+    index = _skip_if_exists(tokens, 2)
+    if _is_word_at(tokens, index, "only"):
+        index += 1
+    name, _index = _read_qualified(tokens, index)
     return name
 
 
@@ -243,35 +311,11 @@ def _parse_drop(tokens: list[Token]) -> None:
 
 
 def _block_drop_index(name: str) -> None:
-    """DROP INDEX는 대상 테이블을 문장만으로 확정하기 어렵다.
-
-    1층 인덱스 이름이면 그 테이블로 막고, 판단이 안 되면 그대로 막는다.
-    """
+    """DROP INDEX는 대상 테이블과 상관없이 항상 막는다."""
     normalized = name.casefold()
-    table = _first_layer_index_table(normalized)
-    target = table if table is not None else normalized
     raise CatalogWriteBlocked(
-        "연구 추출 앱은 1층 테이블에 쓰지 않습니다: "
-        f"{target} (DROP INDEX). "
-        "인덱스 대상을 확인할 수 없으면 막습니다. " + _SEAWEED
+        "연구 추출 앱은 인덱스를 지우지 않습니다: " f"{normalized} (DROP INDEX). " + _SEAWEED
     )
-
-
-def _first_layer_index_table(name: str) -> str | None:
-    """인덱스 이름이 1층 자동 인덱스이거나 카탈로그 인덱스면 테이블을 돌려준다."""
-    for table in FIRST_LAYER_TABLES:
-        if name.startswith(f"sqlite_autoindex_{table}_"):
-            return table
-    from app.models import Base
-
-    for table_name in _CATALOG_TABLES:
-        table = Base.metadata.tables.get(table_name)
-        if table is None:
-            continue
-        for index in table.indexes:
-            if index.name and index.name.casefold() == name:
-                return table_name
-    return None
 
 
 def _main_after_with(tokens: list[Token]) -> list[Token]:
@@ -288,11 +332,82 @@ def _main_after_with(tokens: list[Token]) -> list[Token]:
         index += 1
         if index >= len(tokens) or tokens[index] != ("punct", "("):
             _block_unknown(tokens)
-        index = _skip_paren(tokens, index)
+        index = _check_cte_body(tokens, index)
         if index < len(tokens) and tokens[index] == ("punct", ","):
             index += 1
             continue
         return tokens[index:]
+
+
+def _check_cte_body(tokens: list[Token], index: int) -> int:
+    """CTE 본문을 검사하고 닫는 괄호 다음 위치를 돌려준다.
+
+    SELECT·VALUES·WITH 본문은 읽기로 본다. 그 외 본문은 문장으로 다시 검사한다.
+    """
+    if index >= len(tokens) or tokens[index] != ("punct", "("):
+        _block_unknown(tokens)
+    end = _skip_paren(tokens, index)
+    inner = tokens[index + 1 : end - 1]
+    if inner and inner[0][0] == "word" and inner[0][1].casefold() in _CTE_READ_BODIES:
+        return end
+    _check_statement(inner)
+    return end
+
+
+def _check_select_into(tokens: list[Token]) -> None:
+    """괄호 밖의 SELECT INTO는 대상 테이블을 만드는 문으로 본다."""
+    depth = 0
+    for index, (kind, value) in enumerate(tokens):
+        if kind == "punct" and value == "(":
+            depth += 1
+            continue
+        if kind == "punct" and value == ")":
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and kind == "word" and value.casefold() == "into":
+            _reject_table(_select_into_target(tokens, index + 1), "CREATE TABLE")
+            return
+
+
+def _select_into_target(tokens: list[Token], index: int) -> str:
+    while _is_word_at(tokens, index, "temp", "temporary", "unlogged", "table"):
+        index += 1
+    name, _index = _read_qualified(tokens, index)
+    return name
+
+
+def _check_pragma(tokens: list[Token]) -> None:
+    """허용 목록에 있는 PRAGMA만 통과시킨다. 목록 밖은 형태와 상관없이 막는다."""
+    name, index = _pragma_name(tokens, 1)
+    if index < len(tokens) and tokens[index] == ("punct", "("):
+        allowed = name in _PRAGMA_PAREN_ALLOW
+    elif index < len(tokens) and tokens[index] == ("other", "="):
+        allowed = name in _PRAGMA_ASSIGN_ALLOW
+    elif index < len(tokens):
+        allowed = False
+    else:
+        allowed = name in _PRAGMA_READ_ALLOW
+    if not allowed:
+        raise CatalogWriteBlocked(
+            "연구 추출 앱은 허용 목록 밖의 PRAGMA를 실행하지 않습니다: " f"{name}. " + _SEAWEED
+        )
+
+
+def _pragma_name(tokens: list[Token], index: int) -> tuple[str, int]:
+    """스키마 접두사와 따옴표·백틱·대괄호를 뗀 PRAGMA 이름을 돌려준다."""
+    name, index = _read_ident(tokens, index)
+    while index < len(tokens) and tokens[index] == ("punct", "."):
+        name, index = _read_ident(tokens, index + 1)
+    return _normalize_pragma_name(name), index
+
+
+def _normalize_pragma_name(name: str) -> str:
+    stripped = name.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {'"', "`"}:
+        stripped = stripped[1:-1]
+    if stripped.startswith("[") and stripped.endswith("]") and len(stripped) >= 2:
+        stripped = stripped[1:-1]
+    return stripped.casefold()
 
 
 def _skip_or_conflict(tokens: list[Token], index: int) -> int:

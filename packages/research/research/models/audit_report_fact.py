@@ -104,6 +104,8 @@ class AuditReportFact(Base):
 
     fetch_status: Mapped[str] = mapped_column(String(32), nullable=False)
     conflicts: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    # extracted_at은 '마지막 성공 추출 시각'이 아니라 '행 내용을 마지막으로 쓴 추출 처리 시각'이다.
+    # 실패 상태로 바뀌면 원래 추출(또는 첫 실패) 시각은 남지 않는다.
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     extractor_version: Mapped[str] = mapped_column(
         String(32), default=EXTRACTOR_VERSION, nullable=False
