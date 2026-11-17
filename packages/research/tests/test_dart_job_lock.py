@@ -11,7 +11,11 @@ from app.errors import CatalogConflict
 from app.repositories.job_repository import JobRepository
 from research.models.extraction_job import ExtractionJob
 from research.repositories.extraction_job_repository import ExtractionJobRepository
-from research.services.dart_job_lock import STALE_RUNNING_SECONDS, assert_dart_idle
+from research.services.dart_job_lock import (
+    STALE_RUNNING_SECONDS,
+    INTERIM_EXTRACTOR_ID,
+    assert_dart_idle,
+)
 
 
 @pytest.fixture
@@ -66,9 +70,7 @@ async def test_assert_dart_idle_recovers_stale_running_extraction(
         await jobs.set_status("ext-stale", "running")
         job = await session.get(ExtractionJob, "ext-stale")
         assert job is not None
-        job.started_at = datetime.now(timezone.utc) - timedelta(
-            seconds=STALE_RUNNING_SECONDS + 60
-        )
+        job.started_at = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUNNING_SECONDS + 60)
         await session.commit()
 
     async with sessionmaker_fixture() as session:
@@ -81,3 +83,73 @@ async def test_assert_dart_idle_recovers_stale_running_extraction(
     assert stale.status == "failed"
     assert stale.error_message is not None
     assert "중단" in stale.error_message
+
+
+async def test_assert_dart_idle_rejects_when_interim_review_is_running(
+    sessionmaker_fixture,
+) -> None:
+    """검토 추출이 진행 중이면 감사 추출과 같은 잠금으로 거절한다."""
+    async with sessionmaker_fixture() as session:
+        jobs = ExtractionJobRepository(session)
+        await jobs.create("interim-lock", INTERIM_EXTRACTOR_ID, {}, mode="extract")
+        await jobs.set_status("interim-lock", "running")
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        with pytest.raises(CatalogConflict, match="검토보고서 추출 작업이 이미 진행 중"):
+            await assert_dart_idle(session)
+
+
+async def test_assert_dart_idle_keeps_audit_message_when_audit_is_running(
+    sessionmaker_fixture,
+) -> None:
+    """감사 추출이 진행 중일 때의 문구는 검토 추출 문구로 바뀌지 않는다."""
+    async with sessionmaker_fixture() as session:
+        jobs = ExtractionJobRepository(session)
+        await jobs.create("audit-lock", "audit_opinion", {}, mode="extract")
+        await jobs.set_status("audit-lock", "running")
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        with pytest.raises(CatalogConflict, match="감사 추출 작업이 이미 진행 중") as raised:
+            await assert_dart_idle(session)
+    assert "검토보고서" not in str(raised.value)
+
+
+async def test_assert_dart_idle_rejects_interim_when_catalog_is_running(
+    sessionmaker_fixture,
+) -> None:
+    """카탈로그 수집이 진행 중이면 검토 추출 잠금도 거절한다."""
+    async with sessionmaker_fixture() as session:
+        await JobRepository(session).create(
+            "cat-interim",
+            {"report_type": "A002", "start_date": "20250801", "end_date": "20250814"},
+            "key-interim",
+            mode="collect",
+        )
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        with pytest.raises(CatalogConflict, match="이미 진행 중"):
+            await assert_dart_idle(session)
+
+
+async def test_assert_dart_idle_recovers_stale_interim_job(sessionmaker_fixture) -> None:
+    """오래된 running 검토 추출 잡은 실패로 마감하고 잠금을 푼다."""
+    async with sessionmaker_fixture() as session:
+        jobs = ExtractionJobRepository(session)
+        await jobs.create("interim-stale", INTERIM_EXTRACTOR_ID, {}, mode="extract")
+        await jobs.set_status("interim-stale", "running")
+        job = await session.get(ExtractionJob, "interim-stale")
+        assert job is not None
+        job.started_at = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUNNING_SECONDS + 60)
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        await assert_dart_idle(session)
+        await session.commit()
+
+    async with sessionmaker_fixture() as session:
+        stale = await session.get(ExtractionJob, "interim-stale")
+    assert stale is not None
+    assert stale.status == "failed"

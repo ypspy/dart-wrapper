@@ -19,6 +19,18 @@ class ExtractAuditRequest(BaseModel):
     mode: Literal["extract", "resume", "reparse", "patch"] = "extract"
 
 
+class ExtractInterimReviewRequest(BaseModel):
+    """반기·분기 검토보고서 추출 요청. 유형 기본값은 A002와 A003이다."""
+
+    start_date: str = Field(pattern=r"^\d{8}$")
+    end_date: str = Field(pattern=r"^\d{8}$")
+    report_types: list[Literal["A002", "A003"]] = Field(
+        default_factory=lambda: ["A002", "A003"],
+        min_length=1,
+    )
+    mode: Literal["extract", "resume"] = "extract"
+
+
 class ExtractAuditResponse(BaseModel):
     """추출 트리거 응답. 즉시 반환된다."""
 
