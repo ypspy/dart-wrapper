@@ -101,9 +101,19 @@ def _require_existing_file(path: Path) -> None:
     )
 
 
-def apply_statements(path: Path, statements: list[str], *, write: bool) -> None:
-    """dry-run은 DDL만 출력하고, write는 기존 파일에만 실행한다."""
+def apply_statements(
+    path: Path,
+    statements: list[str],
+    *,
+    write: bool,
+    confirm_backup: bool = False,
+) -> None:
+    """dry-run은 DDL만 출력하고, write는 백업 확인이 있는 기존 파일에만 실행한다."""
     _require_existing_file(path)
+    if write and not confirm_backup:
+        raise InterimTableError(
+            "쓰려면 대상 데이터베이스를 백업한 뒤 --confirm-backup을 함께 주세요."
+        )
     assert_statements_safe(statements)
     if not write:
         for statement in statements:
@@ -130,7 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--write",
         action="store_true",
-        help="DDL을 실행합니다. 없으면 출력만 합니다.",
+        help="DDL을 실행합니다. 없으면 출력만 합니다. --confirm-backup이 필요합니다.",
+    )
+    parser.add_argument(
+        "--confirm-backup",
+        action="store_true",
+        help="대상 파일을 이미 백업했음을 확인합니다. --write와 함께 필요합니다.",
     )
     return parser
 
@@ -139,7 +154,12 @@ def main(argv: list[str] | None = None) -> int:
     """DDL을 출력하거나 기존 파일에 적용한다. 거절하면 1을 돌려준다."""
     args = build_parser().parse_args(argv)
     try:
-        apply_statements(args.target_db, build_statements(), write=bool(args.write))
+        apply_statements(
+            args.target_db,
+            build_statements(),
+            write=bool(args.write),
+            confirm_backup=bool(args.confirm_backup),
+        )
     except InterimTableError as exc:
         print(str(exc), file=sys.stderr)
         return 1

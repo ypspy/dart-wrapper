@@ -60,8 +60,8 @@ def test_write_adds_only_interim_table(tmp_path: Path) -> None:
     connection.close()
     before = _table_names(path)
 
-    assert main(["--target-db", str(path), "--write"]) == 0
-    assert main(["--target-db", str(path), "--write"]) == 0
+    assert main(["--target-db", str(path), "--write", "--confirm-backup"]) == 0
+    assert main(["--target-db", str(path), "--write", "--confirm-backup"]) == 0
 
     names = _table_names(path)
     assert names - before == {"interim_review_facts"}
@@ -91,6 +91,21 @@ def test_refuses_sql_that_names_first_layer_or_audit_facts() -> None:
     with pytest.raises(InterimTableError, match="audit_report_facts"):
         assert_statements_safe(["INSERT INTO audit_report_facts (rcept_no) VALUES ('x')"])
     assert_statements_safe(build_statements())
+
+
+def test_write_without_backup_confirmation_leaves_file_unchanged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--write만으로는 쓰지 않고 백업 확인을 요구한다."""
+    path = tmp_path / "catalog.db"
+    sqlite3.connect(path).close()
+    before = _sha256(path)
+
+    assert main(["--target-db", str(path), "--write"]) == 1
+
+    assert _sha256(path) == before
+    assert "interim_review_facts" not in _table_names(path)
+    assert "백업" in capsys.readouterr().err
 
 
 def test_missing_file_is_rejected_and_not_created(
