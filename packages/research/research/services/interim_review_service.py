@@ -326,7 +326,12 @@ class InterimReviewService:
         if html_looks_blocked(html):
             base.fetch_status = "blocked"
             return base
-        parsed = parse_interim_review(html, auditor_names=self._auditor_names)
+        parsed = parse_interim_review(
+            html,
+            auditor_names=self._auditor_names,
+            doc_kind=doc_kind or None,
+            review_kind=review_kind or None,
+        )
         _apply_parse(base, parsed)
         base.fetch_status = "ok"
         return base

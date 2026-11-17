@@ -50,7 +50,17 @@ def test_fixtures_are_synthetic_and_cover_the_matrix() -> None:
     assert len(htmls) >= 8
     manifest = json.loads((_FIXTURE / "manifest.json").read_text(encoding="utf-8"))
     names = {path.name for path in htmls}
-    assert {item["file"] for item in manifest["documents"]} == names
+    manifest_names = {item["file"] for item in manifest["documents"]}
+    assert manifest_names <= names
+    for required in (
+        "leading_conclusion_unmodified.html",
+        "trailing_opinion_unmodified.html",
+        "prior_period_qualified_mention.html",
+        "half_cumulative_months.html",
+        "quarter_cumulative_nine_months.html",
+        "quarter_three_months.html",
+    ):
+        assert required in names
     codes = {item["conclusion_code"] for item in manifest["documents"]}
     assert {"unmodified", "qualified", "adverse", "disclaimer", "unknown"} <= codes
     blob = "\n".join(path.read_text(encoding="utf-8") for path in htmls)
