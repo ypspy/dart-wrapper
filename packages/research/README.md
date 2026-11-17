@@ -33,3 +33,17 @@ PYTHONPATH=.:../web-api python scripts/create_interim_review_table.py --target-d
 ```
 
 실행은 `POST /admin/extract/interim-review` 입니다. 기간은 `YYYYMMDD`이고, `report_types`는 A002·A003(기본 둘 다), `mode`는 `extract` 또는 `resume`입니다. 상태·중단·강제 종료는 기존 추출 잡 경로를 `job_id`로 그대로 씁니다. 실제 추출과 뷰어 다운로드는 승인 뒤에만 합니다. 이 저장소의 테스트는 합성 HTML만 사용합니다.
+
+## 단일 기간 감사시간 표
+
+옛 서식은 당기/전기 열 없이 역할 열만 있다. 추출기(`activity_hours`)는 그 칸의 `period`를 `unknown`으로 두고 `period_raw`를 비운 채 저장한다. 저장된 period는 unknown 그대로다. unknown을 무조건 당기로 보지 않는다.
+
+신호(`reviewing.candidates._hour_cells`)와 골드 채점(`gold.scoring._hours_keys`)만 `research.extracting.hours_period`의 가드를 통과한 표에서 합계(`role=total`)를 당기 합계처럼 읽는다. 가드는 다음 세 조건을 모두 만족할 때만 참이다.
+
+1. 당기/전기 표시가 없다. 모든 칸의 period가 unknown이고 period_raw가 비어 있다.
+2. 기간이 섞여 있지 않다. current 또는 prior 칸이 없다.
+3. 역할당 열이 하나다. `(role, role_raw, metric)`이 한 번씩만 나온다. colspan으로 같은 키가 두 번이면 해당하지 않는다.
+
+가드가 거짓이면 종전처럼 period가 current인 합계만 본다. 저장소 밖 분석도 이 규칙을 따라야 하고, 저장된 period를 current로 고쳐 쓰지 않는다.
+
+검토 큐 재생성과 골드 재채점은 이 규칙만으로 실행하지 않는다. 승인 뒤에만 한다.
