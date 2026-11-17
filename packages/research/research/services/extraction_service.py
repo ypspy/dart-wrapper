@@ -59,7 +59,7 @@ from research.extracting.selector import (
 )
 from research.extracting.subsidiaries import SubsidiaryResult, extract_subsidiaries, notes_tail
 from research.extracting.text import compact
-from research.models.audit_report_fact import AuditReportFact
+from research.models.audit_report_fact import AuditReportFact, _now
 from research.models.corp import Corp
 from app.models.disclosure import Disclosure
 from app.models.entry import Entry
@@ -493,9 +493,7 @@ class ExtractionService:
                 fact = await FactRepository(session).get(rcept_no, dcm_no)
                 if fact is not None:
                     disclosure = await session.get(Disclosure, rcept_no)
-                    corp_code = (
-                        disclosure.corp_code if disclosure is not None else None
-                    )
+                    corp_code = disclosure.corp_code if disclosure is not None else None
                     corp = await session.get(Corp, corp_code) if corp_code else None
                     add_fact_outcomes(
                         bundle_counts,
@@ -582,14 +580,10 @@ class ExtractionService:
                 selector = _to_selector(entry)
                 if selector is None:
                     continue
-                if is_audit_document(
-                    selector.report_type, selector.source, selector.document_name
-                ):
+                if is_audit_document(selector.report_type, selector.source, selector.document_name):
                     audit_selectors.append(selector)
             for dcm_no in group_by_dcm(audit_selectors):
-                fetch_status = await self._extract_one_audit_document(
-                    job_id, filing, dcm_no, mode
-                )
+                fetch_status = await self._extract_one_audit_document(job_id, filing, dcm_no, mode)
                 visited += 1
                 if fetch_status is not None:
                     processed += 1
@@ -631,9 +625,7 @@ class ExtractionService:
                 return
             async with self._sessionmaker() as session:
                 filing = await EntryRepository(session).list_by_rcept_no(rcept_no)
-            fetch_status = await self._extract_one_audit_document(
-                job_id, filing, dcm_no, "patch"
-            )
+            fetch_status = await self._extract_one_audit_document(job_id, filing, dcm_no, "patch")
             visited += 1
             if fetch_status is not None:
                 processed += 1
@@ -693,6 +685,16 @@ class ExtractionService:
             facts = FactRepository(session)
             existing = await facts.get(rcept_no, dcm_no)
             _copy_operator_fields(fact, existing)
+            # 이미 fetch_failed인 행이 다시 실패하면 시각을 유지한다.
+            # 결과를 쓰거나 실패 상태를 새로 쓸 때만 처리 시각으로 바꾼다.
+            if (
+                existing is not None
+                and existing.fetch_status == "fetch_failed"
+                and fact.fetch_status == "fetch_failed"
+            ):
+                fact.extracted_at = existing.extracted_at
+            else:
+                fact.extracted_at = _now()
             await facts.upsert(fact)
             await self._apply_sibling_opinion(session, fact, sample)
             await ExtractionJobRepository(session).add_log(
@@ -709,14 +711,23 @@ class ExtractionService:
         sample: Entry,
         exc: BaseException,
     ) -> None:
-        """문서 예외를 fetch_failed로 남기고 다음 문서로 넘어갈 수 있게 한다."""
+        """문서 예외를 fetch_failed로 남기고 다음 문서로 넘어갈 수 있게 한다.
+
+        extracted_at은 마지막 성공 시각이 아니라 행 내용을 마지막으로 쓴 시각이다.
+        실패 상태로 바뀌면 원래 추출(또는 첫 실패) 시각은 남지 않는다.
+        이미 fetch_failed인 행이 다시 실패하면 행이 바뀌지 않으므로 시각도 유지한다.
+        """
         rcept_no = sample.rcept_no
         dcm_no = sample.dcm_no or ""
         logger.exception("문서 추출에 실패했습니다: %s/%s", rcept_no, dcm_no)
         async with self._sessionmaker() as session:
             facts = FactRepository(session)
             existing = await facts.get(rcept_no, dcm_no)
-            await facts.upsert(_failed_fact(sample, existing))
+            prev_status = existing.fetch_status if existing is not None else None
+            failed = _failed_fact(sample, existing)
+            if prev_status != "fetch_failed":
+                failed.extracted_at = _now()
+            await facts.upsert(failed)
             await ExtractionJobRepository(session).add_log(
                 job_id,
                 "error",

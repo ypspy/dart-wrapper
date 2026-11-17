@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 
@@ -19,6 +21,7 @@ from research.repositories.extraction_job_repository import ExtractionJobReposit
 from research.repositories.fact_repository import FactRepository
 from app.repositories.job_repository import JobRepository
 from app.schemas.entry import EntryRecord
+from research.services.completeness_service import CompletenessService
 from research.services.extraction_service import ExtractionService
 
 COVER_URL = "https://dart.fss.or.kr/report/viewer.do?rcpNo=1&eleId=cover"
@@ -114,6 +117,32 @@ NOTES_HTML = """
 </table>
 </body></html>
 """
+
+_OLD_EXTRACTED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite가 시간대를 떼고 돌려줘도 UTC로 비교한다."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _stamped_fact(**overrides: object) -> AuditReportFact:
+    """extracted_at이 2020-01-01인 기존 행."""
+    values: dict[str, object] = {
+        "rcept_no": "20200331000001",
+        "dcm_no": "11111",
+        "source_report_type": "F001",
+        "fs_scope": "separate",
+        "fetch_status": "fetch_failed",
+        "conflicts": [],
+        "audit_report_date_candidates": [],
+        "extracted_at": _OLD_EXTRACTED_AT,
+    }
+    values.update(overrides)
+    return AuditReportFact(**values)  # type: ignore[arg-type]
+
 
 A001_AFFILIATE_HTML = """
 <html><body>
@@ -1528,7 +1557,7 @@ async def test_extract_skips_f001_company_overview_attachment(
 
 
 async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
-    """같은 버전의 ok 행은 resume에서 다시 fetch하지 않는다."""
+    """같은 버전의 ok 행은 resume에서 다시 fetch하지 않고 extracted_at도 그대로다."""
     await _seed_entries(sessionmaker_fixture, _f001_leaves())
     async with sessionmaker_fixture() as session:
         await FactRepository(session).upsert(
@@ -1542,6 +1571,7 @@ async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
                 opinion_status="ok",
                 conflicts=[],
                 audit_report_date_candidates=[],
+                extracted_at=_OLD_EXTRACTED_AT,
             )
         )
         await session.commit()
@@ -1562,8 +1592,13 @@ async def test_resume_skips_ok_facts(sessionmaker_fixture) -> None:
     async with sessionmaker_fixture() as session:
         job = await session.get(ExtractionJob, job_id)
         logs = await ExtractionJobRepository(session).recent_logs(job_id)
+        fact = await FactRepository(session).get("20200331000001", "11111")
     assert job is not None and job.status == "succeeded"
     assert any("문서 0건" in log.message for log in logs)
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert fact.opinion_code == "unqualified"
+    assert _as_utc(fact.extracted_at) == _OLD_EXTRACTED_AT
 
 
 async def test_patch_refetches_only_bundle_fail_documents(
@@ -2211,3 +2246,140 @@ async def test_run_job_counts_visits_including_skips(
     assert job.params["target_count"] == 1
     assert job.params["processed_count"] == 1
     assert any("문서 0건" in log.message for log in logs)
+
+
+def _failing_transport() -> httpx.MockTransport:
+    """DART 원문 요청이 네트워크 오류로 끝나게 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("연결 실패", request=request)
+
+    return httpx.MockTransport(handler)
+
+
+async def test_reextract_refreshes_extracted_at(sessionmaker_fixture) -> None:
+    """fetch_failed 행을 다시 추출해 ok로 쓰면 extracted_at이 그 처리 시각이 된다."""
+    started = datetime.now(timezone.utc)
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(_stamped_fact())
+        await session.commit()
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert _as_utc(fact.extracted_at) >= started
+
+
+async def test_failed_retry_without_state_change_keeps_extracted_at(
+    sessionmaker_fixture,
+) -> None:
+    """이미 fetch_failed인 행이 다시 실패하면 extracted_at은 2020-01-01 그대로다."""
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(_stamped_fact())
+        await session.commit()
+    async with httpx.AsyncClient(transport=_failing_transport()) as client:
+        service = ExtractionService(
+            sessionmaker_fixture,
+            DartHttpClient(client, max_retries=0, retry_backoff_seconds=0.0),
+        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+    assert fact is not None
+    assert fact.fetch_status == "fetch_failed"
+    assert _as_utc(fact.extracted_at) == _OLD_EXTRACTED_AT
+
+
+async def test_failed_overwrite_of_ok_row_refreshes_extracted_at(
+    sessionmaker_fixture,
+) -> None:
+    """reparse가 not_found인 ok 행을 다시 처리하다 실패하면 fetch_failed와 시각을 새로 쓴다."""
+    started = datetime.now(timezone.utc)
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            _stamped_fact(fetch_status="ok", opinion_status="not_found")
+        )
+        await session.commit()
+    async with httpx.AsyncClient(transport=_failing_transport()) as client:
+        service = ExtractionService(
+            sessionmaker_fixture,
+            DartHttpClient(client, max_retries=0, retry_backoff_seconds=0.0),
+        )
+        job_id = await service.start("20200301", "20200331", ["F001"], "reparse")
+        await service.run_job(job_id)
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+    assert fact is not None
+    assert fact.fetch_status == "fetch_failed"
+    assert _as_utc(fact.extracted_at) >= started
+
+
+async def test_sibling_conflict_and_override_keep_extracted_at(
+    sessionmaker_fixture,
+) -> None:
+    """형제 conflict와 감사보고서일 override는 extracted_at을 바꾸지 않는다."""
+    await _seed_entries(
+        sessionmaker_fixture,
+        [
+            *_f001_leaves(),
+            _entry(
+                entry_id="sib-cover",
+                rcept_no="20200331000002",
+                report_type="A001",
+                source="attachment",
+                dcm_no="22222",
+                document_name="감사보고서",
+            ),
+        ],
+    )
+    async with sessionmaker_fixture() as session:
+        facts = FactRepository(session)
+        await facts.upsert(
+            _stamped_fact(
+                rcept_no="20200331000002",
+                dcm_no="22222",
+                source_report_type="A001",
+                fetch_status="ok",
+                opinion_code="qualified",
+                opinion_status="ok",
+            )
+        )
+        await facts.upsert(
+            _stamped_fact(
+                rcept_no="20200101000099",
+                dcm_no="99999",
+                fetch_status="ok",
+                opinion_status="ok",
+            )
+        )
+        await session.commit()
+
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], "extract")
+        await service.run_job(job_id)
+
+    async with sessionmaker_fixture() as session:
+        sibling = await FactRepository(session).get("20200331000002", "22222")
+        assert sibling is not None
+        assert any(
+            isinstance(item, dict) and item.get("field") == "sibling_opinion"
+            for item in sibling.conflicts
+        )
+        assert _as_utc(sibling.extracted_at) == _OLD_EXTRACTED_AT
+        await CompletenessService(session).override_audit_report_date(
+            "20200101000099", "99999", "2020-03-31"
+        )
+        overridden = await FactRepository(session).get("20200101000099", "99999")
+    assert overridden is not None
+    assert overridden.audit_report_date_source == "override"
+    assert overridden.audit_report_date == "2020-03-31"
+    assert _as_utc(overridden.extracted_at) == _OLD_EXTRACTED_AT
