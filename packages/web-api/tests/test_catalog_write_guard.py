@@ -402,3 +402,34 @@ async def test_local_lifespan_default_keeps_catalog_maintenance(
     assert status is not None
     assert status[0] == "partial"
     assert [row[0] for row in logs] == ["warning"]
+
+
+_SHARED_STATE = ("engine", "sessionmaker", "http_client", "dart_http", "entry_collector")
+
+
+async def test_local_and_readonly_lifespan_set_shared_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """기본 분기와 읽기 전용 분기 모두 세션·HTTP·수집기 상태를 붙인다."""
+    default_path = tmp_path / "default.db"
+    readonly_path = tmp_path / "readonly.db"
+    await _build_catalog(readonly_path)
+    monkeypatch.setenv("DART_LLM_ENABLED", "false")
+    monkeypatch.setenv("OPENDART_API_KEY", "")
+    monkeypatch.setenv("OPENDART_API_KEY_2", "")
+    monkeypatch.setenv("DATE_RESOLVER_API_KEY", "")
+    monkeypatch.setenv("DATABASE_URL", _url(default_path))
+    get_settings.cache_clear()
+    try:
+        app = create_local_app()
+        async with app.router.lifespan_context(app):
+            for name in _SHARED_STATE:
+                assert getattr(app.state, name) is not None
+        monkeypatch.setenv("DATABASE_URL", _url(readonly_path))
+        get_settings.cache_clear()
+        readonly = create_local_app(catalog_writes=False)
+        async with readonly.router.lifespan_context(readonly):
+            for name in _SHARED_STATE:
+                assert getattr(readonly.state, name) is not None
+    finally:
+        get_settings.cache_clear()

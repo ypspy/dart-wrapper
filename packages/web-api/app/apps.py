@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.adapters.dart_http import DartHttpClient
 from app.api.admin import catalog as admin_catalog
@@ -59,6 +59,30 @@ def _dart_client(settings: Settings) -> tuple[httpx.AsyncClient, DartHttpClient]
     return http_client, dart_http
 
 
+def _init_local_state(
+    app: FastAPI, engine: AsyncEngine, settings: Settings
+) -> tuple[async_sessionmaker[AsyncSession], httpx.AsyncClient]:
+    """세션·DART 클라이언트·수집기를 앱 상태에 붙인다.
+
+    HTTP 클라이언트는 수집기 생성보다 먼저 상태에 넣어, 뒤 단계가 실패해도
+    호출측이 닫을 수 있게 한다.
+    """
+    from app.adapters.node_entry_collector import NodeEntryCollector
+
+    http_client, dart_http = _dart_client(settings)
+    sessionmaker = create_sessionmaker(engine)
+    app.state.engine = engine
+    app.state.sessionmaker = sessionmaker
+    app.state.http_client = http_client
+    app.state.dart_http = dart_http
+    app.state.entry_collector = NodeEntryCollector(
+        settings.node_executable,
+        settings.entry_collector_script,
+        timeout_seconds=settings.collector_timeout_seconds,
+    )
+    return sessionmaker, http_client
+
+
 @asynccontextmanager
 async def public_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """DB와 열람용 DART 클라이언트만 연다."""
@@ -83,7 +107,6 @@ async def local_lifespan(app: FastAPI, *, catalog_writes: bool = True) -> AsyncI
 
     catalog_writes가 거짓이면 1층 스키마를 보강하지 않고 진행 중 수집 작업도 그대로 둔다.
     """
-    from app.adapters.node_entry_collector import NodeEntryCollector
     from app.repositories.job_repository import JobRepository
 
     settings: Settings = app.state.settings
@@ -98,17 +121,7 @@ async def local_lifespan(app: FastAPI, *, catalog_writes: bool = True) -> AsyncI
         return
 
     await ensure_schema(engine)
-    http_client, dart_http = _dart_client(settings)
-    sessionmaker = create_sessionmaker(engine)
-    app.state.engine = engine
-    app.state.sessionmaker = sessionmaker
-    app.state.http_client = http_client
-    app.state.dart_http = dart_http
-    app.state.entry_collector = NodeEntryCollector(
-        settings.node_executable,
-        settings.entry_collector_script,
-        timeout_seconds=settings.collector_timeout_seconds,
-    )
+    sessionmaker, http_client = _init_local_state(app, engine, settings)
     async with sessionmaker() as session:
         await JobRepository(session).abandon_orphans()
         await session.commit()
@@ -121,7 +134,6 @@ async def local_lifespan(app: FastAPI, *, catalog_writes: bool = True) -> AsyncI
 
 async def _prepare_readonly_catalog(app: FastAPI, engine: AsyncEngine, settings: Settings) -> None:
     """1층은 읽기만 확인한다. 실패하면 엔진과 HTTP 클라이언트를 닫고 예외를 다시 올린다."""
-    from app.adapters.node_entry_collector import NodeEntryCollector
     from app.repositories.job_repository import JobRepository
 
     http_client: httpx.AsyncClient | None = None
@@ -145,18 +157,10 @@ async def _prepare_readonly_catalog(app: FastAPI, engine: AsyncEngine, settings:
             "(RESEARCH_ALLOW_CATALOG_WRITES=false). "
             "스키마 보강과 작업 정리는 하지 않습니다."
         )
-        http_client, dart_http = _dart_client(settings)
-        sessionmaker = create_sessionmaker(engine)
-        app.state.engine = engine
-        app.state.sessionmaker = sessionmaker
-        app.state.http_client = http_client
-        app.state.dart_http = dart_http
-        app.state.entry_collector = NodeEntryCollector(
-            settings.node_executable,
-            settings.entry_collector_script,
-            timeout_seconds=settings.collector_timeout_seconds,
-        )
+        _sessionmaker, http_client = _init_local_state(app, engine, settings)
     except Exception:
+        if http_client is None:
+            http_client = getattr(app.state, "http_client", None)
         if http_client is not None:
             await http_client.aclose()
         await engine.dispose()
