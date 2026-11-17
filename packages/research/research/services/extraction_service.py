@@ -715,7 +715,7 @@ class ExtractionService:
 
         extracted_at은 마지막 성공 시각이 아니라 행 내용을 마지막으로 쓴 시각이다.
         실패 상태로 바뀌면 원래 추출(또는 첫 실패) 시각은 남지 않는다.
-        이미 fetch_failed인 행이 다시 실패하면 행이 바뀌지 않으므로 시각도 유지한다.
+        이미 fetch_failed인 재실패나, 결과 행이 ok로 그대로인 경우는 시각을 유지한다.
         """
         rcept_no = sample.rcept_no
         dcm_no = sample.dcm_no or ""
@@ -725,7 +725,12 @@ class ExtractionService:
             existing = await facts.get(rcept_no, dcm_no)
             prev_status = existing.fetch_status if existing is not None else None
             failed = _failed_fact(sample, existing)
-            if prev_status != "fetch_failed":
+            # 시각은 이전 상태가 아니라, 이번에 실제로 쓴 fetch_status를 본다.
+            # ok 행을 바꾸지 않고 돌려주면 extracted_at도 그대로 둔다.
+            wrote_new_failure = (
+                failed.fetch_status == "fetch_failed" and prev_status != "fetch_failed"
+            )
+            if wrote_new_failure:
                 failed.extracted_at = _now()
             await facts.upsert(failed)
             await ExtractionJobRepository(session).add_log(
