@@ -148,6 +148,8 @@ async def verify_catalog_schema(engine: AsyncEngine) -> None:
                 present.add(table)
             else:
                 missing.append(f"{table} 없음")
+        if not await table_exists(connection, "corps", dialect):
+            missing.append("corps 없음")
         for table, column, _sqlite_ddl, _postgres_ddl in _COLUMN_PATCHES:
             if table not in present:
                 continue

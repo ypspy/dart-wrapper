@@ -29,10 +29,21 @@ from tests.catalog_db_helpers import (
 )
 
 
+def _ensure_corps_table(path: Path) -> None:
+    """web-api create_all은 corps를 만들지 않으므로 존재 확인용 빈 테이블을 둔다."""
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("CREATE TABLE IF NOT EXISTS corps (corp_code VARCHAR(16) PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+
+
 async def test_verify_catalog_schema_passes_without_ddl(tmp_path: Path) -> None:
     """정상 스키마는 통과하고 sqlite_master와 파일 바이트는 그대로다."""
     path = tmp_path / "catalog.db"
     await build_catalog(path)
+    _ensure_corps_table(path)
     before_hash = file_sha256(path)
     before_master = master_rows(path)
 
@@ -104,6 +115,30 @@ async def test_verify_catalog_schema_missing_table_raises(tmp_path: Path) -> Non
     assert master_rows(path) == before_master
     assert file_sha256(path) == before_hash
     assert all(name != "slice_progress" for _type, name, _sql in master_rows(path))
+
+
+async def test_verify_catalog_schema_missing_corps_raises(tmp_path: Path) -> None:
+    """corps가 없으면 기동 확인이 실패하고 파일은 그대로다. 열은 보지 않는다."""
+    path = tmp_path / "no-corps.db"
+    await build_catalog(path)
+    _ensure_corps_table(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("DROP TABLE corps")
+        connection.commit()
+    finally:
+        connection.close()
+    before_hash = file_sha256(path)
+    before_master = master_rows(path)
+
+    engine = create_db_engine(url_for(path))
+    with pytest.raises(CatalogSchemaError, match="corps"):
+        await verify_catalog_schema(engine)
+    await engine.dispose()
+
+    assert file_sha256(path) == before_hash
+    assert master_rows(path) == before_master
+    assert all(name != "corps" for _type, name, _sql in master_rows(path))
 
 
 class _PresentRow:
@@ -383,6 +418,7 @@ async def test_local_and_readonly_lifespan_set_shared_state(
     default_path = tmp_path / "default.db"
     readonly_path = tmp_path / "readonly.db"
     await build_catalog(readonly_path)
+    _ensure_corps_table(readonly_path)
     monkeypatch.setenv("DART_LLM_ENABLED", "false")
     monkeypatch.setenv("OPENDART_API_KEY", "")
     monkeypatch.setenv("OPENDART_API_KEY_2", "")
