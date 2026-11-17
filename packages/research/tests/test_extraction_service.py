@@ -2257,6 +2257,102 @@ def _failing_transport() -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
+async def _run_with_extract_exception(
+    sessionmaker_fixture,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    mode: str,
+) -> int:
+    """_extract_document가 예외를 내게 하고, 호출 횟수를 돌려준다."""
+    calls = {"n": 0}
+
+    async def _raise_extract(
+        self: ExtractionService,
+        filing: list,
+        audit_entries: list,
+    ) -> AuditReportFact:
+        calls["n"] += 1
+        raise RuntimeError("추출 예외")
+
+    monkeypatch.setattr(ExtractionService, "_extract_document", _raise_extract)
+    service, client = _service(sessionmaker_fixture)
+    async with client:
+        job_id = await service.start("20200301", "20200331", ["F001"], mode)
+        await service.run_job(job_id)
+    assert job_id
+    return calls["n"]
+
+
+async def test_document_exception_keeps_extracted_at_when_already_failed(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_extract_document 예외는 _mark_document_failed를 지난다.
+
+    이미 fetch_failed인 행은 extracted_at을 유지한다.
+    """
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(_stamped_fact())
+        await session.commit()
+    calls = await _run_with_extract_exception(sessionmaker_fixture, monkeypatch, mode="extract")
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+    assert calls == 1
+    assert fact is not None
+    assert fact.fetch_status == "fetch_failed"
+    assert _as_utc(fact.extracted_at) == _OLD_EXTRACTED_AT
+
+
+async def test_document_exception_refreshes_extracted_at_on_ok_to_failed(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_extract_document 예외는 _mark_document_failed를 지난다.
+
+    ok 행이 fetch_failed로 바뀌면 extracted_at을 갱신한다.
+    """
+    started = datetime.now(timezone.utc)
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            _stamped_fact(fetch_status="ok", opinion_status="not_found")
+        )
+        await session.commit()
+    calls = await _run_with_extract_exception(sessionmaker_fixture, monkeypatch, mode="reparse")
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+    assert calls == 1
+    assert fact is not None
+    assert fact.fetch_status == "fetch_failed"
+    assert _as_utc(fact.extracted_at) >= started
+
+
+async def test_exception_keeps_extracted_at_when_ok_row_is_unchanged(
+    sessionmaker_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_extract_document 예외는 _mark_document_failed를 지난다.
+
+    _failed_fact가 ok 행을 그대로 돌려주면 extracted_at을 바꾸지 않는다.
+    """
+    await _seed_entries(sessionmaker_fixture, _f001_leaves())
+    async with sessionmaker_fixture() as session:
+        await FactRepository(session).upsert(
+            _stamped_fact(fetch_status="ok", opinion_status="not_found")
+        )
+        await session.commit()
+
+    def _leave_ok(_sample: object, existing: AuditReportFact | None) -> AuditReportFact | None:
+        return existing
+
+    monkeypatch.setattr("research.services.extraction_service._failed_fact", _leave_ok)
+    calls = await _run_with_extract_exception(sessionmaker_fixture, monkeypatch, mode="reparse")
+    async with sessionmaker_fixture() as session:
+        fact = await FactRepository(session).get("20200331000001", "11111")
+    assert calls == 1
+    assert fact is not None
+    assert fact.fetch_status == "ok"
+    assert _as_utc(fact.extracted_at) == _OLD_EXTRACTED_AT
+
+
 async def test_reextract_refreshes_extracted_at(sessionmaker_fixture) -> None:
     """fetch_failed 행을 다시 추출해 ok로 쓰면 extracted_at이 그 처리 시각이 된다."""
     started = datetime.now(timezone.utc)
