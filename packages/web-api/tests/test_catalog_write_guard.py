@@ -292,6 +292,19 @@ def test_assert_no_first_layer_write_blocks_file_pragmas(statement: str, name: s
     assert f": {name}." in str(caught.value)
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "DROP INDEX IF EXISTS ix_entries_rcept_no",
+        "DROP INDEX ix_extraction_jobs_status",
+    ],
+)
+def test_drop_index_always_blocked(statement: str) -> None:
+    """1층이든 2층이든 DROP INDEX는 인덱스 이름으로 막는다."""
+    with pytest.raises(CatalogWriteBlocked, match=r"\(DROP INDEX\)"):
+        assert_no_first_layer_write(statement)
+
+
 async def test_block_first_layer_writes_raises_inside_and_releases_after() -> None:
     """가드 안에서는 catalog_jobs 변경이 막히고, 밖에서는 같은 문이 실행된다."""
     engine = create_db_engine("sqlite+aiosqlite:///:memory:")

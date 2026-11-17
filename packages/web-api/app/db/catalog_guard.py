@@ -309,35 +309,11 @@ def _parse_drop(tokens: list[Token]) -> None:
 
 
 def _block_drop_index(name: str) -> None:
-    """DROP INDEX는 대상 테이블을 문장만으로 확정하기 어렵다.
-
-    1층 인덱스 이름이면 그 테이블로 막고, 판단이 안 되면 그대로 막는다.
-    """
+    """DROP INDEX는 대상 테이블과 상관없이 항상 막는다."""
     normalized = name.casefold()
-    table = _first_layer_index_table(normalized)
-    target = table if table is not None else normalized
     raise CatalogWriteBlocked(
-        "연구 추출 앱은 1층 테이블에 쓰지 않습니다: "
-        f"{target} (DROP INDEX). "
-        "인덱스 대상을 확인할 수 없으면 막습니다. " + _SEAWEED
+        "연구 추출 앱은 인덱스를 지우지 않습니다: " f"{normalized} (DROP INDEX). " + _SEAWEED
     )
-
-
-def _first_layer_index_table(name: str) -> str | None:
-    """인덱스 이름이 1층 자동 인덱스이거나 카탈로그 인덱스면 테이블을 돌려준다."""
-    for table in FIRST_LAYER_TABLES:
-        if name.startswith(f"sqlite_autoindex_{table}_"):
-            return table
-    from app.models import Base
-
-    for table_name in _CATALOG_TABLES:
-        table = Base.metadata.tables.get(table_name)
-        if table is None:
-            continue
-        for index in table.indexes:
-            if index.name and index.name.casefold() == name:
-                return table_name
-    return None
 
 
 def _main_after_with(tokens: list[Token]) -> list[Token]:
