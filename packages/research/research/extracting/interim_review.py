@@ -15,8 +15,26 @@ from research.extracting.text import compact
 
 INTERIM_EXTRACTOR_VERSION = "interim_review.v1"
 
-_CONCLUSION_HEADINGS = frozenset({"검토결론", "검토의견"})
-_STOP_HEADINGS = frozenset({"검토결론근거", "기타사항", "강조사항"})
+_CONCLUSION_HEADINGS = frozenset(
+    {"검토결론", "검토의견", "한정결론", "부적정결론", "결론표명거절", "의견거절"}
+)
+_HEADING_CODES = {
+    "한정결론": "qualified",
+    "부적정결론": "adverse",
+    "결론표명거절": "disclaimer",
+    "의견거절": "disclaimer",
+}
+_STOP_HEADINGS = frozenset(
+    {
+        "검토결론근거",
+        "기타사항",
+        "강조사항",
+        "한정결론근거",
+        "부적정결론근거",
+        "결론표명거절근거",
+        "한정의견근거",
+    }
+)
 _DATE_RE = re.compile(r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일")
 _RANGE_RE = re.compile(
     r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*부터\s*"
@@ -149,8 +167,8 @@ def _signature_zone(text: str, doc_kind: str | None) -> tuple[str, int]:
     return text[span[1] :], span[1]
 
 
-def _conclusion_body(text: str, doc_kind: str | None) -> str:
-    """결론 제목 다음 줄부터 다음 제목 또는 서명부 직전까지."""
+def _conclusion_parts(text: str, doc_kind: str | None) -> tuple[str, str]:
+    """결론 제목과, 그 다음 줄부터 다음 제목 또는 서명부 직전까지의 문단."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     start: int | None = None
     for index, line in enumerate(lines):
@@ -158,13 +176,18 @@ def _conclusion_body(text: str, doc_kind: str | None) -> str:
             start = index
             break
     if start is None:
-        return ""
+        return "", ""
     body: list[str] = []
     for line in lines[start + 1 :]:
         if _is_stop_heading(line) or _is_signature_line(line):
             break
         body.append(line)
-    return "\n".join(body).strip()
+    return lines[start], "\n".join(body).strip()
+
+
+def _conclusion_body(text: str, doc_kind: str | None) -> str:
+    """결론 제목 다음 줄부터 다음 제목 또는 서명부 직전까지."""
+    return _conclusion_parts(text, doc_kind)[1]
 
 
 def _calendar_iso(year: int, month: int, day: int) -> str | None:
@@ -213,13 +236,25 @@ def _reviewer(text: str, names: Sequence[str]) -> tuple[str | None, str | None, 
 
 
 def _conclusion(text: str, doc_kind: str | None) -> tuple[str | None, str, str]:
-    """검토결론 문단만 보고 unmodified/qualified/adverse/disclaimer/unknown을 나눈다."""
-    body = _conclusion_body(text, doc_kind)
-    if not compact(body):
+    """검토결론 문단만 보고 unmodified/qualified/adverse/disclaimer/unknown을 나눈다.
+
+    한정·부적정·표명거절 제목은 문단 문구보다 제목 자체가 코드를 정한다.
+    """
+    heading, body = _conclusion_parts(text, doc_kind)
+    heading_code = _HEADING_CODES.get(compact(heading))
+    if not compact(body) and heading_code is None:
         return None, "unknown", "not_found"
-    raw = body[:_CONCLUSION_LIMIT]
+    raw = (body or heading)[:_CONCLUSION_LIMIT]
+    if heading_code is not None:
+        return raw, heading_code, "ok"
     token = compact(body)
-    if "의견거절" in token or "결론표명하지않" in token or "결론을표명하지않" in token:
+    # 감사의견 표명 거절 문장은 검토 결론 거절이 아니다.
+    if "감사의견을표명하지아니" not in token and (
+        "의견거절" in token
+        or "결론표명하지않" in token
+        or "결론을표명하지않" in token
+        or "결론을표명하지아니" in token
+    ):
         return raw, "disclaimer", "ok"
     if "부적정결론" in token or "부적정의견" in token:
         return raw, "adverse", "ok"
@@ -298,17 +333,44 @@ def _resolved_range(start_iso: str, end_iso: str) -> str:
     )
 
 
+def _inclusive_months(start_iso: str, end_iso: str) -> int:
+    """시작 달부터 끝 달까지를 센다. 1월~6월은 6이다."""
+    start_on = date.fromisoformat(start_iso)
+    end_on = date.fromisoformat(end_iso)
+    return (end_on.year - start_on.year) * 12 + (end_on.month - start_on.month) + 1
+
+
 def _period(text: str, review_kind: str | None) -> tuple[str | None, str | None, str]:
-    """대상 재무제표 단락의 부터~까지, 없으면 기준일과 가장 긴 개월 수로 기간을 만든다."""
+    """대상 재무제표 단락의 부터~까지, 없으면 기준일과 가장 긴 개월 수로 기간을 만든다.
+
+    부터~까지가 여러 개면 가장 긴 누적 구간을 고른 뒤, 그 개월 수가 반기·분기와
+    맞는지 본다. 3개월만 있는 반기는 그 구간을 ok로 저장하지 않는다.
+    """
     scope = _scope_paragraph(text)
     if not scope:
         return None, None, "not_found"
-    ranged = _RANGE_RE.search(scope)
-    if ranged is not None:
+    ranges: list[tuple[int, int, str, str, str]] = []
+    for ranged in _RANGE_RE.finditer(scope):
         start = _calendar_iso(int(ranged.group(1)), int(ranged.group(2)), int(ranged.group(3)))
         end = _calendar_iso(int(ranged.group(4)), int(ranged.group(5)), int(ranged.group(6)))
-        if start and end:
-            return ranged.group(0), _resolved_range(start, end), "ok"
+        if not start or not end or start > end:
+            continue
+        start_on = date.fromisoformat(start)
+        end_on = date.fromisoformat(end)
+        ranges.append(
+            (
+                _inclusive_months(start, end),
+                (end_on - start_on).days,
+                ranged.group(0),
+                start,
+                end,
+            )
+        )
+    if ranges:
+        months, _days, raw, start, end = max(ranges, key=lambda item: (item[0], item[1]))
+        if not _months_match_kind(review_kind, months):
+            return raw, None, "ambiguous"
+        return raw, _resolved_range(start, end), "ok"
 
     current = _END_RE.search(scope)
     month_matches = list(_MONTHS_RE.finditer(scope))

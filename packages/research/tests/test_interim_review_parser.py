@@ -109,6 +109,9 @@ def test_responsibility_sentence_is_not_a_conclusion_heading() -> None:
     assert parsed.conclusion_code == "unmodified"
     assert parsed.conclusion_status == "ok"
     _assert_conclusion_paragraph_only(parsed.conclusion_raw)
+    assert parsed.conclusion_raw is not None
+    assert parsed.conclusion_raw.startswith("우리의 검토결과")
+    assert "표명하지 아니합니다" not in parsed.conclusion_raw
 
 
 def test_prior_period_qualified_mention_stays_unmodified() -> None:
@@ -167,3 +170,111 @@ def test_month_span_that_disagrees_with_review_kind_is_ambiguous() -> None:
     assert parsed.review_period_raw is not None
     assert "3개월" in parsed.review_period_raw
     assert "2025.04.01~2025.06.30" not in (parsed.review_period_raw or "")
+
+
+def test_half_only_short_calendar_range_is_ambiguous() -> None:
+    """반기 문서에 4월~6월 구간만 있으면 그 기간을 ok로 두지 않는다."""
+    html = """
+    <html><body>
+    <p>우리는 2025년 4월 1일부터 2025년 6월 30일까지의 반기재무제표를 검토하였습니다.</p>
+    </body></html>
+    """
+    parsed = parse_interim_review(html, review_kind="half")
+    assert parsed.review_period_status == "ambiguous"
+    assert parsed.review_period_resolved is None
+    assert parsed.review_period_raw == "2025년 4월 1일부터 2025년 6월 30일까지"
+
+
+def test_half_picks_longest_cumulative_range() -> None:
+    """3개월 구간과 6개월 구간이 있으면 누적 1월 1일~6월 30일을 고른다."""
+    html = """
+    <html><body>
+    <p>우리는 2025년 4월 1일부터 2025년 6월 30일까지 및
+    2025년 1월 1일부터 2025년 6월 30일까지의 재무제표를 검토하였습니다.</p>
+    </body></html>
+    """
+    parsed = parse_interim_review(html, review_kind="half")
+    assert parsed.review_period_status == "ok"
+    assert parsed.review_period_resolved == "2025.01.01~2025.06.30"
+
+
+def test_quarter_nine_month_calendar_range_is_ok() -> None:
+    """3분기 1월 1일부터 9월 30일까지는 누적 9개월로 인정한다."""
+    html = """
+    <html><body>
+    <p>우리는 2025년 1월 1일부터 2025년 9월 30일까지의 분기재무제표를 검토하였습니다.</p>
+    </body></html>
+    """
+    parsed = parse_interim_review(html, review_kind="quarter")
+    assert parsed.review_period_status == "ok"
+    assert parsed.review_period_resolved == "2025.01.01~2025.09.30"
+
+
+@pytest.mark.parametrize(
+    ("heading", "code"),
+    [
+        ("한정결론", "qualified"),
+        ("부적정결론", "adverse"),
+        ("결론표명거절", "disclaimer"),
+        ("의견거절", "disclaimer"),
+    ],
+)
+def test_special_conclusion_heading_sets_the_code(heading: str, code: str) -> None:
+    """한정·부적정·표명거절 제목 자체가 결론 코드를 정하고 근거 문단은 끊는다."""
+    html = f"""
+    <html><body>
+    <p>{heading}</p>
+    <p>결론 본문입니다.</p>
+    <p>강조사항</p>
+    <p>근거 문단은 결론에 넣지 않습니다.</p>
+    </body></html>
+    """
+    parsed = parse_interim_review(html)
+    assert parsed.conclusion_status == "ok"
+    assert parsed.conclusion_code == code
+    assert parsed.conclusion_raw is not None
+    assert parsed.conclusion_raw.startswith("결론 본문")
+    assert "근거 문단" not in parsed.conclusion_raw
+
+
+def test_standard_review_sentence_stays_unmodified() -> None:
+    """표준 검토결과 문장은 unmodified로 남는다."""
+    html = """
+    <html><body>
+    <p>검토결론</p>
+    <p>우리의 검토결과, 상기 재무제표가 중요성의 관점에서 한국채택국제회계기준에 따라
+    작성되지 않았다는 점이 발견되지 않았습니다.</p>
+    <p>한정의견근거</p>
+    <p>전기에는 한정의견이었습니다.</p>
+    </body></html>
+    """
+    parsed = parse_interim_review(html)
+    assert parsed.conclusion_code == "unmodified"
+    assert parsed.conclusion_status == "ok"
+    assert parsed.conclusion_raw is not None
+    assert "한정의견" not in parsed.conclusion_raw
+
+
+def test_refusal_to_express_conclusion_is_disclaimer() -> None:
+    """'결론을 표명하지 아니합니다'는 disclaimer다."""
+    html = """
+    <html><body>
+    <p>검토결론</p>
+    <p>우리는 결론을 표명하지 아니합니다.</p>
+    </body></html>
+    """
+    parsed = parse_interim_review(html)
+    assert parsed.conclusion_code == "disclaimer"
+    assert parsed.conclusion_status == "ok"
+
+
+def test_audit_opinion_refusal_sentence_is_not_a_review_disclaimer() -> None:
+    """'감사의견을 표명하지 아니합니다'만으로는 검토 결론 거절이 아니다."""
+    html = """
+    <html><body>
+    <p>검토결론</p>
+    <p>우리는 감사의견을 표명하지 아니합니다.</p>
+    </body></html>
+    """
+    parsed = parse_interim_review(html)
+    assert parsed.conclusion_code != "disclaimer"
