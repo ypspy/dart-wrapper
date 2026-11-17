@@ -7,7 +7,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.adapters.dart_http import DartHttpClient
@@ -17,7 +18,11 @@ from app.api.catalog import ui as catalog_ui
 from app.api.v1 import catalog as catalog_query
 from app.api.v1 import viewer
 from app.config import Settings, get_settings
-from app.db.catalog_guard import block_first_layer_writes, verify_catalog_schema
+from app.db.catalog_guard import (
+    CatalogWriteBlocked,
+    block_first_layer_writes,
+    verify_catalog_schema,
+)
 from app.db.session import create_db_engine, create_sessionmaker, ensure_schema
 from app.errors import register_exception_handlers
 
@@ -114,7 +119,8 @@ async def local_lifespan(app: FastAPI, *, catalog_writes: bool = True) -> AsyncI
     if not catalog_writes:
         await _prepare_readonly_catalog(app, engine, settings)
         try:
-            yield
+            with block_first_layer_writes(engine.sync_engine):
+                yield
         finally:
             await app.state.http_client.aclose()
             await engine.dispose()
@@ -198,6 +204,15 @@ def create_local_app(*, catalog_writes: bool = True) -> FastAPI:
 
     app = FastAPI(title="DART 공시 수집", version="0.1.0", lifespan=lifespan)
     register_exception_handlers(app)
+    if not catalog_writes:
+
+        @app.exception_handler(CatalogWriteBlocked)
+        async def catalog_write_blocked(
+            _request: Request, exc: CatalogWriteBlocked
+        ) -> JSONResponse:
+            """연구 앱에서 1층 쓰기가 막히면 403으로 돌려준다."""
+            return JSONResponse(status_code=403, content={"detail": str(exc)})
+
     app.include_router(admin_catalog.router)
     app.include_router(collect_ui.router)
     _read_routers(app)
