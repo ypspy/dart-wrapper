@@ -137,6 +137,66 @@ async def test_verify_catalog_schema_missing_table_raises(tmp_path: Path) -> Non
     assert all(name != "slice_progress" for _type, name, _sql in _master_rows(path))
 
 
+class _PresentRow:
+    """있음/없음만 돌려주는 가짜 조회 결과."""
+
+    def __init__(self, present: bool) -> None:
+        self._present = present
+
+    def first(self) -> tuple[int] | None:
+        if self._present:
+            return (1,)
+        return None
+
+
+class _PostgresConnection:
+    """information_schema 질의만 기록하는 가짜 Postgres 연결."""
+
+    def __init__(self, missing: set[str] | None = None) -> None:
+        self.dialect = type("Dialect", (), {"name": "postgresql"})()
+        self.statements: list[str] = []
+        self._missing = missing or set()
+
+    async def execute(self, statement: object, params: dict[str, str] | None = None) -> _PresentRow:
+        sql = str(statement)
+        self.statements.append(sql)
+        name = ""
+        if params:
+            name = params.get("name") or params.get("table") or ""
+        return _PresentRow(name not in self._missing)
+
+    async def __aenter__(self) -> "_PostgresConnection":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+class _PostgresEngine:
+    """connect()가 가짜 연결을 그대로 돌려주는 엔진."""
+
+    def __init__(self, connection: _PostgresConnection) -> None:
+        self._connection = connection
+
+    def connect(self) -> _PostgresConnection:
+        return self._connection
+
+
+async def test_verify_catalog_schema_postgres_branch_reads_only() -> None:
+    """Postgres 분기는 information_schema 읽기만 하고, 없는 테이블 이름을 오류에 담는다."""
+    connection = _PostgresConnection()
+    await verify_catalog_schema(_PostgresEngine(connection))  # type: ignore[arg-type]
+    assert connection.statements
+    for statement in connection.statements:
+        assert statement.startswith("SELECT 1 FROM information_schema.")
+        assert "table_schema = 'public'" in statement
+        assert_no_first_layer_write(statement)
+
+    missing = _PostgresConnection({"entries"})
+    with pytest.raises(CatalogSchemaError, match="entries"):
+        await verify_catalog_schema(_PostgresEngine(missing))  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(
     ("statement", "table", "operation"),
     [

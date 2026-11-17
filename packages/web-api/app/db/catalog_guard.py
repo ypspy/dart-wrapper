@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.db.session import (
     _CATALOG_TABLES,
     _COLUMN_PATCHES,
-    _column_exists,
-    _table_exists,
+    column_exists,
+    table_exists,
 )
 
 # 카탈로그 6개에 corps를 더한다. corps 모델은 연구 패키지에 있지만 1층으로 본다.
@@ -92,14 +92,14 @@ async def verify_catalog_schema(engine: AsyncEngine) -> None:
         dialect = connection.dialect.name
         present: set[str] = set()
         for table in _CATALOG_TABLES:
-            if await _table_exists(connection, table, dialect):
+            if await table_exists(connection, table, dialect):
                 present.add(table)
             else:
                 missing.append(f"{table} 없음")
         for table, column, _sqlite_ddl, _postgres_ddl in _COLUMN_PATCHES:
             if table not in present:
                 continue
-            if not await _column_exists(connection, table, column, dialect):
+            if not await column_exists(connection, table, column, dialect):
                 missing.append(f"{table}.{column} 없음")
     if not missing:
         return

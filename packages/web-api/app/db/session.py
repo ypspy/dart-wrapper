@@ -121,9 +121,9 @@ async def _add_column_if_missing(
     dialect: str,
 ) -> None:
     """테이블에 컬럼이 없으면 ALTER TABLE로 추가한다."""
-    if not await _table_exists(connection, table, dialect):
+    if not await table_exists(connection, table, dialect):
         return
-    if await _column_exists(connection, table, column, dialect):
+    if await column_exists(connection, table, column, dialect):
         return
 
     statement = text(f"ALTER TABLE {table} ADD COLUMN {column} {column_ddl}")
@@ -131,7 +131,7 @@ async def _add_column_if_missing(
     logger.info("스키마 보강: %s.%s 컬럼을 추가했습니다.", table, column)
 
 
-async def _table_exists(connection: AsyncConnection, table: str, dialect: str) -> bool:
+async def table_exists(connection: AsyncConnection, table: str, dialect: str) -> bool:
     """테이블 존재 여부를 확인한다."""
     if dialect == "sqlite":
         result = await connection.execute(
@@ -150,9 +150,7 @@ async def _table_exists(connection: AsyncConnection, table: str, dialect: str) -
     return result.first() is not None
 
 
-async def _column_exists(
-    connection: AsyncConnection, table: str, column: str, dialect: str
-) -> bool:
+async def column_exists(connection: AsyncConnection, table: str, column: str, dialect: str) -> bool:
     """컬럼 존재 여부를 확인한다."""
     if dialect == "sqlite":
         result = await connection.execute(text(f"PRAGMA table_info({table})"))
