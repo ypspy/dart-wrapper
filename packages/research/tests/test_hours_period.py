@@ -94,6 +94,43 @@ def test_n8_role_list_is_missing_without_type_error() -> None:
     assert [item.signal for item in broken_rows] == ["hours_total_missing"]
 
 
+def _unknown_metric_row(
+    source: list[dict[str, object]], metric_raw: str
+) -> list[dict[str, object]]:
+    """감사 행의 역할마다 모르는 지표 칸을 만든다. unmapped는 True다."""
+    return [
+        dict(cell, metric="other", metric_raw=metric_raw, raw="9", value=9, unmapped=True)
+        for cell in source
+        if cell["metric"] == "audit"
+    ]
+
+
+def test_n16_one_unknown_metric_row_stays_single_period() -> None:
+    """모르는 지표 행이 하나면 가드가 참이고 합계는 (100, 15)다."""
+    hours = single_period_hours(audit_total=100, headcount_total=15)
+    hours.extend(_unknown_metric_row(hours, "기타시간"))
+    assert len([cell for cell in hours if cell["metric"] == "other"]) == 6
+    assert is_single_period_hours(hours) is True
+    assert _hours_keys(hours) == (100, 15)
+
+
+def test_n17_two_unknown_metric_rows_are_rejected() -> None:
+    """모르는 지표 행이 둘이면 키가 겹쳐 가드가 거짓이고 합계 키는 (None, None)이다."""
+    hours = single_period_hours(audit_total=100, headcount_total=15)
+    hours.extend(_unknown_metric_row(hours, "기타시간"))
+    hours.extend(_unknown_metric_row(hours, "다른시간"))
+    assert is_single_period_hours(hours) is False
+    assert _hours_keys(hours) == (None, None)
+
+
+def test_n24_non_string_period_raw_is_rejected() -> None:
+    """period_raw가 0·False·[]이면 빈 값으로 보지 않고 가드가 거짓이다."""
+    for raw in (0, False, []):
+        hours = single_period_hours(audit_total=100, headcount_total=15)
+        hours[0]["period_raw"] = raw
+        assert is_single_period_hours(hours) is False
+
+
 def test_n9_role_raw_dict_is_missing_without_type_error() -> None:
     """같은 24칸에서 role_raw가 dict면 가드가 거짓이고 예외가 나지 않는다."""
     normal = single_period_hours(audit_total=100, headcount_total=15)

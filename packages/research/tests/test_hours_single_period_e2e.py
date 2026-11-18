@@ -373,6 +373,119 @@ def test_n7_prior_only_table_stays_missing() -> None:
     assert total["value"] == 90
 
 
+def _assert_accepted(html: str, index: int, keys: tuple[object, object]) -> list[dict[str, object]]:
+    """가드 참, 지정한 골드 키, 신호 없음, duplicate 없음."""
+    cells, guard, got, signals, duplicate = _read(html, index)
+    assert guard is True
+    assert got == keys
+    assert signals == []
+    assert duplicate is False
+    return cells
+
+
+_K1_TWO_FISCAL = """
+<html><body><table>
+<tr><td>구분</td><td>담당이사 제48기</td><td>담당이사 제47기</td><td>합계</td></tr>
+<tr><td>투입 인원수</td><td>1</td><td>2</td><td>3</td></tr>
+<tr><td>감사</td><td>80</td><td>100</td><td>180</td></tr>
+</table></body></html>
+"""
+
+_K4_ONE_FISCAL = """
+<html><body><table>
+<tr><td>구분</td><td>담당이사 제48기</td><td>등록공인회계사</td><td>합계</td></tr>
+<tr><td>투입 인원수</td><td>1</td><td>4</td><td>5</td></tr>
+<tr><td>감사</td><td>40</td><td>50</td><td>90</td></tr>
+</table></body></html>
+"""
+
+_K6_SPACED_FISCAL = """
+<html><body><table>
+<tr><td>구분</td><td>담당이사 제 48 기</td><td>등록공인회계사</td><td>합계</td></tr>
+<tr><td>투입 인원수</td><td>1</td><td>4</td><td>5</td></tr>
+<tr><td>감사</td><td>40</td><td>50</td><td>90</td></tr>
+</table></body></html>
+"""
+
+_K5_TWO_SPACED_FISCAL = """
+<html><body><table>
+<tr><td>구분</td><td>담당이사 제 48 기</td><td>담당이사 (제47기)</td><td>합계</td></tr>
+<tr><td>투입 인원수</td><td>1</td><td>2</td><td>3</td></tr>
+<tr><td>감사</td><td>80</td><td>100</td><td>180</td></tr>
+</table></body></html>
+"""
+
+_K3_SPECIALISTS = """
+<html><body><table>
+<tr><td>구분</td><td>전산감사 전문가</td><td>세무 전문가</td><td>합계</td></tr>
+<tr><td>투입 인원수</td><td>1</td><td>1</td><td>2</td></tr>
+<tr><td>감사</td><td>40</td><td>60</td><td>100</td></tr>
+</table></body></html>
+"""
+
+_K2_SUBTITLE_FISCAL = """
+<html><body><table>
+<tr>
+  <td rowspan="2">구분</td>
+  <td>담당이사</td><td>등록공인회계사</td><td>합계</td>
+</tr>
+<tr><td>제47기</td><td>제47기</td><td>제47기</td></tr>
+<tr><td>투입 인원수</td><td>1</td><td>4</td><td>5</td></tr>
+<tr><td>감사</td><td>40</td><td>50</td><td>90</td></tr>
+</table></body></html>
+"""
+
+
+def test_n18_two_fiscal_marks_in_role_raw_are_missing() -> None:
+    """담당이사 제48기·제47기와 합계가 있으면 missing이다."""
+    cells = _assert_missing(_K1_TWO_FISCAL, 21)
+    raws = {cell["role_raw"] for cell in cells}
+    assert "담당이사 제48기" in raws
+    assert "담당이사 제47기" in raws
+    total = next(cell for cell in cells if cell["role"] == "total" and cell["metric"] == "audit")
+    assert total["value"] == 180
+
+
+def test_n19_one_fiscal_mark_in_role_raw_is_missing() -> None:
+    """기수가 한 종류(담당이사 제48기)여도 missing이다."""
+    cells = _assert_missing(_K4_ONE_FISCAL, 22)
+    assert any(cell["role_raw"] == "담당이사 제48기" for cell in cells)
+    total = next(cell for cell in cells if cell["role"] == "total" and cell["metric"] == "audit")
+    assert total["value"] == 90
+
+
+def test_n20_spaced_fiscal_mark_is_missing() -> None:
+    """「제 48 기」처럼 공백이 있어도 공백을 빼고 보면 missing이다."""
+    cells = _assert_missing(_K6_SPACED_FISCAL, 23)
+    assert any(cell["role_raw"] == "담당이사 제 48 기" for cell in cells)
+
+
+def test_n21_two_spaced_fiscal_marks_are_missing() -> None:
+    """띄어 쓴 제48기와 괄호 안 제47기가 같이 있으면 missing이다."""
+    cells = _assert_missing(_K5_TWO_SPACED_FISCAL, 24)
+    raws = {cell["role_raw"] for cell in cells}
+    assert "담당이사 제 48 기" in raws
+    assert "담당이사 (제47기)" in raws
+
+
+def test_n22_distinct_specialist_headers_stay_single_period() -> None:
+    """전산감사·세무처럼 기수가 없는 다른 원문은 가드가 참이고 합계는 (100, 2)다."""
+    cells = _assert_accepted(_K3_SPECIALISTS, 25, (100, 2))
+    assert {cell["role_raw"] for cell in cells} == {"전산감사 전문가", "세무 전문가", "합계"}
+
+
+def test_n23_subtitle_only_fiscal_mark_stays_single_period() -> None:
+    """소제목 행의 제47기만 있는 표는 가드가 참이다.
+
+    추출기 후속 전까지의 알려진 한계다. 칸의 role_raw에는 기수가 남지 않는다.
+    추출기를 고치면 이 기대값을 바꿔야 한다.
+    """
+    cells = _assert_accepted(_K2_SUBTITLE_FISCAL, 26, (90, 5))
+    assert {cell["role_raw"] for cell in cells} == {"담당이사", "등록공인회계사", "합계"}
+    assert {cell["period"] for cell in cells} == {"unknown"}
+    assert all("제" not in str(cell["role_raw"]) for cell in cells)
+
+
 def test_n14_equal_unlabeled_colspan_totals_stay_missing() -> None:
     """colspan 무라벨 2열은 감사 합계가 100/100으로 같아도 missing이다."""
     html = _UNLABELED_COLSPAN.replace("<td>100</td><td>90</td>", "<td>100</td><td>100</td>", 1)
