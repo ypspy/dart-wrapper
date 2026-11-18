@@ -4,6 +4,14 @@ import pytest
 
 from research.extracting.subsidiaries import extract_subsidiaries
 
+_A001_OK = """
+<p>계열회사의 현황</p>
+<table>
+<tr><td>회사명</td><td>관계</td></tr>
+<tr><td>갑</td><td>종속회사</td></tr>
+</table>
+"""
+
 
 def _notes(table: str, heading: str = "(2) 당기말 현재 종속기업의 현황은 다음과 같습니다.") -> str:
     return f"<html><body><p>{heading}</p>{table}</body></html>"
@@ -65,6 +73,98 @@ def test_s3_two_row_header_with_subcolumns() -> None:
     assert (result.count, result.status) == (2, "ok")
 
 
+# S4·S5·S6: 원문 #54 형태. 한 행이 여러 회사를 묶음(「… 외 57개 (주2)」).
+BUNDLED = """
+<table border="1">
+<tr><th>종속기업명</th><th>소재지</th><th>지분율</th></tr>
+<tr><td>가상H㈜ (주2, 3)</td><td>대한민국</td><td>33.40%</td></tr>
+<tr><td>{name}</td><td>파나마</td><td>100.00%</td></tr>
+<tr><td>가상J Ltd.</td><td>홍콩</td><td>100.00%</td></tr>
+</table>
+"""
+
+
+def test_s4_bundled_row_is_ambiguous() -> None:
+    result = _run(_notes(BUNDLED.format(name="가상I Shipholding S.A. 외 57개 (주2)")))
+    assert (result.count, result.status, result.source) == (None, "ambiguous", "notes")
+
+
+def test_s5_bundled_row_does_not_fall_back_to_a001() -> None:
+    html = _notes(BUNDLED.format(name="가상I Shipholding S.A. 외 57개 (주2)"))
+    result = _run(html, a001=_A001_OK)
+    assert (result.count, result.status, result.source) == (None, "ambiguous", "notes")
+
+
+@pytest.mark.parametrize("name", ["가상K㈜ 외 3개사", "가상L 투자조합 등 2개"])
+def test_s6_bundled_row_variants_are_ambiguous(name: str) -> None:
+    result = _run(_notes(BUNDLED.format(name=name)))
+    assert (result.count, result.status) == (None, "ambiguous")
+
+
+def test_s17_name_with_oe_but_no_bundle_is_counted() -> None:
+    """「해외 2호」처럼 개수 표기가 아닌 이름은 묶음 행이 아니다."""
+    result = _run(_notes(BUNDLED.format(name="가상해외 2호 투자조합")))
+    assert (result.count, result.status) == (3, "ok")
+
+
+# S7: 원문 20170323000219 형태. 3줄 헤더 뒤 전 칸 colspan 그룹 구분행 [국내]/[해외].
+GROUP_ROWS_BRACKET = """
+<table border="1">
+<tr><th rowspan="2">종속기업명</th><th rowspan="2">업 종</th><th colspan="2">지분율(%)</th></tr>
+<tr><th>지배기업 보유지분</th><th>합 계</th></tr>
+<tr><td colspan="4">[국내]</td></tr>
+<tr><td>가상M㈜</td><td>건설</td><td>52.80</td><td>52.80</td></tr>
+<tr><td>가상N㈜</td><td>판매</td><td>95.30</td><td>95.30</td></tr>
+<tr><td colspan="4">[해외]</td></tr>
+<tr><td>가상O Co., Ltd.</td><td>제조</td><td>100.00</td><td>100.00</td></tr>
+</table>
+"""
+
+
+def test_s7_bracket_group_rows_are_not_counted() -> None:
+    result = _run(_notes(GROUP_ROWS_BRACKET))
+    assert (result.count, result.status) == (3, "ok")
+
+
+# S8: 원문 20170330001518 형태. 「갑은행의 종속기업」 행(다른 칸 공란).
+GROUP_ROWS_PARENT = """
+<table border="1">
+<tr><th>회사명</th><th>국가</th><th>주요사업</th><th>지분율(%)</th></tr>
+<tr><td>가상은행의 종속기업</td><td></td><td></td><td></td></tr>
+<tr><td>가상P유한공사</td><td>중국</td><td>은행업</td><td>100.0</td></tr>
+<tr><td>가상Q 신탁</td><td>대한민국</td><td>집합투자기구</td><td>100.0</td></tr>
+<tr><td>가상R Inc.의 종속기업</td><td></td><td></td><td></td></tr>
+<tr><td>가상S Corp.</td><td>미국</td><td>특수목적회사</td><td>100.0</td></tr>
+</table>
+"""
+
+
+def test_s8_parent_group_rows_are_not_counted() -> None:
+    result = _run(_notes(GROUP_ROWS_PARENT))
+    assert (result.count, result.status) == (3, "ok")
+
+
+def test_s9_unknown_name_only_row_is_ambiguous() -> None:
+    html = _notes(GROUP_ROWS_PARENT.replace("가상은행의 종속기업", "비고: 아래 회사는 당기 신규"))
+    result = _run(html)
+    assert (result.count, result.status) == (None, "ambiguous")
+
+
+# S10: 둘째 헤더 줄에 rowspan이 없어 이름 칸이 빈 경우(구조를 확정할 수 없음).
+TWO_ROW_HEADER_NO_ROWSPAN = """
+<table border="1">
+<tr><th>종속기업명</th><th>소재지</th><th colspan="2">지분율(%)</th></tr>
+<tr><th></th><th></th><th>당기말</th><th>전기말</th></tr>
+<tr><td>가상T㈜</td><td>대한민국</td><td>100.00</td><td>100.00</td></tr>
+</table>
+"""
+
+
+def test_s10_empty_name_cell_is_ambiguous() -> None:
+    result = _run(_notes(TWO_ROW_HEADER_NO_ROWSPAN))
+    assert (result.count, result.status) == (None, "ambiguous")
+
+
 # S11: 원문 20170323000219 주석 첫머리 형태. 「…와 그 종속기업」 제목 표가 먼저 나온다.
 TITLE_TABLE = """
 <table><tr><td>가상주식회사와 그 종속기업</td></tr><tr><td></td></tr>
@@ -76,6 +176,23 @@ def test_s11_title_table_is_skipped() -> None:
     html = f"<html><body>{TITLE_TABLE}<p>(2) 종속기업의 현황</p>{TWO_ROW_HEADER}</body></html>"
     result = _run(html)
     assert (result.count, result.status) == (3, "ok")
+
+
+# S12: 원문 20170208000026 형태. 구분/내용 세로형 개요 표(회사명이 본문 행 라벨).
+KEY_VALUE = """
+<table border="1">
+<tr><th>구 분</th><th>내 용</th></tr>
+<tr><td>회 사 명</td><td>가상U 주식회사</td></tr>
+<tr><td>설립연월일</td><td>2015년 12월 04일</td></tr>
+<tr><td>본점소재지</td><td>서울특별시</td></tr>
+</table>
+"""
+
+
+def test_s12_key_value_overview_table_is_ambiguous() -> None:
+    html = _notes(KEY_VALUE, heading="1-1. 지배기업 및 종속기업의 개요")
+    result = _run(html)
+    assert (result.count, result.status) == (None, "ambiguous")
 
 
 # S13: 원문 20160412001705(전체 문서 입력) 형태. 헤더 힌트 없는 표(서명란 등)는 세지 않는다.

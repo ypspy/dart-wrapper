@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from bs4 import BeautifulSoup, Tag
@@ -14,6 +15,11 @@ _KIND_HEADERS = ("구분", "관계", "기업구분")
 _NAME_HEADERS = ("회사명", "기업명", "종속기업명", "법인명")
 _NOTES_MARKER = "주석 "
 _UNIT_BANNER_MARKERS = ("단위", "당기", "전기")
+_BUNDLE_ROW = re.compile(r"(?:외|등|기타)\d+(?:개|社|곳)")
+_GROUP_LABEL = re.compile(
+    r"^(?:\[.+\]|<.+>|〈.+〉|\(.+\)|국내|해외|국내법인|해외법인|.+의?종속(?:기업|회사)|.+자회사)$"
+)
+
 
 # 헤더 칸 전체가 이 값이면 이름 열로 본다(제목 문장 속 「…와 그 종속기업」은 칸 전체가 아니라 제외).
 _NAME_CELLS = (
@@ -25,6 +31,10 @@ _NAME_CELLS = (
     "회사",
     "법인",
 )
+
+
+class _Ambiguous(Exception):
+    """선택한 표를 확정해 셀 수 없음(추측하지 않음)."""
 
 
 @dataclass(frozen=True)
@@ -132,6 +142,20 @@ def _hint_columns(header: list[str]) -> list[int]:
     ]
 
 
+def _is_name_cell(cell: str) -> bool:
+    """칸이 회사명 힌트이거나 칸 전체가 이름 헤더인지 본다."""
+    token = compact(cell)
+    return any(h in token for h in _NAME_HEADERS) or token in _NAME_CELLS
+
+
+def _name_column(header: list[str]) -> int | None:
+    """헤더에서 이름 열의 첫 위치를 반환한다. 없으면 None."""
+    for i, c in enumerate(header):
+        if c != "#" and _is_name_cell(c):
+            return i
+    return None
+
+
 def _is_header_continuation(row: list[str], header: list[str], cols: list[int]) -> bool:
     """헤더 힌트 칸이 rowspan으로 복제된 행(다단 헤더의 아랫줄)."""
     return any(i < len(row) and compact(row[i]) == compact(header[i]) for i in cols)
@@ -190,6 +214,7 @@ def _count_table(table: Tag, *, require_kind: bool) -> int | None:
     body = matrix[header_index + 1 :]
     while body and _is_header_continuation(body[0], header, hint_cols):
         body = body[1:]
+    name_index = _name_column(header)
     kind_index = _kind_column(header, body)
     if require_kind and kind_index is None:
         return None
@@ -199,6 +224,19 @@ def _count_table(table: Tag, *, require_kind: bool) -> int | None:
     for row in body:
         if _is_skip_row(row):
             continue
+        if any(c != "#" and any(h in compact(c) for h in _NAME_HEADERS) for c in row):
+            raise _Ambiguous("name_label_in_body")
+        if name_index is not None:
+            name = compact(row[name_index]) if name_index < len(row) else ""
+            if _BUNDLE_ROW.search(name):
+                raise _Ambiguous("bundle_row")
+            others = [compact(c) for i, c in enumerate(row) if i != name_index and c != "#"]
+            if not name:
+                raise _Ambiguous("empty_name")
+            if len(row) > 1 and all(not o or o == name for o in others):
+                if _GROUP_LABEL.match(name):
+                    continue
+                raise _Ambiguous("label_like_row")
         body_rows += 1
         if kind_index is not None:
             kind = row[kind_index] if kind_index < len(row) else ""
@@ -236,20 +274,26 @@ def extract_subsidiaries(
         return SubsidiaryResult(None, "not_applicable", None)
 
     if notes_html:
-        count = _count_from_html(
-            notes_html,
-            require_kind=False,
-            notes_mode=True,
-        )
+        try:
+            count = _count_from_html(
+                notes_html,
+                require_kind=False,
+                notes_mode=True,
+            )
+        except _Ambiguous:
+            return SubsidiaryResult(None, "ambiguous", "notes")
         if count is not None:
             return SubsidiaryResult(count, "ok", "notes")
 
     if a001_html:
-        count = _count_from_html(
-            a001_html,
-            require_kind=True,
-            notes_mode=False,
-        )
+        try:
+            count = _count_from_html(
+                a001_html,
+                require_kind=True,
+                notes_mode=False,
+            )
+        except _Ambiguous:
+            return SubsidiaryResult(None, "ambiguous", "a001")
         if count is not None:
             return SubsidiaryResult(count, "ok", "a001")
 
