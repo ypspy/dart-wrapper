@@ -160,10 +160,10 @@ def test_hours_total_duplicate_two_current_totals_regression() -> None:
     )
 
 
-def test_single_period_two_distinct_total_columns_is_duplicate() -> None:
-    """단일 기간에서 합계 원문이 둘이면 duplicate이고 missing이 아니다.
+def test_single_period_two_distinct_total_columns_is_missing() -> None:
+    """단일 기간에서 합계 원문이 둘이면 가드가 거짓이고 missing이다.
 
-    의도된 한계, README 한계 1·2 참조.
+    r3에서 기대값 변경(검토 중간 1·2).
     """
     hours = single_period_hours(audit_total=100)
     hours.append(
@@ -181,12 +181,8 @@ def test_single_period_two_distinct_total_columns_is_duplicate() -> None:
     )
     fact = view(2, hours=hours, hours_status="ok")
     candidates, summary = numeric_candidates([fact], set())
-    assert not any(item.signal == "hours_total_missing" for item in candidates)
-    assert not any(item.rcept_no == fact.rcept_no for item in candidates)
-    assert any(
-        row.section == "skip" and row.key == "hours_total_duplicate" and row.n == 1
-        for row in summary
-    )
+    assert [(item.signal, item.raw_value) for item in candidates] == [("hours_total_missing", "")]
+    assert not any(row.key == "hours_total_duplicate" for row in summary)
 
 
 def test_current_prior_format_keeps_current_total_signal() -> None:
@@ -318,11 +314,14 @@ def test_table_without_total_role_is_missing() -> None:
     assert _edge(hours) == (True, (None, None), ["hours_total_missing"], [])
 
 
-def test_one_unmapped_audit_cell_stays_single_period() -> None:
-    """남는 unmapped audit 칸이 1개면 가드가 참이고 합계 신호는 없다."""
+def test_one_unmapped_audit_cell_is_missing() -> None:
+    """남는 unmapped audit 칸이 1개여도 가드가 거짓이고 missing이다.
+
+    r3에서 기대값 변경(검토 중간 1·2).
+    """
     hours = single_period_hours(audit_total=100, headcount_total=15)
     hours.append(_unmapped_audit())
-    assert _edge(hours) == (True, (100, 15), [], [])
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
 
 
 def test_two_unmapped_audit_cells_are_missing() -> None:

@@ -21,9 +21,12 @@ def _prepare(
     *,
     old_hours: list[dict[str, object]],
     new_hours: list[dict[str, object]],
-    gold_value: dict[str, Any],
+    gold_value: dict[str, Any] | None,
 ) -> sqlite3.Connection:
-    """임시 gold.db에 실행·표본·v19/v20 스냅샷·hours 라벨을 넣는다."""
+    """임시 gold.db에 실행·표본·v19/v20 스냅샷·hours 라벨을 넣는다.
+
+    gold_value가 None이면 gold UI의 맞음 저장과 같이 SQL NULL을 넣는다.
+    """
     conn = open_gold(tmp_path / "gold.db", None)
     migrate(conn)
     now = datetime.now(timezone.utc).isoformat()
@@ -67,7 +70,7 @@ def _prepare(
         ) VALUES ('R1', 'D1', 'hours', 'table', 'prefill', 'correct', ?, ?, ?, '', ?)
         """,
         (
-            json.dumps(gold_value, ensure_ascii=False),
+            None if gold_value is None else json.dumps(gold_value, ensure_ascii=False),
             json.dumps(old_hours, ensure_ascii=False),
             _OLD,
             now,
@@ -81,6 +84,22 @@ def _other_cell_changed() -> list[dict[str, object]]:
     """합계가 아닌 첫 칸만 바꾼 단일 기간 표를 돌려준다."""
     hours = single_period_hours()
     hours[0] = dict(hours[0], raw="2", value=2)
+    return hours
+
+
+def _two_totals(
+    *,
+    left_audit: int = 100,
+    right_audit: int = 90,
+    left_headcount: int = 15,
+    right_headcount: int = 14,
+) -> list[dict[str, object]]:
+    """「합계」와 「합 계」 두 열. 감사·인원 합계를 각각 두 칸으로 둔다."""
+    hours = single_period_hours(audit_total=left_audit, headcount_total=left_headcount)
+    audit = next(cell for cell in hours if cell["role"] == "total" and cell["metric"] == "audit")
+    head = next(cell for cell in hours if cell["role"] == "total" and cell["metric"] == "headcount")
+    hours.append(dict(audit, role_raw="합 계", value=right_audit, raw=str(right_audit)))
+    hours.append(dict(head, role_raw="합 계", value=right_headcount, raw=str(right_headcount)))
     return hours
 
 
@@ -192,3 +211,66 @@ def test_score_table_bundle_uses_verdict_not_hours_keys(tmp_path: Path) -> None:
     ).fetchone()
     assert row is not None
     assert row[0] == "tp"
+
+
+def test_n10_single_to_two_totals_with_null_gold_is_fp(tmp_path: Path) -> None:
+    """단일 100/15가 합계 100과 합 계 90이 되면 키가 사라져 FP이고 큐는 0이다.
+
+    gold_value는 SQL NULL이다. current 표에서 합계가 사라질 때의 master 의미와 같다.
+    """
+    conn = _prepare(
+        tmp_path,
+        old_hours=single_period_hours(audit_total=100, headcount_total=15),
+        new_hours=_two_totals(),
+        gold_value=None,
+    )
+    stored = conn.execute("SELECT gold_value FROM gold_labels").fetchone()
+    assert stored is not None
+    assert stored[0] is None
+    assert _carry(conn) == ("fp", 0)
+
+
+def test_n11_left_total_change_with_null_gold_stays_queued(tmp_path: Path) -> None:
+    """두 합계에서 왼쪽 감사만 80으로 바뀌면 키가 둘 다 없어 abstain, 큐 1이다."""
+    conn = _prepare(
+        tmp_path,
+        old_hours=_two_totals(),
+        new_hours=_two_totals(left_audit=80),
+        gold_value=None,
+    )
+    assert _carry(conn) == ("abstain", 1)
+
+
+def test_n12_right_total_change_with_null_gold_is_queued(tmp_path: Path) -> None:
+    """두 합계에서 오른쪽 감사만 70으로 바뀌면 abstain, 큐 1이다."""
+    conn = _prepare(
+        tmp_path,
+        old_hours=_two_totals(),
+        new_hours=_two_totals(right_audit=70),
+        gold_value=None,
+    )
+    assert _carry(conn) == ("abstain", 1)
+
+
+def test_n13_nontotal_change_on_two_totals_with_null_gold_is_queued(tmp_path: Path) -> None:
+    """두 합계는 유지하고 비합계 칸만 바꾸면 abstain, 큐 1이다."""
+    changed = _two_totals()
+    changed[0] = dict(changed[0], raw="2", value=2)
+    conn = _prepare(
+        tmp_path,
+        old_hours=_two_totals(),
+        new_hours=changed,
+        gold_value=None,
+    )
+    assert _carry(conn) == ("abstain", 1)
+
+
+def test_n15_label_matches_new_total_is_queued(tmp_path: Path) -> None:
+    """라벨 정답이 이전 표와 다르고 새 표와 같으면 abstain, 큐 1이다."""
+    conn = _prepare(
+        tmp_path,
+        old_hours=single_period_hours(audit_total=100, headcount_total=15),
+        new_hours=single_period_hours(audit_total=90, headcount_total=15),
+        gold_value={"verdict": "correct", "audit_hours": 90, "headcount": 15},
+    )
+    assert _carry(conn) == ("abstain", 1)

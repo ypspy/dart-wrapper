@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from hours_period_samples import single_period_hours
 from research.extracting.hours_period import is_single_period_hours, total_cells
+from research.gold.scoring import _hours_keys
+from research.reviewing.candidates import numeric_candidates
+from test_reviewing_candidates import view
 
 
 def test_single_period_24_cells_accepts_unknown_total() -> None:
@@ -71,3 +74,36 @@ def test_non_dict_element_blocks_single_period() -> None:
     hours.append("칸아님")
     assert is_single_period_hours(hours) is False
     assert is_single_period_hours(["칸아님"]) is False
+
+
+def test_n8_role_list_is_missing_without_type_error() -> None:
+    """한 칸의 role이 리스트면 가드가 거짓이고 후보 계산이 예외 없이 끝난다.
+
+    정상 fact는 신호가 없고, 그 fact는 missing 1건이다. _hours_keys는 (None, None)이다.
+    """
+    normal = single_period_hours(audit_total=100, headcount_total=15)
+    broken = single_period_hours(audit_total=100, headcount_total=15)
+    broken[0]["role"] = ["qcr"]
+    assert is_single_period_hours(broken) is False
+    assert _hours_keys(broken) == (None, None)
+    normal_fact = view(81, hours=normal, hours_status="ok")
+    broken_fact = view(82, hours=broken, hours_status="ok")
+    candidates, _summary = numeric_candidates([normal_fact, broken_fact], set())
+    assert [item for item in candidates if item.rcept_no == normal_fact.rcept_no] == []
+    broken_rows = [item for item in candidates if item.rcept_no == broken_fact.rcept_no]
+    assert [item.signal for item in broken_rows] == ["hours_total_missing"]
+
+
+def test_n9_role_raw_dict_is_missing_without_type_error() -> None:
+    """같은 24칸에서 role_raw가 dict면 가드가 거짓이고 예외가 나지 않는다."""
+    normal = single_period_hours(audit_total=100, headcount_total=15)
+    broken = single_period_hours(audit_total=100, headcount_total=15)
+    broken[0]["role_raw"] = {"raw": "제47기"}
+    assert is_single_period_hours(broken) is False
+    assert _hours_keys(broken) == (None, None)
+    normal_fact = view(83, hours=normal, hours_status="ok")
+    broken_fact = view(84, hours=broken, hours_status="ok")
+    candidates, _summary = numeric_candidates([normal_fact, broken_fact], set())
+    assert [item for item in candidates if item.rcept_no == normal_fact.rcept_no] == []
+    broken_rows = [item for item in candidates if item.rcept_no == broken_fact.rcept_no]
+    assert [item.signal for item in broken_rows] == ["hours_total_missing"]

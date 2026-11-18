@@ -69,16 +69,15 @@ def test_hours_keys_duplicate_role_columns_returns_none() -> None:
     assert _hours_keys(table) == (None, None)
 
 
-def test_hours_keys_distinct_total_columns_keep_last_and_queue_duplicate() -> None:
-    """단일 기간에서 role_raw가 다른 합계 2열이면 골드는 마지막 값이고 큐는 duplicate다.
+def test_hours_keys_distinct_total_columns_return_none_and_missing() -> None:
+    """단일 기간에서 role_raw가 다른 합계 2열이면 골드는 (None, None)이고 큐는 missing이다.
 
-    합계가 여러 칸이면 _hours_keys는 마지막 값을 쓴다. 큐(검토 신호)와
-    골드(채점 키)는 목적이 다르다.
+    r3에서 기대값 변경(검토 중간 1·2).
     """
     table = single_period_hours(audit_total=100, headcount_total=15)
     total = next(cell for cell in table if cell["role"] == "total" and cell["metric"] == "audit")
     table.append(dict(total, role_raw="합 계", value=120, raw="120"))
-    assert _hours_keys(table) == (120, 15)
+    assert _hours_keys(table) == (None, None)
     fact = FactView(
         rcept_no="R-HOURS-2",
         dcm_no="D1",
@@ -88,8 +87,5 @@ def test_hours_keys_distinct_total_columns_keep_last_and_queue_duplicate() -> No
         hours_status="ok",
     )
     candidates, summary = numeric_candidates([fact], set())
-    assert [item.signal for item in candidates if item.bundle == "hours"] == []
-    assert any(
-        row.section == "skip" and row.key == "hours_total_duplicate" and row.n == 1
-        for row in summary
-    )
+    assert [item.signal for item in candidates if item.bundle == "hours"] == ["hours_total_missing"]
+    assert not any(row.key == "hours_total_duplicate" for row in summary)
