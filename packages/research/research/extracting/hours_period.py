@@ -71,18 +71,21 @@ r5 확장 조건: 골드 스냅샷 446건에서 판정 변화 0건, 넓은 기�
 from __future__ import annotations
 
 import re
+import unicodedata
 
-# 공백과 폭 없는 문자. 비교 전에 지운다. \d는 전각 숫자도 잡는다.
-_INVISIBLE = re.compile("[\\s\u200b-\u200d\u2060\ufeff]+")
+# 추출기 compact와 같은 공백 패턴. 비교 전에 이것과 서식 문자(Cf)를 지운다.
+# Cf에는 U+00AD·U+200B–U+200F·U+2060–U+2064·U+FEFF가 들어간다.
+# \d는 전각 숫자도 잡는다.
+_SPACE = re.compile(r"\s+")
 _FISCAL_MARK = re.compile(r"(?:제|第)?\d+(?:기|期)")
 _PERIOD_WORD = re.compile(r"당기|전기")
 
 
 def _plain(value: object) -> str:
-    """비교 전에 공백과 폭 없는 문자를 지운다. 문자열이 아니면 빈 문자열이다."""
+    """비교 전에 공백(compact와 같음)과 서식 문자(Cf)를 지운다. 문자열이 아니면 빈 문자열이다."""
     if not isinstance(value, str):
         return ""
-    return _INVISIBLE.sub("", value)
+    return "".join(ch for ch in _SPACE.sub("", value) if unicodedata.category(ch) != "Cf")
 
 
 def is_single_period_hours(hours: object) -> bool:
@@ -123,8 +126,8 @@ def is_single_period_hours(hours: object) -> bool:
         #    숫자가 없는 「기」(분·반기검토, 현장감사수행시기)는 거절하지 않는다.
         if any(_FISCAL_MARK.search(_plain(value)) for value in (role_raw, metric_raw, raw)):
             return False
-        # 8. 행 라벨의 당기/전기. 라벨 열(모서리)에만 있으면 칸에 남지 않는다.
-        if _PERIOD_WORD.search(_plain(metric_raw)):
+        # 8. 역할 원문·행 라벨·칸 원문의 당기/전기. 추출기가 못 본 숨은 문자 변형도 잡는다.
+        if any(_PERIOD_WORD.search(_plain(value)) for value in (role_raw, metric_raw, raw)):
             return False
         # 4. 역할을 모르는 열. unmapped가 아니라 role로 판단한다.
         if role == "other":
