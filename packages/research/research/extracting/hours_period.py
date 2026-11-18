@@ -6,6 +6,18 @@ unknown을 무조건 당기(current)로 보지 않는다.
 1. 당기/전기 표시가 없다. 모든 칸의 period가 unknown이고 period_raw가 비어 있다.
 2. 기간이 섞여 있지 않다. current 또는 prior 칸이 없다.
 3. 역할당 열이 하나다. (role, role_raw, metric) 키가 각각 한 번만 나온다.
+
+한계:
+
+1. colspan으로 역할당 열이 2개인 무라벨 표는 가드가 거짓이다. 당기 합계가
+   없으므로 hours_total_missing이다. 어느 열이 당기인지 정할 근거가 없어
+   사람 검토로 보내는 것이 의도다.
+2. role_raw가 다른 합계 열 2개(같은 기간)는 가드가 참이고
+   hours_total_duplicate다. 1과 신호가 다른 것은 상황이 달라서다.
+3. 같은 지표에 unmapped 남는 칸(role이 other, role_raw가 빈 문자열)이
+   2개 이상이면 키가 겹쳐 가드가 거짓이다(보수적).
+4. 헤더를 하나도 읽지 못한 새 서식 6열 표는 구조로 구분할 수 없다.
+   연도 조건은 넣지 않았다.
 """
 
 from __future__ import annotations

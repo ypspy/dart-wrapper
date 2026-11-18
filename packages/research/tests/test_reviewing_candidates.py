@@ -6,6 +6,8 @@ import math
 import statistics
 
 from hours_period_samples import comparative_hours, single_period_hours
+from research.extracting.hours_period import is_single_period_hours
+from research.gold.scoring import _hours_keys
 from research.reviewing.candidates import (
     FactView,
     build_candidates,
@@ -159,7 +161,10 @@ def test_hours_total_duplicate_two_current_totals_regression() -> None:
 
 
 def test_single_period_two_distinct_total_columns_is_duplicate() -> None:
-    """단일 기간에서 합계 원문이 둘이면 duplicate이고 missing이 아니다."""
+    """단일 기간에서 합계 원문이 둘이면 duplicate이고 missing이 아니다.
+
+    의도된 한계, README 한계 1·2 참조.
+    """
     hours = single_period_hours(audit_total=100)
     hours.append(
         {
@@ -247,7 +252,10 @@ def test_mixed_periods_do_not_accept_unknown_total() -> None:
 
 
 def test_duplicated_role_column_unknown_is_missing_not_duplicate() -> None:
-    """같은 (total, 합계, audit) 키가 두 번이고 전부 unknown이면 missing이고 duplicate가 아니다."""
+    """같은 (total, 합계, audit) 키가 두 번이고 전부 unknown이면 missing이고 duplicate가 아니다.
+
+    의도된 한계, README 한계 1·2 참조.
+    """
     hours = single_period_hours(audit_total=100)
     total = next(cell for cell in hours if cell["role"] == "total" and cell["metric"] == "audit")
     hours.append(dict(total))
@@ -255,6 +263,81 @@ def test_duplicated_role_column_unknown_is_missing_not_duplicate() -> None:
     candidates, summary = numeric_candidates([fact], set())
     assert [(item.signal, item.raw_value) for item in candidates] == [("hours_total_missing", "")]
     assert not any(row.key == "hours_total_duplicate" for row in summary)
+
+
+def _edge(
+    hours: list[dict[str, object]],
+) -> tuple[bool, tuple[object, object], list[str], list[str]]:
+    """가드, 골드 핵심값, hours 후보 신호, hours 요약 키."""
+    fact = view(80, hours=hours, hours_status="ok")
+    candidates, summary = numeric_candidates([fact], set())
+    signals = [item.signal for item in candidates if item.bundle == "hours"]
+    keys = [row.key for row in summary if "hours" in row.key]
+    return is_single_period_hours(hours), _hours_keys(hours), signals, keys
+
+
+def _unmapped_audit() -> dict[str, object]:
+    """역할에 남지 않은 audit 칸."""
+    return {
+        "role": "other",
+        "role_raw": "",
+        "metric": "audit",
+        "metric_raw": "x",
+        "period": "unknown",
+        "period_raw": "",
+        "raw": "1",
+        "value": 1,
+        "unmapped": True,
+    }
+
+
+def test_period_raw_none_stays_single_period_without_signal() -> None:
+    """모든 period_raw가 None이면 빈 문자열로 보아 가드가 참이고 신호는 없다."""
+    hours = single_period_hours(audit_total=100, headcount_total=15)
+    for cell in hours:
+        cell["period_raw"] = None
+    assert _edge(hours) == (True, (100, 15), [], [])
+
+
+def test_blank_period_raw_is_missing() -> None:
+    """한 칸의 period_raw가 공백이면 가드가 거짓이고 missing이다."""
+    hours = single_period_hours()
+    hours[0]["period_raw"] = " "
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
+
+
+def test_headcount_only_single_period_is_missing() -> None:
+    """audit 행이 없고 headcount만 있으면 가드는 참이지만 감사 합계가 없어 missing이다."""
+    hours = [cell for cell in single_period_hours(headcount_total=15) if cell["metric"] != "audit"]
+    assert _edge(hours) == (True, (None, 15), ["hours_total_missing"], [])
+
+
+def test_table_without_total_role_is_missing() -> None:
+    """합계 역할이 없어도 가드는 참이고, 읽을 합계가 없어 missing이다."""
+    hours = [cell for cell in single_period_hours() if cell["role"] != "total"]
+    assert _edge(hours) == (True, (None, None), ["hours_total_missing"], [])
+
+
+def test_one_unmapped_audit_cell_stays_single_period() -> None:
+    """남는 unmapped audit 칸이 1개면 가드가 참이고 합계 신호는 없다."""
+    hours = single_period_hours(audit_total=100, headcount_total=15)
+    hours.append(_unmapped_audit())
+    assert _edge(hours) == (True, (100, 15), [], [])
+
+
+def test_two_unmapped_audit_cells_are_missing() -> None:
+    """같은 지표의 unmapped 칸이 2개면 키가 겹쳐 가드가 거짓이고 missing이다."""
+    hours = single_period_hours()
+    hours.append(_unmapped_audit())
+    hours.append(_unmapped_audit())
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
+
+
+def test_period_none_on_one_cell_is_missing() -> None:
+    """한 칸의 period가 None이면 unknown이 아니므로 가드가 거짓이고 missing이다."""
+    hours = single_period_hours()
+    hours[0]["period"] = None
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
 
 
 def test_unit_missing_and_subsidiary_and_date() -> None:

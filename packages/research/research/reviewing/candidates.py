@@ -340,6 +340,7 @@ def _hour_cells(hours: object) -> list[dict[str, object]] | None:
 
     단일 기간 가드가 참이면 unknown 합계를, 아니면 당기 합계만 본다.
     반환은 없음(None)·빈 목록·1칸·2칸 이상이고, 이후 분기는 바꾸지 않는다.
+    colspan 무라벨 2열은 missing, role_raw가 다른 합계 2열은 duplicate다(한계 1·2).
     """
     return total_cells(hours, "audit")
 

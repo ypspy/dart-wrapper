@@ -96,7 +96,9 @@ _UNLABELED_COLSPAN = """
 
 def test_legacy_single_period_html_is_unknown_and_not_missing() -> None:
     """옛 서식 6열은 추출 뒤에도 전부 unknown이고, 합계 100은 missing이 아니다."""
-    assert EXTRACTOR_VERSION == "audit_opinion.v19"
+    assert (
+        EXTRACTOR_VERSION == "audit_opinion.v19"
+    ), "버전이 오르면 단일 기간 규칙을 추출 단계로 옮길지 다시 판단하라."
     cells, status = extract_hours(_LEGACY_SINGLE_PERIOD)
     assert status == "ok"
     assert len(cells) == 24
@@ -113,8 +115,13 @@ def test_legacy_single_period_html_is_unknown_and_not_missing() -> None:
 
 
 def test_unlabeled_colspan_pair_stays_missing() -> None:
-    """당기/전기 소제목 없는 colspan 2열은 unknown으로 남고 missing이다."""
-    assert EXTRACTOR_VERSION == "audit_opinion.v19"
+    """당기/전기 소제목 없는 colspan 2열은 unknown으로 남고 missing이다.
+
+    의도된 한계, README 한계 1·2 참조.
+    """
+    assert (
+        EXTRACTOR_VERSION == "audit_opinion.v19"
+    ), "버전이 오르면 단일 기간 규칙을 추출 단계로 옮길지 다시 판단하라."
     cells, status = extract_hours(_UNLABELED_COLSPAN)
     assert status == "ok"
     assert len(cells) == 48
