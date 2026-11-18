@@ -265,6 +265,23 @@ def test_n13_nontotal_change_on_two_totals_with_null_gold_is_queued(tmp_path: Pa
     assert _carry(conn) == ("abstain", 1)
 
 
+def test_n35_headcount_change_with_null_gold_is_fp(tmp_path: Path) -> None:
+    """감사 합계 100은 유지되고 인원 합계만 15에서 14가 되면 FP이고 큐는 0이다.
+
+    gold_value는 SQL NULL이다. 가드가 참인 단일 기간 표의 기존 의미와 같다.
+    """
+    conn = _prepare(
+        tmp_path,
+        old_hours=single_period_hours(audit_total=100, headcount_total=15),
+        new_hours=single_period_hours(audit_total=100, headcount_total=14),
+        gold_value=None,
+    )
+    stored = conn.execute("SELECT gold_value FROM gold_labels").fetchone()
+    assert stored is not None
+    assert stored[0] is None
+    assert _carry(conn) == ("fp", 0)
+
+
 def test_n15_label_matches_new_total_is_queued(tmp_path: Path) -> None:
     """라벨 정답이 이전 표와 다르고 새 표와 같으면 abstain, 큐 1이다."""
     conn = _prepare(

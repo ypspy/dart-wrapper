@@ -495,3 +495,168 @@ def test_n14_equal_unlabeled_colspan_totals_stay_missing() -> None:
         cell["value"] for cell in cells if cell["role"] == "total" and cell["metric"] == "audit"
     ]
     assert audits == [100, 100]
+
+
+def _three(
+    headers: list[str] | None = None,
+    rows: list[tuple[str, list[str]]] | None = None,
+    corner: str = "구분",
+    subtitle: list[str] | None = None,
+) -> str:
+    """역할 3열 합성 표. 기본 합계는 감사 90, 인원 5다."""
+    roles = headers or ["담당이사", "등록공인회계사", "합계"]
+    body_rows = rows or [
+        ("투입 인원수", ["1", "4", "5"]),
+        ("감사", ["40", "50", "90"]),
+    ]
+    if subtitle is None:
+        head = (
+            "<tr><td>" + corner + "</td>" + "".join(f"<td>{name}</td>" for name in roles) + "</tr>"
+        )
+    else:
+        head = (
+            '<tr><td rowspan="2">'
+            + corner
+            + "</td>"
+            + "".join(f"<td>{name}</td>" for name in roles)
+            + "</tr><tr>"
+            + "".join(f"<td>{name}</td>" for name in subtitle)
+            + "</tr>"
+        )
+    body = "".join(
+        "<tr><td>" + label + "</td>" + "".join(f"<td>{value}</td>" for value in values) + "</tr>"
+        for label, values in body_rows
+    )
+    return "<html><body><table>" + head + body + "</table></body></html>"
+
+
+_BASE_ROWS: list[tuple[str, list[str]]] = [
+    ("투입 인원수", ["1", "4", "5"]),
+    ("감사", ["40", "50", "90"]),
+]
+
+
+def test_n25_parenthesized_fiscal_mark_without_je_is_missing() -> None:
+    """「담당이사(47기)」처럼 제 없이 숫자와 기만 있어도 missing이다."""
+    html = _three(headers=["담당이사(47기)", "등록공인회계사", "합계"])
+    cells = _assert_missing(html, 27)
+    assert any(cell["role_raw"] == "담당이사(47기)" for cell in cells)
+
+
+def test_n26_hanja_fiscal_mark_is_missing() -> None:
+    """「담당이사 第47期」는 missing이다."""
+    html = _three(headers=["담당이사 第47期", "등록공인회계사", "합계"])
+    cells = _assert_missing(html, 28)
+    assert any(cell["role_raw"] == "담당이사 第47期" for cell in cells)
+
+
+def test_n27_zero_width_fiscal_marks_are_missing() -> None:
+    """폭 없는 문자가 끼어도 「제47기」로 보고 missing이다."""
+    between_je = _three(headers=["담당이사 제\u200b47기", "등록공인회계사", "합계"])
+    between_number = _three(headers=["담당이사 제47\u200b기", "등록공인회계사", "합계"])
+    first = _assert_missing(between_je, 29)
+    second = _assert_missing(between_number, 30)
+    assert any(cell["role_raw"] == "담당이사 제\u200b47기" for cell in first)
+    assert any(cell["role_raw"] == "담당이사 제47\u200b기" for cell in second)
+
+
+def test_n28_fiscal_mark_row_label_is_missing() -> None:
+    """감사 행 대신 행 라벨이 「제47기」이면 missing이다."""
+    html = _three(rows=[("투입 인원수", ["1", "4", "5"]), ("제47기", ["40", "50", "90"])])
+    cells = _assert_missing(html, 31)
+    assert any(cell["metric_raw"] == "제47기" for cell in cells)
+    assert not any(cell["metric"] == "audit" for cell in cells)
+
+
+def test_n29_fiscal_mark_in_cell_raw_is_missing() -> None:
+    """투입 인원수 칸 원문이 「제47기」이면 missing이다."""
+    html = _three(rows=[("투입 인원수", ["제47기", "4", "5"]), ("감사", ["40", "50", "90"])])
+    cells = _assert_missing(html, 32)
+    assert any(cell["raw"] == "제47기" and cell["metric"] == "headcount" for cell in cells)
+
+
+def test_n30_prior_word_row_label_is_missing() -> None:
+    """행 라벨 「전기」가 추가되면 missing이다."""
+    html = _three(rows=[*_BASE_ROWS, ("전기", ["1", "1", "1"])])
+    cells = _assert_missing(html, 33)
+    assert any(cell["metric_raw"] == "전기" for cell in cells)
+
+
+def test_n31_digitless_gi_stays_single_period() -> None:
+    """숫자가 없는 「기」와 전문가 열은 가드가 참이고 합계는 (90, 5)다."""
+    specialist = _three(headers=["전산감사ㆍ세무ㆍ가치평가 등 전문가", "등록공인회계사", "합계"])
+    interim = _three(rows=[_BASE_ROWS[0], ("분·반기검토", ["1", "2", "3"]), _BASE_ROWS[1]])
+    fieldwork = _three(rows=[*_BASE_ROWS, ("현장감사수행시기", ["1", "1", "1"])])
+    specialist_cells = _assert_accepted(specialist, 34, (90, 5))
+    interim_cells = _assert_accepted(interim, 35, (90, 5))
+    field_cells = _assert_accepted(fieldwork, 36, (90, 5))
+    assert any(
+        cell["role_raw"] == "전산감사ㆍ세무ㆍ가치평가 등 전문가" for cell in specialist_cells
+    )
+    assert any(cell["metric_raw"] == "분·반기검토" for cell in interim_cells)
+    assert any(cell["metric_raw"] == "현장감사수행시기" for cell in field_cells)
+
+
+def test_n32_corner_prior_word_stays_single_period() -> None:
+    """모서리 「전기」만 있는 표는 칸이 옛 서식과 같아 가드가 참이다.
+
+    추출기 후속 전까지의 알려진 한계다. 라벨 열은 건너뛰어 칸에 전기가 남지 않는다.
+    """
+    plain_cells, plain_status = extract_hours(_three())
+    assert plain_status == "ok"
+    cells = _assert_accepted(_three(corner="전기"), 37, (90, 5))
+    assert cells == plain_cells
+    assert all(cell["period"] == "unknown" and cell["period_raw"] == "" for cell in cells)
+
+
+def test_n33_mixed_subtitle_fiscal_marks_stay_single_period() -> None:
+    """소제목 기수가 열마다 달라도(제48기/제47기/제48기) 가드가 참이다.
+
+    한계 5로 현재 동작을 고정한다. 칸의 role_raw에는 기수가 남지 않는다.
+    """
+    cells = _assert_accepted(_three(subtitle=["제48기", "제47기", "제48기"]), 38, (90, 5))
+    assert {cell["role_raw"] for cell in cells} == {"담당이사", "등록공인회계사", "합계"}
+    assert all("제" not in str(cell["role_raw"]) for cell in cells)
+
+
+_J10_COMPARATIVE = """
+<html><body><table>
+<tr>
+  <td rowspan="2">구분</td>
+  <td colspan="2">담당이사</td>
+  <td colspan="2">등록공인회계사</td>
+  <td colspan="2">합계</td>
+</tr>
+<tr>
+  <td>제48기(당기)</td><td>제47기(전기)</td>
+  <td>제48기(당기)</td><td>제47기(전기)</td>
+  <td>제48기(당기)</td><td>제47기(전기)</td>
+</tr>
+<tr>
+  <td>투입 인원수</td>
+  <td>2</td><td>1</td>
+  <td>5</td><td>4</td>
+  <td>7</td><td>5</td>
+</tr>
+<tr>
+  <td>감사</td>
+  <td>40</td><td>30</td>
+  <td>60</td><td>50</td>
+  <td>100</td><td>80</td>
+</tr>
+</table></body></html>
+"""
+
+
+def test_n34_comparative_fiscal_headers_keep_current_totals() -> None:
+    """「제48기(당기)」/「제47기(전기)」 비교표는 거짓이고 당기 합계는 (100, 7)이다."""
+    cells, guard, keys, signals, duplicate = _read(_J10_COMPARATIVE, 39)
+    assert guard is False
+    assert keys == (100, 7)
+    assert signals == []
+    assert duplicate is False
+    totals = {
+        (cell["metric"], cell["period"], cell["value"]) for cell in cells if cell["role"] == "total"
+    }
+    assert ("audit", "current", 100) in totals
+    assert ("headcount", "current", 7) in totals
