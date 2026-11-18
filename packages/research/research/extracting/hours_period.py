@@ -1,7 +1,7 @@
 """단일 기간 감사시간 표에서 합계 칸을 고르는 순수 함수.
 
 unknown을 무조건 당기(current)로 보지 않는다.
-가드는 아래 일곱 조건을 모두 만족할 때만 참이다.
+가드는 아래 여덟 조건을 모두 만족할 때만 참이다.
 가드가 거짓이면 master와 같다.
 
 1. 당기/전기 표시가 없다. 모든 칸의 period가 unknown이고 period_raw가 비어 있다.
@@ -13,8 +13,10 @@ unknown을 무조건 당기(current)로 보지 않는다.
 5. 합계 열이 하나다. role이 total인 칸의 role_raw가 2종류 이상이면 거짓이다.
 6. 키 값이 문자열이다. role·role_raw·metric·period·period_raw 중 하나라도
    str도 None도 아니면 거짓이다. 0·False·[]는 빈 값으로 보지 않는다.
-7. 역할 원문에 기수가 없다. role_raw에서 공백을 뺀 문자열에 제N기가 하나라도
-   있으면 거짓이다. 기수가 한 종류여도 거절한다.
+7. 역할 원문·행 라벨·칸 원문에 기수가 없다. 공백과 폭 없는 문자를 지운 뒤
+   (제|第)?숫자(기|期)가 하나라도 있으면 거짓이다. 기수가 한 종류여도 거절한다.
+8. 행 라벨에 당기/전기가 없다. metric_raw에서 공백과 폭 없는 문자를 지운 뒤
+   당기 또는 전기가 있으면 거짓이다.
 
 한계:
 
@@ -51,14 +53,24 @@ from __future__ import annotations
 
 import re
 
-_FISCAL_MARK = re.compile(r"제\d+기")
+# 공백과 폭 없는 문자. 비교 전에 지운다. \d는 전각 숫자도 잡는다.
+_INVISIBLE = re.compile("[\\s\u200b-\u200d\u2060\ufeff]+")
+_FISCAL_MARK = re.compile(r"(?:제|第)?\d+(?:기|期)")
+_PERIOD_WORD = re.compile(r"당기|전기")
+
+
+def _plain(value: object) -> str:
+    """비교 전에 공백과 폭 없는 문자를 지운다. 문자열이 아니면 빈 문자열이다."""
+    if not isinstance(value, str):
+        return ""
+    return _INVISIBLE.sub("", value)
 
 
 def is_single_period_hours(hours: object) -> bool:
     """단일 기간 표인지 본다.
 
     unknown을 무조건 current로 보지 않는다.
-    리스트이고 dict 칸이 하나 이상이며, 가드 일곱 조건을 모두 만족할 때만 True다.
+    리스트이고 dict 칸이 하나 이상이며, 가드 여덟 조건을 모두 만족할 때만 True다.
     가드가 거짓이면 master와 같다.
     """
     if not isinstance(hours, list) or not hours:
@@ -86,8 +98,14 @@ def is_single_period_hours(hours: object) -> bool:
         # 6. 키 값이 문자열. set 비교 전에 확인해 TypeError를 막는다.
         if not all(isinstance(value, str) or value is None for value in (role, role_raw, metric)):
             return False
-        # 7. 역할 원문의 기수. 공백을 뺀 뒤 제N기가 하나라도 있으면 거절한다.
-        if isinstance(role_raw, str) and _FISCAL_MARK.search(re.sub(r"\s+", "", role_raw)):
+        metric_raw = item.get("metric_raw")
+        raw = item.get("raw")
+        # 7. 역할 원문·행 라벨·칸 원문의 기수. 한 종류여도 거절한다.
+        #    숫자가 없는 「기」(분·반기검토, 현장감사수행시기)는 거절하지 않는다.
+        if any(_FISCAL_MARK.search(_plain(value)) for value in (role_raw, metric_raw, raw)):
+            return False
+        # 8. 행 라벨의 당기/전기. 라벨 열(모서리)에만 있으면 칸에 남지 않는다.
+        if _PERIOD_WORD.search(_plain(metric_raw)):
             return False
         # 4. 역할을 모르는 열. unmapped가 아니라 role로 판단한다.
         if role == "other":
