@@ -194,7 +194,9 @@ def score(conn: sqlite3.Connection, version: str) -> int:
 
 def _sparse_keys(conn: sqlite3.Connection, run_id: str) -> set[tuple[str, str]]:
     """실행에 고정된 희소 필드."""
-    row = conn.execute("SELECT params FROM gold_runs WHERE run_id = ?", (run_id,)).fetchone()
+    row = conn.execute(
+        "SELECT params FROM gold_runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
     if row is None or not row[0]:
         return set()
     params = json.loads(row[0])
@@ -283,7 +285,9 @@ def metrics(conn: sqlite3.Connection, run_id: str, version: str) -> list[MetricR
                 and item["period"] == period
                 and item["role"] == "main"
             ]
-            period_rows.append(_metric_row("period", period, bundle, subject, records, False))
+            period_rows.append(
+                _metric_row("period", period, bundle, subject, records, False)
+            )
             pooled_records.extend(records)
         for item in parsed:
             if item["role"] != "oversample":
@@ -477,9 +481,13 @@ def _write_score(
     )
 
 
-def table_carryover(conn: sqlite3.Connection, old_version: str, new_version: str) -> list[ReReview]:
+def table_carryover(
+    conn: sqlite3.Connection, old_version: str, new_version: str
+) -> list[ReReview]:
     """표가 같으면 판정을 넘기고, hours 핵심값이 다르면 FP, 나머진 재검수 큐로 보낸다."""
-    conn.execute("DELETE FROM gold_rereview WHERE extractor_version = ?", (new_version,))
+    conn.execute(
+        "DELETE FROM gold_rereview WHERE extractor_version = ?", (new_version,)
+    )
     queued: list[ReReview] = []
     created_at = datetime.now(timezone.utc).isoformat()
     for label in gold_final(conn):
@@ -489,7 +497,11 @@ def table_carryover(conn: sqlite3.Connection, old_version: str, new_version: str
         new_snap = load_snapshot(conn, new_version, label.rcept_no, label.dcm_no)
         if new_snap is None:
             continue
-        old_table = extract_predicted(old_snap, label.bundle, label.subject) if old_snap else None
+        old_table = (
+            extract_predicted(old_snap, label.bundle, label.subject)
+            if old_snap
+            else None
+        )
         new_table = extract_predicted(new_snap, label.bundle, label.subject)
         if _canon(old_table) == _canon(new_table):
             if label.verdict == "correct":
@@ -508,7 +520,9 @@ def table_carryover(conn: sqlite3.Connection, old_version: str, new_version: str
         reason = "hours 핵심값은 같고 표가 달라졌습니다."
         if label.bundle != "hours":
             reason = "이전 버전과 표가 달라 다시 확인이 필요합니다."
-        review = ReReview(label.rcept_no, label.dcm_no, label.bundle, label.subject, reason)
+        review = ReReview(
+            label.rcept_no, label.dcm_no, label.bundle, label.subject, reason
+        )
         queued.append(review)
         conn.execute(
             """
