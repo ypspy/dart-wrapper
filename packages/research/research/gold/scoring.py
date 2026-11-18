@@ -432,6 +432,8 @@ def _hours_keys(table: Any) -> tuple[Any, Any]:
 
     단일 기간 가드가 참이면 unknown 합계를, 아니면 당기 합계를 읽는다.
     칸이 여러 개면 마지막 값을 쓴다.
+    합계 칸이 여러 개면 마지막 값을 쓰는 것은 period가 current인 표에만
+    해당하고, unknown 합계 2열은 가드가 거절한다.
     """
     audit_cells = total_cells(table, "audit")
     headcount_cells = total_cells(table, "headcount")

@@ -38,20 +38,25 @@ PYTHONPATH=.:../web-api python scripts/create_interim_review_table.py --target-d
 
 옛 서식은 당기/전기 열 없이 역할 열만 있다. 추출기(`activity_hours`)는 그 칸의 `period`를 `unknown`으로 두고 `period_raw`를 비운 채 저장한다. 저장된 period는 unknown 그대로다. unknown을 무조건 당기로 보지 않는다.
 
-신호(`reviewing.candidates._hour_cells`)와 골드 채점(`gold.scoring._hours_keys`)만 `research.extracting.hours_period`의 가드를 통과한 표에서 합계(`role=total`)를 당기 합계처럼 읽는다. 가드는 다음 세 조건을 모두 만족할 때만 참이다.
+신호(`reviewing.candidates._hour_cells`)와 골드 채점(`gold.scoring._hours_keys`)만 `research.extracting.hours_period`의 가드를 통과한 표에서 합계(`role=total`)를 당기 합계처럼 읽는다. 가드는 다음 여섯 조건을 모두 만족할 때만 참이다. 가드가 거짓이면 master와 같다.
 
 1. 당기/전기 표시가 없다. 모든 칸의 period가 unknown이고 period_raw가 비어 있다.
 2. 기간이 섞여 있지 않다. current 또는 prior 칸이 없다.
 3. 역할당 열이 하나다. `(role, role_raw, metric)`이 한 번씩만 나온다. colspan으로 같은 키가 두 번이면 해당하지 않는다.
+4. 역할을 모르는 열이 없다. `role="other"`인 칸이 하나라도 있으면 거짓이다. `metric="other"`인 모르는 지표 행은 합계 칸 선택에 영향이 없어 조건에 넣지 않는다.
+5. 합계 열이 하나다. `role="total"`인 칸의 `role_raw`가 2종류 이상이면 거짓이다.
+6. 키 값이 문자열이다. `role`·`role_raw`·`metric` 중 하나라도 문자열도 None도 아니면 거짓이다.
 
 가드가 거짓이면 종전처럼 period가 current인 합계만 본다. 저장소 밖 분석도 이 규칙을 따라야 하고, 저장된 period를 current로 고쳐 쓰지 않는다.
 
 ### 한계
 
 1. colspan으로 역할당 열이 2개인 무라벨 표는 가드가 거짓이다. 당기 합계 칸이 없으므로 신호는 `hours_total_missing`이다. 두 열 중 어느 쪽이 당기인지 코드 안에 근거가 없어, 사람 검토로 보내는 것이 의도다. 두 열 값이 달라도, 같아도 신호는 missing이다.
-2. `role_raw`가 다른 합계 열 2개(같은 기간)는 가드가 참이고 신호는 `hours_total_duplicate`다. 1과 신호가 다른 것은 상황이 다르기 때문이다. 같은 `(role, role_raw, metric)`이 두 번이면 기간이 다른 두 열로 보고, `role_raw`가 다르면 같은 기간 안의 합계 열 2개로 본다.
-3. 같은 지표에 unmapped 남는 칸(`role="other"`, `role_raw=""`)이 2개 이상이면 키가 겹쳐 가드가 거짓이 되고 missing이 된다. 1칸이면 가드는 참이다. 보수적인 거짓 음성이다. 2026-11-17 확인 기준 live 30,592행은 정확히 24칸이라 해당이 없다. 다른 문서 건수는 재지 않았다.
-4. 헤더를 하나도 읽지 못한 새 서식 6열 표는 구조로 구분할 수 없다. 연도 조건은 넣지 않았다. 서식 변경 시점(2016년 7–8월경)이 딱 떨어지지 않고, 구조상 단일 기간인 새 fact 2건이 2017-04 접수다(원문 대조 전). 컷을 넣으면 그런 문서를 잘라낼 수 있다. 원문 대조 249/249는 모두 단일 기간이었다. 전기만 있는 표는 period가 prior라 가드가 거짓이다.
+2. `role_raw`가 다른 합계 열 2개는 가드가 거짓이고 신호는 `hours_total_missing`이며 골드 키는 `(None, None)`이다. 어느 열이 당기인지 근거가 없다.
+3. 역할을 모르는 열(`role="other"`)이 있으면 개수와 상관없이 가드가 거짓이고 신호는 `hours_total_missing`이다.
+4. 구조로 구분할 수 없는 남은 경우는 새 서식인데 당기/전기 표시를 하나도 읽지 못했고, 역할 헤더는 열마다 하나씩 읽힌 표다. 이 표는 옛 서식과 칸 구조가 같아서 가드가 참이다. 헤더가 아예 없는 6값 열은 키가 겹쳐 가드가 거짓이고 missing이다. 연도 조건은 넣지 않았다. 서식 변경 시점(2016년 7–8월경)이 딱 떨어지지 않고, 구조상 단일 기간인 새 fact 2건이 2017-04 접수다(원문 대조 전). 컷을 넣으면 그런 문서를 잘라낼 수 있다. 원문 대조 249/249는 모두 단일 기간이었다. 전기만 있는 표는 period가 prior라 가드가 거짓이다.
+
+이 조건으로 가드가 거짓이 되는 live 문서 수는 재지 않았다(별도 ro 측정).
 
 2026-11-17 2:1x PM CT 재확인 기준, 두 배 열 표는 그룹2 중 5행과 큐 생성 뒤 새 fact 4건이다. 그 뒤 C2 추출로 늘었을 수 있다. live 재측정은 별도다.
 
