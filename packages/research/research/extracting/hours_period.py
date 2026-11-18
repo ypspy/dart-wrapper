@@ -1,7 +1,7 @@
 """단일 기간 감사시간 표에서 합계 칸을 고르는 순수 함수.
 
 unknown을 무조건 당기(current)로 보지 않는다.
-가드는 아래 여섯 조건을 모두 만족할 때만 참이다.
+가드는 아래 일곱 조건을 모두 만족할 때만 참이다.
 가드가 거짓이면 master와 같다.
 
 1. 당기/전기 표시가 없다. 모든 칸의 period가 unknown이고 period_raw가 비어 있다.
@@ -10,7 +10,10 @@ unknown을 무조건 당기(current)로 보지 않는다.
 4. 역할을 모르는 열이 없다. role이 other인 칸이 하나라도 있으면 거짓이다.
    metric이 other인 모르는 지표 행은 합계 칸 선택에 영향이 없어 조건에 넣지 않는다.
 5. 합계 열이 하나다. role이 total인 칸의 role_raw가 2종류 이상이면 거짓이다.
-6. 키 값이 문자열이다. role·role_raw·metric 중 하나라도 str도 None도 아니면 거짓이다.
+6. 키 값이 문자열이다. role·role_raw·metric·period·period_raw 중 하나라도
+   str도 None도 아니면 거짓이다. 0·False·[]는 빈 값으로 보지 않는다.
+7. 역할 원문에 기수가 없다. role_raw에서 공백을 뺀 문자열에 제N기가 하나라도
+   있으면 거짓이다. 기수가 한 종류여도 거절한다.
 
 한계:
 
@@ -31,12 +34,16 @@ unknown을 무조건 당기(current)로 보지 않는다.
 
 from __future__ import annotations
 
+import re
+
+_FISCAL_MARK = re.compile(r"제\d+기")
+
 
 def is_single_period_hours(hours: object) -> bool:
     """단일 기간 표인지 본다.
 
     unknown을 무조건 current로 보지 않는다.
-    리스트이고 dict 칸이 하나 이상이며, 가드 여섯 조건을 모두 만족할 때만 True다.
+    리스트이고 dict 칸이 하나 이상이며, 가드 일곱 조건을 모두 만족할 때만 True다.
     가드가 거짓이면 master와 같다.
     """
     if not isinstance(hours, list) or not hours:
@@ -47,7 +54,11 @@ def is_single_period_hours(hours: object) -> bool:
         if not isinstance(item, dict):
             return False
         period = item.get("period")
-        period_raw = item.get("period_raw") or ""
+        period_raw = item.get("period_raw")
+        # 6. 기간 값도 문자열. 0·False·[]를 빈 값으로 보기 전에 확인한다.
+        if not all(isinstance(value, str) or value is None for value in (period, period_raw)):
+            return False
+        period_raw = period_raw or ""
         # 2. 섞임 없음. current·prior가 있으면 단일 기간이 아니다.
         if period in {"current", "prior"}:
             return False
@@ -59,6 +70,9 @@ def is_single_period_hours(hours: object) -> bool:
         metric = item.get("metric")
         # 6. 키 값이 문자열. set 비교 전에 확인해 TypeError를 막는다.
         if not all(isinstance(value, str) or value is None for value in (role, role_raw, metric)):
+            return False
+        # 7. 역할 원문의 기수. 공백을 뺀 뒤 제N기가 하나라도 있으면 거절한다.
+        if isinstance(role_raw, str) and _FISCAL_MARK.search(re.sub(r"\s+", "", role_raw)):
             return False
         # 4. 역할을 모르는 열. unmapped가 아니라 role로 판단한다.
         if role == "other":
