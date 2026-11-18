@@ -15,6 +15,17 @@ _NAME_HEADERS = ("회사명", "기업명", "종속기업명", "법인명")
 _NOTES_MARKER = "주석 "
 _UNIT_BANNER_MARKERS = ("단위", "당기", "전기")
 
+# 헤더 칸 전체가 이 값이면 이름 열로 본다(제목 문장 속 「…와 그 종속기업」은 칸 전체가 아니라 제외).
+_NAME_CELLS = (
+    "종속기업",
+    "종속회사",
+    "연결대상종속기업",
+    "연결대상종속회사",
+    "연결대상회사",
+    "회사",
+    "법인",
+)
+
 
 @dataclass(frozen=True)
 class SubsidiaryResult:
@@ -97,14 +108,33 @@ def _is_notes_heading(heading: str) -> bool:
     return "종속기업" in heading or "연결대상" in heading
 
 
-def _header_row_index(matrix: list[list[str]]) -> int:
-    """앞쪽 행 중 회사명이나 구분 열이 있는 헤더 위치를 찾는다."""
+def _header_row_index(matrix: list[list[str]]) -> int | None:
+    """앞쪽 행 중 회사명이나 구분 열이 있는 헤더 위치를 찾는다. 없으면 None."""
     hints = _NAME_HEADERS + _KIND_HEADERS
     for index, row in enumerate(matrix[:3]):
         joined = compact("".join(row))
         if any(hint in joined for hint in hints):
             return index
-    return 0
+        cells = [compact(cell) for cell in row if cell != "#"]
+        merged_title = len(cells) > 1 and len(set(cells)) == 1
+        if not merged_title and any(cell in _NAME_CELLS for cell in cells):
+            return index
+    return None
+
+
+def _hint_columns(header: list[str]) -> list[int]:
+    """헤더 행에서 이름·구분 힌트가 있는 칸 위치."""
+    hints = _NAME_HEADERS + _KIND_HEADERS
+    return [
+        i
+        for i, c in enumerate(header)
+        if c != "#" and (any(h in compact(c) for h in hints) or compact(c) in _NAME_CELLS)
+    ]
+
+
+def _is_header_continuation(row: list[str], header: list[str], cols: list[int]) -> bool:
+    """헤더 힌트 칸이 rowspan으로 복제된 행(다단 헤더의 아랫줄)."""
+    return any(i < len(row) and compact(row[i]) == compact(header[i]) for i in cols)
 
 
 def _kind_column(header: list[str], body: list[list[str]]) -> int | None:
@@ -112,9 +142,7 @@ def _kind_column(header: list[str], body: list[list[str]]) -> int | None:
     for index, cell in enumerate(header):
         token = compact(cell)
         if any(name in token for name in _KIND_HEADERS) and any(
-            not _is_skip_row(row)
-            and index < len(row)
-            and _is_taxonomic_kind(row[index])
+            not _is_skip_row(row) and index < len(row) and _is_taxonomic_kind(row[index])
             for row in body
         ):
             return index
@@ -152,8 +180,17 @@ def _count_table(table: Tag, *, require_kind: bool) -> int | None:
         return None
 
     header_index = _header_row_index(matrix)
+    if header_index is None:
+        if require_kind:
+            header_index = 0
+        else:
+            return None
+    header = matrix[header_index]
+    hint_cols = _hint_columns(header)
     body = matrix[header_index + 1 :]
-    kind_index = _kind_column(matrix[header_index], body)
+    while body and _is_header_continuation(body[0], header, hint_cols):
+        body = body[1:]
+    kind_index = _kind_column(header, body)
     if require_kind and kind_index is None:
         return None
 
