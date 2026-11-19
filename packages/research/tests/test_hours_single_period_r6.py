@@ -289,3 +289,35 @@ def test_n51_extractor_keeps_period_hints_in_period_raw_only() -> None:
         assert {cell["period_raw"] for cell in cells} == hints, name
         assert is_single_period_hours(cells) is False, name
     assert {cell["period_raw"] for cell in plain} == {""}
+
+
+def test_n52_corner_soft_hyphen_prior_is_label_and_missing() -> None:
+    """모서리 「전\\u00ad기」는 라벨 열로 건너뛰고 period_raw에 단서가 남아 가드가 거짓이다.
+
+    서식 문자(Cf)를 지우면 전기 라벨이다. 열은 밀리지 않고 period는 unknown이다.
+    """
+    plain_cells, plain_status = extract_hours(_three())
+    assert plain_status == "ok"
+    cells = _assert_missing(_three(corner="전\u00ad기"), 69)
+    assert [dict(cell, period_raw="") for cell in cells] == plain_cells
+    assert all(cell["role"] != "other" for cell in cells)
+    assert all(cell["period"] == "unknown" and cell["period_raw"] == "전\u00ad기" for cell in cells)
+    assert is_single_period_hours(cells) is False
+
+
+def test_n53_paren_prior_header_stays_unknown_in_period_raw() -> None:
+    """「제47(전)기」·「(전)기」 헤더는 period_raw에 남고 period는 unknown이라 가드가 거짓이다.
+
+    전기로 추측하지 않는다. 역할 원문에는 이 단서를 넣지 않는다.
+    """
+    cases = {
+        "제47(전)기": ["제47(전)기", "제47(전)기", "제47(전)기"],
+        "(전)기": ["(전)기", "(전)기", "(전)기"],
+    }
+    for name, subtitle in cases.items():
+        cells = _assert_missing(_three(subtitle=subtitle), 70)
+        assert {cell["period"] for cell in cells} == {"unknown"}, name
+        assert {cell["period_raw"] for cell in cells} == {name}, name
+        assert all(str(cell["period_raw"]).strip() != "" for cell in cells), name
+        assert {cell["role_raw"] for cell in cells} == {"담당이사", "등록공인회계사", "합계"}, name
+        assert is_single_period_hours(cells) is False, name
