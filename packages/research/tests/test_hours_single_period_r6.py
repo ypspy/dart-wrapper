@@ -208,13 +208,11 @@ def test_n46_nested_parent_header_legacy_is_accepted() -> None:
     assert {cell["period"] for cell in cells} == {"current", "prior"}
 
 
-def test_n47_corner_prior_table_before_comparative_is_known_limit() -> None:
-    """모서리 「전기」 표(감사 80) 뒤에 비교표(당기 100)가 있으면 첫 표만 읽어 (80, 5)다.
-
-    안 G: 한계 7·8로 현재 동작을 고정한다. 추출기 후속(PR15-EXT) 전까지의 알려진 오판이다.
-    """
-    cells = _assert_accepted(_page(_first_80("전기"), _COMPARATIVE), 64, (80, 5))
-    assert cells == extract_hours(_page(_first_80("전기")))[0]
+def test_n47_corner_prior_table_before_comparative_is_missing() -> None:
+    """모서리 「전기」 표(감사 80) 뒤에 비교표가 있어도 첫 표 칸의 period_raw가 「전기」라 missing이다(안 GE)."""
+    cells = _assert_missing(_page(_first_80("전기"), _COMPARATIVE), 64)
+    assert {cell["period"] for cell in cells} == {"unknown"}
+    assert {cell["period_raw"] for cell in cells} == {"전기"}
 
 
 def test_n48_plain_first_table_before_comparative_is_known_limit() -> None:
@@ -242,11 +240,8 @@ def test_n49_purpose_paths_stay_as_expected() -> None:
     _assert_accepted(footnote, 67, (90, 5))
 
 
-def test_n50_title_row_with_fiscal_mark_is_known_limit() -> None:
-    """표 안 제목 행 「제47기 감사참여자 구분별 인원수 및 감사시간」은 칸에 남지 않아 참 (90, 5)다.
-
-    안 G: 한계 5의 한 형태로 고정한다. 추출기 후속(PR15-EXT)에서 바뀐다.
-    """
+def test_n50_title_row_with_fiscal_mark_is_missing() -> None:
+    """표 안 제목 행 「제47기 감사참여자 구분별 인원수 및 감사시간」은 period_raw로 남아 missing이다(안 GE)."""
     html = _page(
         _table(
             [
@@ -257,6 +252,40 @@ def test_n50_title_row_with_fiscal_mark_is_known_limit() -> None:
             ]
         )
     )
-    cells = _assert_accepted(html, 68, (90, 5))
-    assert not any(re.search(r"\d+기", str(cell["period_raw"])) for cell in cells)
-    assert is_single_period_hours(cells) is True
+    cells = _assert_missing(html, 68)
+    assert all(re.search(r"제47기", str(cell["period_raw"])) for cell in cells)
+    assert is_single_period_hours(cells) is False
+
+
+def test_n51_extractor_keeps_period_hints_in_period_raw_only() -> None:
+    """추출기는 기간 단서를 period_raw에만 남긴다. period·값·역할·지표는 단서 없는 표와 같다(안 GE)."""
+    plain, _ = extract_hours(_three())
+    keys = ("role", "role_raw", "metric", "metric_raw", "period", "raw", "value", "unmapped")
+    subtitle_rows = (
+        "<tr><td rowspan='2'>구분</td><td>담당이사</td><td>등록공인회계사</td><td>합계</td></tr>"
+    )
+    cases = {
+        "corner_prior": (_three(corner="전기"), {"전기"}),
+        "corner_current": (_three(corner="당기"), {"당기"}),
+        "mixed_subtitle": (
+            "<html><body><table>"
+            + subtitle_rows
+            + "<tr><td>제48기</td><td>제47기</td><td>제48기</td></tr>"
+            + f"<tr>{_HC_ROW}</tr><tr>{_AU_ROW}</tr></table></body></html>",
+            {"제48기", "제47기"},
+        ),
+        "hidden_prior_subtitle": (
+            "<html><body><table>"
+            + subtitle_rows
+            + "<tr><td>전\u00ad기</td><td>전\u00ad기</td><td>전\u00ad기</td></tr>"
+            + f"<tr>{_HC_ROW}</tr><tr>{_AU_ROW}</tr></table></body></html>",
+            {"전\u00ad기"},
+        ),
+    }
+    for name, (html, hints) in cases.items():
+        cells, status = extract_hours(html)
+        assert status == "ok", name
+        assert [{k: c[k] for k in keys} for c in cells] == [{k: c[k] for k in keys} for c in plain]
+        assert {cell["period_raw"] for cell in cells} == hints, name
+        assert is_single_period_hours(cells) is False, name
+    assert {cell["period_raw"] for cell in plain} == {""}

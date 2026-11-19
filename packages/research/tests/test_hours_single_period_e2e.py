@@ -474,15 +474,15 @@ def test_n22_distinct_specialist_headers_stay_single_period() -> None:
     assert {cell["role_raw"] for cell in cells} == {"전산감사 전문가", "세무 전문가", "합계"}
 
 
-def test_n23_subtitle_only_fiscal_mark_stays_single_period() -> None:
-    """소제목 행의 제47기만 있는 표는 가드가 참이다.
+def test_n23_subtitle_only_fiscal_mark_is_missing() -> None:
+    """소제목 기수가 period_raw로 남아 missing이다(안 GE / PR15-EXT).
 
-    추출기 후속 전까지의 알려진 한계다. 칸의 role_raw에는 기수가 남지 않는다.
-    추출기를 고치면 이 기대값을 바꿔야 한다.
+    칸의 role_raw에는 기수가 남지 않는다.
     """
-    cells = _assert_accepted(_K2_SUBTITLE_FISCAL, 26, (90, 5))
+    cells = _assert_missing(_K2_SUBTITLE_FISCAL, 26)
     assert {cell["role_raw"] for cell in cells} == {"담당이사", "등록공인회계사", "합계"}
     assert {cell["period"] for cell in cells} == {"unknown"}
+    assert {cell["period_raw"] for cell in cells} == {"제47기"}
     assert all("제" not in str(cell["role_raw"]) for cell in cells)
 
 
@@ -597,24 +597,21 @@ def test_n31_digitless_gi_stays_single_period() -> None:
     assert any(cell["metric_raw"] == "현장감사수행시기" for cell in field_cells)
 
 
-def test_n32_corner_prior_word_stays_single_period() -> None:
-    """모서리 「전기」만 있는 표는 칸이 옛 서식과 같아 가드가 참이다.
-
-    추출기 후속 전까지의 알려진 한계다. 라벨 열은 건너뛰어 칸에 전기가 남지 않는다.
-    """
+def test_n32_corner_prior_word_is_missing() -> None:
+    """모서리 「전기」가 period_raw로 남아 missing이다."""
     plain_cells, plain_status = extract_hours(_three())
     assert plain_status == "ok"
-    cells = _assert_accepted(_three(corner="전기"), 37, (90, 5))
-    assert cells == plain_cells
-    assert all(cell["period"] == "unknown" and cell["period_raw"] == "" for cell in cells)
+    cells = _assert_missing(_three(corner="전기"), 37)
+    assert [dict(cell, period_raw="") for cell in cells] == plain_cells
+    assert all(cell["period"] == "unknown" and cell["period_raw"] == "전기" for cell in cells)
 
 
-def test_n33_mixed_subtitle_fiscal_marks_stay_single_period() -> None:
-    """소제목 기수가 열마다 달라도(제48기/제47기/제48기) 가드가 참이다.
+def test_n33_mixed_subtitle_fiscal_marks_are_missing() -> None:
+    """열별 소제목 기수가 period_raw로 남아 missing이다.
 
-    한계 5로 현재 동작을 고정한다. 칸의 role_raw에는 기수가 남지 않는다.
+    칸의 role_raw에는 기수가 남지 않는다.
     """
-    cells = _assert_accepted(_three(subtitle=["제48기", "제47기", "제48기"]), 38, (90, 5))
+    cells = _assert_missing(_three(subtitle=["제48기", "제47기", "제48기"]), 38)
     assert {cell["role_raw"] for cell in cells} == {"담당이사", "등록공인회계사", "합계"}
     assert all("제" not in str(cell["role_raw"]) for cell in cells)
 
