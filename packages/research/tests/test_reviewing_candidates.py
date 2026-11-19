@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import math
+import statistics
 
+from hours_period_samples import comparative_hours, single_period_hours
+from research.extracting.hours_period import is_single_period_hours
+from research.gold.scoring import _hours_keys
 from research.reviewing.candidates import (
     FactView,
     build_candidates,
@@ -94,6 +98,245 @@ def test_numeric_flags_hours_forbidden_and_asset_tail() -> None:
         and item.rcept_no == "20200300000030"
         for item in candidates
     )
+
+
+def _stratum_detail(scales: list[float]) -> str:
+    """후보 계산과 같은 inclusive 사분위 눈금 문장."""
+    q1, _q2, q3 = statistics.quantiles(scales, n=4, method="inclusive")
+    iqr = q3 - q1
+    low = q1 - 1.5 * iqr
+    high = q3 + 1.5 * iqr
+    kept = sum(scale < low or scale > high for scale in scales)
+    return f"Q1 {format(q1, '.6g')} Q3 {format(q3, '.6g')} IQR {format(iqr, '.6g')} 후보 {kept}"
+
+
+def test_single_period_legacy_total_enters_iqr_without_missing() -> None:
+    """단일 기간 24칸 합계는 missing이 아니고, 0이면 nonpositive이며 IQR 눈금에 들어간다."""
+    mass = [
+        view(index, hours=single_period_hours(audit_total=100 + index), hours_status="ok")
+        for index in range(30)
+    ]
+    outlier = view(30, hours=single_period_hours(audit_total=1_000_000_000), hours_status="ok")
+    zero = view(31, hours=single_period_hours(audit_total=0), hours_status="ok")
+    candidates, summary = numeric_candidates([*mass, outlier, zero], set())
+    assert not any(item.signal == "hours_total_missing" for item in candidates)
+    nonpositive = [item for item in candidates if item.rcept_no == zero.rcept_no]
+    assert [(item.signal, item.subject, item.raw_value) for item in nonpositive] == [
+        ("hours_nonpositive", "audit_current_total", "0")
+    ]
+    scales = [math.log1p(100 + index) for index in range(30)]
+    scales.append(math.log1p(1_000_000_000))
+    stratum = next(
+        row
+        for row in summary
+        if row.section == "stratum" and row.key == "F001|separate|audit_current_total"
+    )
+    assert stratum.n == 31
+    assert stratum.detail == _stratum_detail(scales)
+    highs = [
+        item
+        for item in candidates
+        if item.signal == "iqr_high" and item.subject == "audit_current_total"
+    ]
+    assert [item.raw_value for item in highs] == ["1000000000"]
+
+
+def test_hours_total_duplicate_two_current_totals_regression() -> None:
+    """당기 감사 합계가 두 칸이면 duplicate로 건너뛰고 missing이 아니다."""
+    duplicate = view(
+        1,
+        hours=[
+            {"role": "total", "metric": "audit", "period": "current", "value": 1},
+            {"role": "total", "metric": "audit", "period": "current", "value": 2},
+        ],
+        hours_status="ok",
+    )
+    candidates, summary = numeric_candidates([duplicate], set())
+    assert not any(item.signal == "hours_total_missing" for item in candidates)
+    assert not any(item.rcept_no == duplicate.rcept_no for item in candidates)
+    assert any(
+        row.section == "skip" and row.key == "hours_total_duplicate" and row.n == 1
+        for row in summary
+    )
+
+
+def test_single_period_two_distinct_total_columns_is_missing() -> None:
+    """단일 기간에서 합계 원문이 둘이면 가드가 거짓이고 missing이다.
+
+    r3에서 기대값 변경(검토 중간 1·2).
+    """
+    hours = single_period_hours(audit_total=100)
+    hours.append(
+        {
+            "role": "total",
+            "role_raw": "합 계",
+            "metric": "audit",
+            "metric_raw": "감사",
+            "period": "unknown",
+            "period_raw": "",
+            "raw": "90",
+            "value": 90,
+            "unmapped": False,
+        }
+    )
+    fact = view(2, hours=hours, hours_status="ok")
+    candidates, summary = numeric_candidates([fact], set())
+    assert [(item.signal, item.raw_value) for item in candidates] == [("hours_total_missing", "")]
+    assert not any(row.key == "hours_total_duplicate" for row in summary)
+
+
+def test_current_prior_format_keeps_current_total_signal() -> None:
+    """새 서식은 당기 합계만 쓰고, 신호와 raw_value는 전기·비합계 칸을 따르지 않는다."""
+    mass = [
+        view(
+            index,
+            hours=comparative_hours(audit_current=100 + index, audit_prior=1),
+            hours_status="ok",
+        )
+        for index in range(30)
+    ]
+    outlier = view(
+        30,
+        hours=comparative_hours(audit_current=1_000_000_000, audit_prior=1),
+        hours_status="ok",
+    )
+    zero = view(31, hours=comparative_hours(audit_current=0, audit_prior=999), hours_status="ok")
+    missing = view(
+        32, hours=comparative_hours(audit_current=None, audit_prior=40), hours_status="ok"
+    )
+    candidates, summary = numeric_candidates([*mass, outlier, zero, missing], set())
+    zero_rows = [item for item in candidates if item.rcept_no == zero.rcept_no]
+    assert [(item.signal, item.raw_value) for item in zero_rows] == [("hours_nonpositive", "0")]
+    missing_rows = [item for item in candidates if item.rcept_no == missing.rcept_no]
+    assert [(item.signal, item.raw_value) for item in missing_rows] == [("hours_total_missing", "")]
+    assert not any(
+        item.signal == "hours_total_missing" and item.rcept_no != missing.rcept_no
+        for item in candidates
+    )
+    scales = [math.log1p(100 + index) for index in range(30)]
+    scales.append(math.log1p(1_000_000_000))
+    stratum = next(
+        row
+        for row in summary
+        if row.section == "stratum" and row.key == "F001|separate|audit_current_total"
+    )
+    assert stratum.n == 31
+    assert stratum.detail == _stratum_detail(scales)
+    highs = [
+        item
+        for item in candidates
+        if item.signal == "iqr_high" and item.subject == "audit_current_total"
+    ]
+    assert [item.raw_value for item in highs] == ["1000000000"]
+
+
+def test_mixed_periods_do_not_accept_unknown_total() -> None:
+    """current·prior 칸이 있으면 unknown 합계는 당기로 인정하지 않아 missing이다."""
+    hours = single_period_hours(audit_total=100)
+    partner = next(
+        cell for cell in hours if cell["role"] == "engagement_partner" and cell["metric"] == "audit"
+    )
+    partner["period"] = "current"
+    partner["period_raw"] = "당기"
+    other = next(cell for cell in hours if cell["role"] == "cpa" and cell["metric"] == "audit")
+    other["period"] = "prior"
+    other["period_raw"] = "전기"
+    fact = view(3, hours=hours, hours_status="ok")
+    candidates, summary = numeric_candidates([fact], set())
+    assert [(item.signal, item.raw_value) for item in candidates] == [("hours_total_missing", "")]
+    assert not any(row.key == "hours_total_duplicate" for row in summary)
+
+
+def test_duplicated_role_column_unknown_is_missing_not_duplicate() -> None:
+    """같은 (total, 합계, audit) 키가 두 번이고 전부 unknown이면 missing이고 duplicate가 아니다.
+
+    의도된 한계, README 한계 1·2 참조.
+    """
+    hours = single_period_hours(audit_total=100)
+    total = next(cell for cell in hours if cell["role"] == "total" and cell["metric"] == "audit")
+    hours.append(dict(total))
+    fact = view(4, hours=hours, hours_status="ok")
+    candidates, summary = numeric_candidates([fact], set())
+    assert [(item.signal, item.raw_value) for item in candidates] == [("hours_total_missing", "")]
+    assert not any(row.key == "hours_total_duplicate" for row in summary)
+
+
+def _edge(
+    hours: list[dict[str, object]],
+) -> tuple[bool, tuple[object, object], list[str], list[str]]:
+    """가드, 골드 핵심값, hours 후보 신호, hours 요약 키."""
+    fact = view(80, hours=hours, hours_status="ok")
+    candidates, summary = numeric_candidates([fact], set())
+    signals = [item.signal for item in candidates if item.bundle == "hours"]
+    keys = [row.key for row in summary if "hours" in row.key]
+    return is_single_period_hours(hours), _hours_keys(hours), signals, keys
+
+
+def _unmapped_audit() -> dict[str, object]:
+    """역할에 남지 않은 audit 칸."""
+    return {
+        "role": "other",
+        "role_raw": "",
+        "metric": "audit",
+        "metric_raw": "x",
+        "period": "unknown",
+        "period_raw": "",
+        "raw": "1",
+        "value": 1,
+        "unmapped": True,
+    }
+
+
+def test_period_raw_none_stays_single_period_without_signal() -> None:
+    """모든 period_raw가 None이면 빈 문자열로 보아 가드가 참이고 신호는 없다."""
+    hours = single_period_hours(audit_total=100, headcount_total=15)
+    for cell in hours:
+        cell["period_raw"] = None
+    assert _edge(hours) == (True, (100, 15), [], [])
+
+
+def test_blank_period_raw_is_missing() -> None:
+    """한 칸의 period_raw가 공백이면 가드가 거짓이고 missing이다."""
+    hours = single_period_hours()
+    hours[0]["period_raw"] = " "
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
+
+
+def test_headcount_only_single_period_is_missing() -> None:
+    """audit 행이 없고 headcount만 있으면 가드는 참이지만 감사 합계가 없어 missing이다."""
+    hours = [cell for cell in single_period_hours(headcount_total=15) if cell["metric"] != "audit"]
+    assert _edge(hours) == (True, (None, 15), ["hours_total_missing"], [])
+
+
+def test_table_without_total_role_is_missing() -> None:
+    """합계 역할이 없어도 가드는 참이고, 읽을 합계가 없어 missing이다."""
+    hours = [cell for cell in single_period_hours() if cell["role"] != "total"]
+    assert _edge(hours) == (True, (None, None), ["hours_total_missing"], [])
+
+
+def test_one_unmapped_audit_cell_is_missing() -> None:
+    """남는 unmapped audit 칸이 1개여도 가드가 거짓이고 missing이다.
+
+    r3에서 기대값 변경(검토 중간 1·2).
+    """
+    hours = single_period_hours(audit_total=100, headcount_total=15)
+    hours.append(_unmapped_audit())
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
+
+
+def test_two_unmapped_audit_cells_are_missing() -> None:
+    """같은 지표의 unmapped 칸이 2개면 키가 겹쳐 가드가 거짓이고 missing이다."""
+    hours = single_period_hours()
+    hours.append(_unmapped_audit())
+    hours.append(_unmapped_audit())
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
+
+
+def test_period_none_on_one_cell_is_missing() -> None:
+    """한 칸의 period가 None이면 unknown이 아니므로 가드가 거짓이고 missing이다."""
+    hours = single_period_hours()
+    hours[0]["period"] = None
+    assert _edge(hours) == (False, (None, None), ["hours_total_missing"], [])
 
 
 def test_unit_missing_and_subsidiary_and_date() -> None:

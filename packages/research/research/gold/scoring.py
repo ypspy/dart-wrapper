@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
+from research.extracting.hours_period import total_cells
 from research.gold.matching import matches
 from research.gold.periods import FLAGGED_SAMPLE_PERIODS
 from research.gold.sampler import is_claim
@@ -427,20 +428,17 @@ def _canon(value: Any) -> str:
 
 
 def _hours_keys(table: Any) -> tuple[Any, Any]:
-    """총 감사시간·투입 인원(당기, 합계)."""
-    audit = None
-    headcount = None
-    if not isinstance(table, list):
-        return (audit, headcount)
-    for cell in table:
-        if not isinstance(cell, dict):
-            continue
-        if cell.get("role") != "total" or cell.get("period") != "current":
-            continue
-        if cell.get("metric") == "audit":
-            audit = cell.get("value")
-        if cell.get("metric") == "headcount":
-            headcount = cell.get("value")
+    """총 감사시간·투입 인원.
+
+    단일 기간 가드가 참이면 unknown 합계를, 아니면 당기 합계를 읽는다.
+    칸이 여러 개면 마지막 값을 쓴다.
+    합계 칸이 여러 개면 마지막 값을 쓰는 것은 period가 current인 표에만
+    해당하고, unknown 합계 2열은 가드가 거절한다.
+    """
+    audit_cells = total_cells(table, "audit")
+    headcount_cells = total_cells(table, "headcount")
+    audit = audit_cells[-1].get("value") if audit_cells else None
+    headcount = headcount_cells[-1].get("value") if headcount_cells else None
     return (audit, headcount)
 
 
