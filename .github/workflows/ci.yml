@@ -1,0 +1,42 @@
+# master push와 master로 향하는 pull_request에서 기존 pytest만 실행한다.
+# 네트워크·live DB·비밀값용 pytest 마커는 저장소에 없다.
+# web-api README는 인메모리 SQLite와 httpx MockTransport를 쓰고,
+# research README는 합성 HTML만 쓴다고 적혀 있어 제외 옵션(-m, -k)은 두지 않는다.
+name: ci
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 3.12 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: web-api 개발 의존성 설치
+        working-directory: packages/web-api
+        run: python -m pip install -e ".[dev]"
+
+      - name: web-api 테스트
+        working-directory: packages/web-api
+        run: python -m pytest -q --tb=short
+
+      - name: research 테스트
+        working-directory: packages/research
+        env:
+          PYTHONPATH: .:../web-api
+        run: python -m pytest -q --tb=short
