@@ -229,3 +229,63 @@ def test_s16_kind_column_rowspan_header() -> None:
     )
     result = _run(html)
     assert (result.count, result.status) == (1, "ok")
+
+
+# --- PR16-K: 구분 열·A001에서 비종속 행을 R4–R6 전에 건너뛰기 (회귀 H1·H6·H9·H10) ---
+
+
+def test_k1_kind_column_empty_total_row_is_skipped() -> None:
+    """구분 열 + 빈 이름 계 행: 비종속 행을 건너뛰어 count=2 (notes)."""
+    html = (
+        "<html><body><p>종속기업 및 관계기업 현황</p><table border='1'>"
+        "<tr><td>구분</td><td>회사명</td><td>지분율</td></tr>"
+        "<tr><td>종속기업</td><td>가상A㈜</td><td>100</td></tr>"
+        "<tr><td>종속기업</td><td>가상B㈜</td><td>60</td></tr>"
+        "<tr><td>관계기업</td><td>가상C㈜</td><td>30</td></tr>"
+        "<tr><td>계</td><td></td><td></td></tr></table></body></html>"
+    )
+    result = _run(html)
+    assert (result.count, result.status, result.source) == (2, "ok", "notes")
+
+
+def test_k2_kind_column_colspan_footnote_is_skipped() -> None:
+    """구분 열 + colspan 각주 행: 비종속 행을 건너뛰어 count=2 (notes)."""
+    html = (
+        "<html><body><p>종속기업 및 관계기업 현황</p><table border='1'>"
+        "<tr><td>구분</td><td>회사명</td><td>지분율</td></tr>"
+        "<tr><td>종속기업</td><td>가상A㈜</td><td>100</td></tr>"
+        "<tr><td>종속기업</td><td>가상B㈜</td><td>60</td></tr>"
+        "<tr><td>관계기업</td><td>가상C㈜</td><td>30</td></tr>"
+        "<tr><td colspan='3'>(주1) 당기 중 신규 설립하였습니다.</td></tr>"
+        "</table></body></html>"
+    )
+    result = _run(html)
+    assert (result.count, result.status, result.source) == (2, "ok", "notes")
+
+
+def test_k3_a001_empty_total_row_is_skipped() -> None:
+    """A001 관계 열 + 빈 이름 계 행: notes 없이 a001 경로, count=2."""
+    a001 = (
+        "<html><body><p>계열회사의 현황</p><table border='1'>"
+        "<tr><td>회사명</td><td>관계</td></tr>"
+        "<tr><td>가상A㈜</td><td>종속회사</td></tr>"
+        "<tr><td>가상B㈜</td><td>종속회사</td></tr>"
+        "<tr><td>가상C㈜</td><td>관계회사</td></tr>"
+        "<tr><td></td><td>계</td></tr></table></body></html>"
+    )
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html="", a001_html=a001)
+    assert (result.count, result.status, result.source) == (2, "ok", "a001")
+
+
+def test_k4_a001_colspan_footnote_is_skipped() -> None:
+    """A001 관계 열 + colspan 각주 행: notes 없이 a001 경로, count=2."""
+    a001 = (
+        "<html><body><p>계열회사의 현황</p><table border='1'>"
+        "<tr><td>회사명</td><td>관계</td></tr>"
+        "<tr><td>가상A㈜</td><td>종속회사</td></tr>"
+        "<tr><td>가상B㈜</td><td>종속회사</td></tr>"
+        "<tr><td>가상C㈜</td><td>관계회사</td></tr>"
+        "<tr><td colspan='2'>(주) 상장사 표시</td></tr></table></body></html>"
+    )
+    result = extract_subsidiaries(fs_scope="consolidated", notes_html="", a001_html=a001)
+    assert (result.count, result.status, result.source) == (2, "ok", "a001")
