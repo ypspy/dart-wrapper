@@ -52,8 +52,8 @@ unknown을 무조건 당기(current)로 보지 않는다.
    캐시의 옛 서식 249건 중 헤더 행에 제N기가 있는 표는 0건이다(2026-11-17
    8:16 PM CT). 최소 지점은 activity_hours._match_period이다. 당기/전기가
    없을 때 헤더에 제N기가 있으면 ("unknown", 원문)을 돌려 조건 1이
-   거절한다. 이렇게 바꿔도 기존 782 테스트는 통과했다(Zucchini 시험, 커밋
-   안 함, 2026-11-17). EXTRACTOR_VERSION은 audit_opinion.v19로 유지한다.
+   거절한다. 이 동작은 #17에서 master에 머지되었다.
+   EXTRACTOR_VERSION은 audit_opinion.v19로 유지한다.
    재추출·버전 올림은 별도 승인이다. 후속 후보는 헤더의 제N기 등으로
    기간을 판별할 수 있는지 조사하는 것이다. 원문 헤더 조사가 먼저이고,
    네트워크와 live DB가 필요한 별도 결정이다. 같은 v19 이름 아래

@@ -18,18 +18,31 @@ _INTERIM_LABELS = ("분ㆍ반기검토", "분·반기검토", "분기검토", "�
 _AUDIT_EXCLUDES = ("감사참여자", "감사업무", "감사시간")
 # 기간 단서: 기수 표기. 당기/전기로 읽지 못한 헤더에 남으면 period_raw로 남긴다.
 _FISCAL_MARK = re.compile(r"(?:제|第)?\d+(?:기|期)")
+# 제N(전)기·(전)기. 숫자와 기가 붙어 있지 않아 위 패턴에 안 걸린다. prior로 읽지 않는다.
+_PAREN_PRIOR_CUE = re.compile(r"(?:제|第)?\d*\(전\)(?:기|期)")
 
 
 def _squash(text: str) -> str:
-    """compact에 더해 서식 문자(Cf: U+00AD·U+200B 등)를 지운다. 기간 단서 확인용."""
+    """compact에 더해 서식 문자(Cf: U+00AD·U+200B 등)를 지운다.
+
+    기간 단서 확인과 라벨 열 판정에 같이 쓴다.
+    """
     return "".join(ch for ch in compact(text) if unicodedata.category(ch) != "Cf")
 
 
 def _period_hint(texts: list[str]) -> str:
-    """기간으로 읽지 않은 헤더에 남은 기간 단서(기수, 숨은 당기/전기)의 원문. 없으면 ""."""
+    """기간으로 읽지 않은 헤더에 남은 기간 단서의 원문. 없으면 "".
+
+    기수, 숨은 당기/전기, 제N(전)기·(전)기를 남긴다. (전)기를 prior로 바꾸지 않는다.
+    """
     for text in texts:
         token = _squash(text)
-        if _FISCAL_MARK.search(token) or _PERIOD_CURRENT in token or _PERIOD_PRIOR in token:
+        if (
+            _FISCAL_MARK.search(token)
+            or _PAREN_PRIOR_CUE.search(token)
+            or _PERIOD_CURRENT in token
+            or _PERIOD_PRIOR in token
+        ):
             return text
     return ""
 
@@ -166,8 +179,12 @@ def _parse_value(raw: str) -> int | None:
 
 
 def _is_label_column(header_texts: list[str], col_index: int) -> bool:
-    """# 패딩과 구분·기간 라벨 열만 건너뛴다. 빈 역할 헤더는 남긴다."""
-    tokens = [compact(text) for text in header_texts]
+    """# 패딩과 구분·기간 라벨 열만 건너뛴다. 빈 역할 헤더는 남긴다.
+
+    기간 단서와 같이 _squash로 서식 문자(Cf)를 지운 뒤 라벨인지 본다.
+    모서리의 soft hyphen이 낀 전기·당기도 라벨 열이다.
+    """
+    tokens = [_squash(text) for text in header_texts]
     if tokens and all(token == "#" for token in tokens):
         return True
     meaningful = [token for token in tokens if token and token != "#"]
