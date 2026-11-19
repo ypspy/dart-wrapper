@@ -232,6 +232,11 @@ def _count_table(table: Tag, *, require_kind: bool) -> int | None:
             continue
         if any(c != "#" and any(h in compact(c) for h in _NAME_HEADERS) for c in row):
             raise _Ambiguous("name_label_in_body")
+        if kind_index is not None:
+            kind = row[kind_index] if kind_index < len(row) else ""
+            if not _is_subsidiary_kind(kind):
+                body_rows += 1
+                continue
         if name_index is not None:
             name = compact(row[name_index]) if name_index < len(row) else ""
             if _BUNDLE_ROW.search(name):
