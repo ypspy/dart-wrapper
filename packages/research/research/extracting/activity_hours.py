@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 from bs4 import BeautifulSoup
 
 from research.extracting.table_matrix import expand_table_matrix
@@ -13,6 +16,22 @@ _LABEL_TOKENS = {"", "#", "구분", _PERIOD_CURRENT, _PERIOD_PRIOR}
 _ROW_LABEL_TOKENS = {"#", "구분", "투입시간"}
 _INTERIM_LABELS = ("분ㆍ반기검토", "분·반기검토", "분기검토", "반기검토")
 _AUDIT_EXCLUDES = ("감사참여자", "감사업무", "감사시간")
+# 기간 단서: 기수 표기. 당기/전기로 읽지 못한 헤더에 남으면 period_raw로 남긴다.
+_FISCAL_MARK = re.compile(r"(?:제|第)?\d+(?:기|期)")
+
+
+def _squash(text: str) -> str:
+    """compact에 더해 서식 문자(Cf: U+00AD·U+200B 등)를 지운다. 기간 단서 확인용."""
+    return "".join(ch for ch in compact(text) if unicodedata.category(ch) != "Cf")
+
+
+def _period_hint(texts: list[str]) -> str:
+    """기간으로 읽지 않은 헤더에 남은 기간 단서(기수, 숨은 당기/전기)의 원문. 없으면 ""."""
+    for text in texts:
+        token = _squash(text)
+        if _FISCAL_MARK.search(token) or _PERIOD_CURRENT in token or _PERIOD_PRIOR in token:
+            return text
+    return ""
 
 
 def _is_axis_header(token: str) -> bool:
@@ -113,7 +132,8 @@ def _match_period(header_texts: list[str], cell: str) -> tuple[str, str]:
             return "current", text
         if _PERIOD_PRIOR in token:
             return "prior", text
-    return "unknown", ""
+    # 기간은 모르지만 헤더에 기간 단서가 있으면 원문을 남긴다(period는 unknown 그대로).
+    return "unknown", _period_hint(header_texts)
 
 
 def _match_metric(col0: str, col1: str) -> tuple[str, str, bool]:
@@ -221,8 +241,11 @@ def _pivot(matrix: list[list[str]], headcount_row: int) -> list[dict[str, object
     """헤더 역할 열과 지표 행을 교차해 hours 원소를 만든다."""
     headers = _column_headers(matrix, headcount_row)
     role_columns: list[tuple[str, str, bool, list[str]]] = []
+    # 라벨 열(모서리)에 있는 기간 단서. 열은 건너뛰어도 원문은 칸의 period_raw로 남긴다.
+    axis_hint = ""
     for col_index, header_texts in enumerate(headers):
         if _is_label_column(header_texts, col_index):
+            axis_hint = axis_hint or _period_hint(header_texts)
             continue
         role, role_raw, unmapped = _match_role(header_texts)
         role_columns.append((role, role_raw, unmapped, header_texts))
@@ -239,6 +262,8 @@ def _pivot(matrix: list[list[str]], headcount_row: int) -> list[dict[str, object
         ]
         for (role, role_raw, role_unmapped, header_texts), raw in zip(role_columns, values):
             period, period_raw = _match_period(header_texts, raw)
+            if period == "unknown" and not period_raw:
+                period_raw = axis_hint
             cells.append(
                 _hours_cell(
                     role=role,
@@ -255,6 +280,8 @@ def _pivot(matrix: list[list[str]], headcount_row: int) -> list[dict[str, object
             if compact(raw) == "#":
                 continue
             period, period_raw = _match_period([], raw)
+            if period == "unknown" and not period_raw:
+                period_raw = axis_hint
             cells.append(
                 _hours_cell(
                     role="other",
