@@ -26,7 +26,7 @@ dart-wrapper는 DART 상세검색·상세페이지 HTML을 스크래핑해 공�
 | `ypspy/review-kit` | PRIVATE | `main` | 독립 리뷰어(클라우드 에이전트) 규칙·스킬. 9절 참고 | [확인됨] `git ls-remote` main = `e124cd3893c4fb7cd56b20252ef37f9c4dbb509b` |
 | `ypspy/my-obsidian-vault` | PRIVATE | — | 리타이어한 이전 볼트. 삭제·아카이브는 윤석님 확인 필요 | [확인됨] 목록 / [추정] 상태는 `wiki/bot-operations.md` 2026-11-05 기록 |
 
-세 대상 저장소의 `handover` 브랜치(2026-11-25 KST): quality-updates `d269d795`(PR #189 열림, base `main`), dart-wrapper `48762aa6`(PR #22 열림, base `master`), disclosure-extractor `f700c39e`(PR #15 열림, base `feat/standard-extractors`). 셋 다 기본 브랜치를 일반 merge 커밋으로 받은 뒤(QU `399885b9`, DW `f7f4499`, DE `fd1561b`) DECISIONS.md 정리 커밋을 얹은 상태로, 기본 브랜치보다 뒤처진 커밋은 없다(앞선 커밋 QU 5, DW 4, DE 4). 11/24 초안의 `.gitignore`·`.env.example`·`HANDOVER.md`는 #187/#21/#14로 기본 브랜치에 들어갔다. 이 갱신본은 열린 PR과 섞이지 않게 `handover-update-20261125` 브랜치에서 올린다. [확인됨 11/25] `git rev-list --left-right --count`, `gh pr list`, `gh pr view`
+세 대상 저장소의 `handover` 브랜치(2026-11-25 KST): quality-updates `d269d795`(PR #189 열림, base `main`), dart-wrapper `48762aab`(PR #22 열림, base `master`), disclosure-extractor `f700c39e`(PR #15 열림, base `feat/standard-extractors`). 셋 다 기본 브랜치를 일반 merge 커밋으로 받은 뒤(QU `399885b9`, DW `f7f4499`, DE `fd1561b`) DECISIONS.md 정리 커밋을 얹은 상태로, 기본 브랜치보다 뒤처진 커밋은 없다(앞선 커밋 QU 5, DW 4, DE 4). 11/24 초안의 `.gitignore`·`.env.example`·`HANDOVER.md`는 #187/#21/#14로 기본 브랜치에 들어갔다. 이 갱신본은 열린 PR과 섞이지 않게 `handover-update-20261125` 브랜치에서 올린다. [확인됨 11/25] `git rev-list --left-right --count`, `gh pr list`, `gh pr view`
 
 ### 2.2 로컬 폴더 — LAPTOP-YS (Windows, 윤석님 노트북)
 
@@ -181,13 +181,13 @@ PR·커밋 봇 식별 규칙(앞방향만): 라벨 `bot:<봇이름>`(클라우�
 
 ## 5. 결정 기록
 
-- `DECISIONS.md`(3절 구조: 1. 이 프로젝트 결정 19, 2. 공통 결정 92, 3. 미분류 64)는 PR #22(head `handover` `48762aa6`)로 열려 있고 `master`에는 아직 없다. 머지는 윤석님 결정 대기 [확인됨 11/25: `gh pr list`, 항목 수 직접 셈].
+- `DECISIONS.md`(3절 구조: 1. 이 프로젝트 결정 19, 2. 공통 결정 92, 3. 미분류 64)는 PR #22(head `handover` `48762aab`)로 열려 있고 `master`에는 아직 없다. 머지는 윤석님 결정 대기 [확인됨 11/25: `gh pr list`, 항목 수 직접 셈].
 - 공통 결정 모음 `COMMON_DECISIONS.md`(156항목)는 quality-updates PR #189에 있다. 3절 미분류는 확정 전에는 규칙으로 쓰지 않는다.
 
 ## 6. 진행 중 작업
 
 ### 6.1 열린 PR·이슈
-- 열린 PR 1건: #22 프로젝트별 DECISIONS.md(3절 구조) 추가, head `handover` `48762aa6`, base `master`, 머지 금지·윤석님 검토 대기 [확인됨 11/25]. 열린 이슈 0건 [확인됨, 11/24].
+- 열린 PR 1건: #22 프로젝트별 DECISIONS.md(3절 구조) 추가, head `handover` `48762aab`, base `master`, 머지 금지·윤석님 검토 대기 [확인됨 11/25]. 열린 이슈 0건 [확인됨, 11/24].
 - 최근 머지: #21 `1f199e0a`(HANDOVER.md, 2026-11-24), #20 `ef02eb7e`(PR #17 경미 3건), #19 `5d442c7e`(CI 추가), #17 `d15f058d`(period_raw), #16 `38bd9dfe`(FS6-SUB), #15 `492138c5`(단일 기간 감사시간), #14 `2c288048`(interim_review.v1 추출기), #13 `0bdc0e2b`, #12 `d8e92e12` [확인됨].
 
 ### 6.2 미완료 작업
