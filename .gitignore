@@ -38,3 +38,11 @@ packages/web-api/scripts/dump_activity_full.py
 packages/web-api/scripts/gen_d4_canvas.py
 packages/web-api/scripts/reextract_attachment_corrections.py
 packages/entry-extractor/scripts/
+# handover 보강: 최소 비밀·로그·키, 로컬 DB(웹 API 경로 밖 포함)
+.env.*
+logs/
+*.key
+*.pem
+*.db
+*.db-wal
+*.db-shm
