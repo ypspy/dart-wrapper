@@ -1,14 +1,15 @@
 # HANDOVER — ypspy/dart-wrapper
 
 - 작성: 2026-11-24 CET(UTC+1), 조율 담당(Mr. Vegetable) executor. 기준 브랜치 `handover` @ `ab74bad6` (base `master` `ef02eb7e`).
-- 이 파일은 `handover` 브랜치 PR로 올린 초안이다. 머지는 윤석님 검토·승인 후.
-- 표기: [확인됨] 이번 작성에서 직접 확인 / [추정] 기록·봇 보고에 있으나 이번에 재확인 안 함 / [확인 불가] 근거를 찾지 못함 / [접근 불가] 접근 경로 없음(LAPTOP-YS 오프라인 11/21–11/30 등).
+- 갱신: 2026-11-25 KST(UTC+9), 조율 담당(Mr. Vegetable) executor. 갱신 브랜치 `handover-update-20261125`(base `master` `1f199e0a`). LAPTOP-YS가 응답해 2.2절을 읽기 전용 점검 결과로 바꾸고, 11/24 이후 바뀐 PR·봇 상태를 반영했다. 이번 갱신에서 새로 확인한 것은 [확인됨 11/25]로 적었다. 그 밖의 [확인됨]은 11/24 작성 때 확인한 값이다.
+- 11/24 초안은 quality-updates #187, dart-wrapper #21, disclosure-extractor #14로 각 기본 브랜치에 squash 머지됐다(2026-11-24 12:35~12:36 KST). 이 갱신본은 별도 PR이며 머지는 윤석님 검토·승인 후.
+- 표기: [확인됨] 이번 작성에서 직접 확인 / [추정] 기록·봇 보고에 있으나 이번에 재확인 안 함 / [확인 불가] 근거를 찾지 못함 / [접근 불가] 접근 경로 없음(11/24 작성 당시 LAPTOP-YS 오프라인 등).
 - 비밀값(토큰·키·비밀번호·환경변수 값)은 적지 않았다. 이름만 적었다.
 - 자매 문서: `ypspy/quality-updates` `HANDOVER.md`, `ypspy/disclosure-extractor` `HANDOVER.md` (2·4·9절은 세 문서 공통).
 
 ## 1. 프로젝트 목적과 현재 상태
 
-dart-wrapper는 DART 상세검색·상세페이지 HTML을 스크래핑해 공시 카탈로그(`entries`, `disclosures`)를 만들고 조회 시 원문을 정제해 보여주는 모노레포이며(`packages/entry-extractor` Node, `packages/web-api` FastAPI, `packages/research` 감사 추출) [확인됨: `README.md`, `AGENTS.md`], 팀 구조상 DART 1층 원천 수집(Seaweed)과 2층 파싱·추출(Zucchini)의 공용 코드베이스다 [추정: `wiki/bot-operations.md`]. `master`는 `ef02eb7e`(#20, 2026-11-19 머지), CI `ci` 성공, 열린 PR·이슈 0건이다 [확인됨]. 실제 데이터(`dart_catalog.db` 약 10.1 GB, 공시 488,539건 11/21 기준)와 야간 수집·주간 백업은 LAPTOP-YS에만 있어 이번 작성에서는 [접근 불가]이며, 여행 기간 중 수집은 멈춰 있고 ARF C2 추출(남은 3,167건)은 W1 골드 캡처 완료 뒤로 보류다 [추정: `Seaweed.md` §2, `Zucchini.md` §1.3·§3].
+dart-wrapper는 DART 상세검색·상세페이지 HTML을 스크래핑해 공시 카탈로그(`entries`, `disclosures`)를 만들고 조회 시 원문을 정제해 보여주는 모노레포이며(`packages/entry-extractor` Node, `packages/web-api` FastAPI, `packages/research` 감사 추출) [확인됨: `README.md`, `AGENTS.md`], 팀 구조상 DART 1층 원천 수집(Seaweed)과 2층 파싱·추출(Zucchini)의 공용 코드베이스다 [추정: `wiki/bot-operations.md`]. `master`는 `1f199e0a`(#21 `HANDOVER.md`, 2026-11-24 머지, CI 성공)이고 마지막 코드 변경은 #20 `ef02eb7e`(2026-11-19)이다. 열린 PR은 #22(DECISIONS.md) 1건이다 [확인됨 11/25]. 실제 데이터(`dart_catalog.db` 10,336,010,240 B, 공시 488,539건)와 야간 수집·주간 백업은 LAPTOP-YS에만 있다 [확인됨 11/25: 랩탑 읽기 전용]. 마지막 야간 수집은 11/21, 마지막 백업은 11/20이며 [확인됨 11/25: 예약 작업 기록], 여행 기간 중 수집은 멈춰 있었고 ARF C2 추출(남은 3,167건)은 W1 골드 캡처 완료 뒤로 보류다 [추정: `Seaweed.md` §2, `Zucchini.md` §1.3·§3].
 
 ## 2. 자료 위치 지도
 
@@ -25,33 +26,71 @@ dart-wrapper는 DART 상세검색·상세페이지 HTML을 스크래핑해 공�
 | `ypspy/review-kit` | PRIVATE | `main` | 독립 리뷰어(클라우드 에이전트) 규칙·스킬. 9절 참고 | [확인됨] `git ls-remote` main = `e124cd3893c4fb7cd56b20252ef37f9c4dbb509b` |
 | `ypspy/my-obsidian-vault` | PRIVATE | — | 리타이어한 이전 볼트. 삭제·아카이브는 윤석님 확인 필요 | [확인됨] 목록 / [추정] 상태는 `wiki/bot-operations.md` 2026-11-05 기록 |
 
-세 대상 저장소의 `handover` 브랜치: quality-updates `c8826001`(base `main` 150cdca5), dart-wrapper `ab74bad6`(base `master` ef02eb7e), disclosure-extractor `cf9afbfa`(base `feat/standard-extractors` d4e7bae9). 각각 `.gitignore` 보강과 `.env.example`(이름만) 커밋 1개. [확인됨] `git log` (이 파일이 놓인 clone)
+세 대상 저장소의 `handover` 브랜치(2026-11-25 KST): quality-updates `d269d795`(PR #189 열림, base `main`), dart-wrapper `48762aab`(PR #22 열림, base `master`), disclosure-extractor `f700c39e`(PR #15 열림, base `feat/standard-extractors`). 셋 다 기본 브랜치를 일반 merge 커밋으로 받은 뒤(QU `399885b9`, DW `f7f4499`, DE `fd1561b`) DECISIONS.md 정리 커밋을 얹은 상태로, 기본 브랜치보다 뒤처진 커밋은 없다(앞선 커밋 QU 5, DW 4, DE 4). 11/24 초안의 `.gitignore`·`.env.example`·`HANDOVER.md`는 #187/#21/#14로 기본 브랜치에 들어갔다. 이 갱신본은 열린 PR과 섞이지 않게 `handover-update-20261125` 브랜치에서 올린다. [확인됨 11/25] `git rev-list --left-right --count`, `gh pr list`, `gh pr view`
 
 ### 2.2 로컬 폴더 — LAPTOP-YS (Windows, 윤석님 노트북)
 
-**[접근 불가]** 2026-11-21~11-30 여행으로 오프라인. 아래 경로는 봇 보고서·박스 기록에 적힌 마지막 확인값이며 이번에 직접 보지 않았다.
+**[확인됨 11/25]** 2026-11-25 05:27 KST에 LAPTOP-YS가 응답해 읽기 전용 명령으로 확인했다(`git status -sb`·`rev-parse`·`worktree list`, 파일 목록·크기, `Get-ScheduledTask`, SQLite `immutable=1` 읽기, `Get-FileHash`, 프로세스·포트 목록). 랩탑에는 아무것도 쓰거나 바꾸지 않았고 `git fetch`도 하지 않았다. 랩탑의 origin 추적 ref는 마지막 fetch(2026-11-23 00:22 KST) 기준이라, 아래 "원격 대비"는 박스에서 받은 현재 원격과 비교한 값이다. 시각은 모두 KST.
 
-| 경로 | 용도 | 근거 |
+**작업 트리**
+
+| 경로 | 브랜치 @ HEAD | 원격 대비 | untracked |
+|---|---|---|---|
+| `C:\dev\quality-updates` | `fix/sanction-kale-handoff-format` @ `4cfc3561` | 원격 같은 브랜치와 같음. 현재 `origin/main` `67fc396a`보다 1 앞서고 80 뒤처짐 | `scripts/tests/fixtures/summary_bench/` |
+| `C:\dev\dart-wrapper` | `feat/gold-review` @ `2f0bf964`(고정, checkout·pull 금지 [추정: `Seaweed.md` §1]) | 원격 `feat/gold-review`와 같음. 현재 `origin/master` `1f199e0a`보다 42 뒤처짐 | `data/`, `packages/web-api/dart_sections.db-shm`, `packages/web-api/dart_sections.db-wal` |
+| `C:\dev\disclosure-extractor` | `feat/standard-extractors` @ `d4e7bae9` | 현재 원격 `374cad91`(#14 HANDOVER 머지)보다 1 뒤처짐 | 없음 |
+| `C:\dev\dw-arf-d8e92e1`, `C:\dev\dw-f004-d8e92e1` | dart-wrapper worktree 2개, 둘 다 detached `d8e92e1` | — | — |
+
+**로컬 DB** (건수는 SQLite `immutable=1` 읽기)
+
+| 경로 | 크기·수정 시각 | 내용 |
 |---|---|---|
-| `C:\dev\dart-wrapper` | DW 작업 트리. `feat/gold-review` @ `2f0bf964`로 고정(checkout·pull 금지) | [추정] `/workspace/handover/bot-reports/Seaweed.md` §1, `/workspace/laptop-sync/origin-sync-result-20261122-0922.txt` |
-| `C:\dev\dart-wrapper\packages\web-api\dart_catalog.db` | 1층 카탈로그(SQLite, 10,096,406,528 B, 2026-11-20 조회) | [추정] `/workspace/proposals/cloud-migration/plan.md` §1 |
-| `C:\dev\dart-wrapper\packages\web-api\dart_sections.db` | F004 본문(6,328,320 B) | [추정] 같은 문서 |
-| `C:\dev\dart-wrapper\data\gold\gold.db` | DW 골드 DB(읽기 전용, 새 라벨 금지) | [추정] `/workspace/handover/bot-reports/Zucchini.md` §6.1 |
-| `C:\dev\dart-wrapper\packages\web-api\f004_research.db` | F004 연구 DB(백업 대상 아님) | [추정] `Seaweed.md` §2.7 |
-| `C:\dev\disclosure-extractor` / `data\gold.db` | DE 트리(`feat/standard-extractors` @ `d4e7bae9`)와 골드 DB(samples 446, labels 0) | [추정] `/workspace/proposals/gold-ingest/w1-desk-restart-20261121-CT.md` |
-| `C:\dev\dart-nightly\run.ps1`, `C:\dev\dart-f004\run.ps1` | 야간 수집·F004 주간 래퍼(작업 스케줄러 `DartNightlyCatalog`, `DartF004Weekly`) | [추정] `Seaweed.md` §1 |
-| `C:\backups\dart\run-backup.ps1`, `backup.py`, `dart-db-slot{N}.zip` | 주간 DB 백업(`DartDbBackup`) | [추정] `Seaweed.md` §2.7, 박스 사본 `/workspace/dart-backup/` |
-| `C:\Users\yoont\arf-resume-20261115\` | ARF 추출 도구·Gold Desk 로그 | [추정] `Zucchini.md` §6.1 |
-| `C:\dev\quality-updates`, 제재 폴더 `qu-sanctions`(969폴더) | QU 랩탑 트리·제재 원자료 | [추정] `Cabbage.md` §1, `Mint.md` §1 |
-| `accounting-lit-mcp`, `ax-learning` | 랩탑에만 있는 프로젝트(이관 대상 아님) | [접근 불가] |
+| `C:\dev\dart-wrapper\packages\web-api\dart_catalog.db` | 10,336,010,240 B, 2026-11-21 21:10 | 1층 카탈로그. `disclosures` 488,539건, `slice_progress` complete 19,504·pending 75, `catalog_jobs`·`extraction_jobs`의 running/pending 0 |
+| `C:\dev\dart-wrapper\packages\web-api\dart_sections.db` | 6,328,320 B, 2026-11-07 00:51 | F004 본문 |
+| `C:\dev\dart-wrapper\packages\web-api\f004_research.db` | 15,585,280 B, 2026-11-16 11:02 | F004 연구 DB(백업 대상 아님) |
+| `C:\dev\dart-wrapper\data\gold\gold.db` | 13,529,088 B, 2026-11-12 13:49 | DW 골드 DB(읽기 전용, 새 라벨 금지 [추정: `Zucchini.md` §6.1]). samples 446, captures 7, capture_history 10, labels 0, runs 1. SHA-256 앞 16자리 `A0CAC855C1DB2D25` |
+| `C:\dev\disclosure-extractor\data\gold.db` | 13,529,088 B, 2026-11-20 00:14 | DE 골드 DB. samples 446, extractor_snapshots 446, captures 0, labels 0, runs 1. SHA-256 앞 16자리 `1E603DA5093EAE41`(11/20 기록 `1e603da5…`와 앞자리 같음) |
+| `C:\dev\dart-wrapper\.worktrees\admin-viewer-skeleton\packages\web-api\dart_catalog.db` | 53,248 B, 2026-07-25 | `git worktree list`에 없는 남은 폴더 안의 작은 DB |
+| `C:\dev\dart-wrapper\data\gold_cache` | — | 골드 원문 캐시. 존재만 확인(크기 미측정) |
+
+**실행 스크립트·예약 작업** (작업 스케줄러, 프로젝트 관련 3개. 나머지는 OneDrive·Google·Apple·Lenovo·Realtek 등 무관한 작업)
+
+| 작업 이름 | 실행 | 트리거 | 마지막 실행·결과 | 다음 실행 |
+|---|---|---|---|---|
+| `DartNightlyCatalog` | `powershell.exe -File C:\dev\dart-nightly\run.ps1` | 매일 14:00, 15:00 | 2026-11-21 15:00, 결과 0. 요약 로그: 15:00~21:10, added 4,829, total 488,539, 잡 `376d2c25…` partial(예산 정지), 미완료 슬라이스 75 | 2026-11-25 14:00 |
+| `DartF004Weekly` | `powershell.exe -File C:\dev\dart-f004\run.ps1` | 토 21:00, 22:00 | 2026-11-21 22:00, **결과 1**. 로그: `loader not found at C:\dev\dw-f004\packages\web-api\scripts\load_section_bodies.py`(`reason=loader_missing`). 스크립트(L13)는 `C:\dev\dw-f004`를 쓰지만 그 폴더는 없고 worktree는 `C:\dev\dw-f004-d8e92e1`이다 | 2026-11-28 21:00 |
+| `DartDbBackup` | `powershell.exe -File C:\backups\dart\run-backup.ps1` → `C:\backups\dart\backup.py` | 수 21:30 | 2026-11-20 21:17 시작, 21:44 `backup.py exit=0`(1,627.8초), 결과 0 | 2026-11-25 21:30 |
+
+- `C:\dev\dart-nightly\run-sections.ps1`도 있다(연결된 예약 작업 없음).
+- `C:\dev\dart-nightly\run.ps1`은 회차마다 `origin/master`를 `C:\dev\dw-nightly`로 detach해 쓰고 끝나면 지운다(L4, L127–L128, L140). 지금 `C:\dev\dw-nightly`는 없다.
+- 로그: `C:\dev\dart-nightly\logs\`(최신 `20261121*.log`, `*-summary.txt`), `C:\backups\dart\logs\`(최신 `backup-20261120-211706.log`).
+- 실행 중 프로세스: python·uvicorn 0개, 8000–8999 포트 LISTEN 0개 → Gold Desk(:8765)와 uvicorn :8010 모두 꺼져 있다.
+
+**백업** (`C:\backups` 전체 20,986,674,922 B)
+
+| 경로 | 내용 |
+|---|---|
+| `C:\backups\dart\` (19,463,795,045 B) | `dart-db-slot3.zip`(1,198,994,722 B, 2026-11-20 21:44), `run-backup.ps1`, `backup.py`, `logs\`, `tmp\`, `pre-arf-20261116\`, `pre-f004-02-20261116\` 등. `backup.py` 대상은 `dart_catalog.db`, `dart_sections.db`, DW `data\gold\gold.db` 3개(L18–L20) — DE `gold.db`, `f004_research.db`는 없다 |
+| `C:\backups\qu-sanctions-20261116-postd28`, `-20261116-r2`, `-20261117-prec20-5`, `-20261118-pre-c16` | QU 제재 폴더 스냅샷 4개(하위 폴더 595 / 688 / 608 / 610) |
+
+**기타**
+
+| 경로 | 내용 |
+|---|---|
+| `C:\Users\yoont\arf-resume-20261115\` | ARF 추출 도구·Gold Desk 로그 [추정: `Zucchini.md` §6.1]. 존재만 확인 |
+| QU 제재 원본 `qu-sanctions`(969폴더 [추정: `Cabbage.md` §1]) | `C:\dev\quality-updates` 아래(깊이 2)와 `C:\Users\yoont` 아래(깊이 3)에서 찾지 못함 — 위치 [확인 불가] |
+| `C:\dev`의 다른 폴더: `accounting-lit-mcp`, `audit-engagement-template`, `ax-learning`, `cost-analysis`, `firmFlow`, `obsidian-vault`, `spelling-bee`, `_archive`, `dart-f004`, `dart-nightly` | 세 저장소와 별개(앞의 둘은 스크립트 폴더). 내용은 열지 않음 |
+
+- `.env` 파일은 비밀값이 있어 열지 않았다.
 
 ### 2.3 봇 박스 (Grok Bot 공용 Linux 박스, `/workspace`)
 
 | 경로 | 용도 | 근거 |
 |---|---|---|
-| `/workspace/handover-repos/<repo>` | 이 HANDOVER.md가 놓인 `handover` 브랜치 clone | [확인됨] |
+| `/workspace/handover-repos/<repo>` | 이 HANDOVER.md를 고친 clone(`handover`, `handover-update-20261125` 브랜치) | [확인됨 11/25] |
+| `/workspace/handover-repos/quality-updates/COMMON_DECISIONS.md` (`handover` 브랜치, PR #189) | 공통 결정 모음 156항목(1. 공통 92, 2. 세 저장소 밖 30, 3. 여러 프로젝트 섞임 11, 4. 프로젝트 불명 23). 위치는 임시이며 최종 위치는 윤석님 결정 대기 | [확인됨 11/25] 항목 수 직접 셈 |
 | `/workspace/quality-updates`, `/workspace/repos/dart-wrapper`, `/workspace/disclosure-extractor-pr11`, `/workspace/qu-*`, `/workspace/wt*` 등 | 봇 작업용 clone·worktree(여러 개, 일부 detached) | [확인됨] `find / -name .git` |
-| `/workspace/decision-inbox/queue.md` | 결정 대기열(추가만, 봇 보고 한 줄씩). 544줄 | [확인됨] |
+| `/workspace/decision-inbox/queue.md` | 결정 대기열(추가만, 봇 보고 한 줄씩). 554줄 | [확인됨 11/25] |
 | `/workspace/proposals/` | 계획서·실행안(`economy/team-rules-v1.md`, `cloud-migration/`, `gold-ingest/`, `qu-bf2000/`, `team-ops-5-actions-20261122.md`) | [확인됨] |
 | `/workspace/plans/` | 수집·백필 계획(2026-11-11~11-20) | [확인됨] |
 | `/workspace/prompts/` | 봇·클라우드 에이전트 지시서 85개 | [확인됨] `ls \| wc -l` |
@@ -99,7 +138,7 @@ dart-wrapper는 DART 상세검색·상세페이지 HTML을 스크래핑해 공�
 ### 3.2 브랜치 전략
 - 기본 `master`(`main`으로 바꾸지 않음, `docs/github-repo.md`), 보호 규칙 없음 [확인됨].
 - 원격 브랜치 21개: `cursor/` 7, `feat/` 4, `fix/` 4, `chore/` 2, `docs/`·`sync/`·`handover` [확인됨]. 머지 방식은 merge 커밋(#11·#12)과 squash(#13~#20) 혼재 [확인됨: `git log`].
-- LAPTOP-YS `C:\dev\dart-wrapper`는 `feat/gold-review` @ `2f0bf964`로 고정(checkout·pull 금지). 야간 수집은 회차마다 `origin/master`를 `C:\dev\dw-nightly` worktree로 detach해 실행 [추정: `Seaweed.md` §1].
+- LAPTOP-YS `C:\dev\dart-wrapper`는 `feat/gold-review` @ `2f0bf964`로 고정(checkout·pull 금지). 야간 수집은 회차마다 `origin/master`를 `C:\dev\dw-nightly` worktree로 detach해 실행 [추정: `Seaweed.md` §1 / 11/25 확인: HEAD `2f0bf964`, `run.ps1` L4·L127–L128·L140이 `C:\dev\dw-nightly`를 만들고 지움, 지금은 없음].
 
 ### 3.3 실행·테스트·배포 명령 [확인됨: `README.md`, CI]
 
@@ -115,7 +154,7 @@ cd packages/entry-extractor && npm test             # node --test tests/test_*.j
 ```
 - 이번 박스 실측(Python 3.13.5, `/tmp` venv): web-api **298 passed**, research **842 passed** [확인됨]. entry-extractor `npm test`는 실행하지 않음.
 - 배포: 공개 앱 실제 배포처는 [확인 불가](저장소에 Render·Docker 설정 없음 [확인됨: 파일 부재]).
-- 야간 수집(랩탑): 작업 스케줄러 `DartNightlyCatalog` → `C:\dev\dart-nightly\run.ps1`(370분 한도), `DartF004Weekly` → `C:\dev\dart-f004\run.ps1`, `DartDbBackup` → `C:\backups\dart\run-backup.ps1` [추정: `Seaweed.md` §1·§2 / 실본 [접근 불가]].
+- 야간 수집(랩탑): 작업 스케줄러 `DartNightlyCatalog` → `C:\dev\dart-nightly\run.ps1`(370분 한도), `DartF004Weekly` → `C:\dev\dart-f004\run.ps1`, `DartDbBackup` → `C:\backups\dart\run-backup.ps1` [확인됨 11/25: `Get-ScheduledTask` 동작·트리거, 2.2절 표].
 
 ## 4. 봇별 역할 분담
 
@@ -124,7 +163,7 @@ cd packages/entry-extractor && npm test             # node --test tests/test_*.j
 
 | 봇 | 역할 | 담당 파일·모듈 | 지금까지 한 일 (근거) | 보고 |
 |---|---|---|---|---|
-| Mr. Vegetable · 조율 담당 | 조율만. 결정 대기함, 브리핑, 봇 지시, 독립 검토 띄우기, 머지 실행(윤석님 결정 후) | `/workspace/decision-inbox/queue.md`, `/workspace/proposals/`, `/workspace/prompts/`, `/workspace/reviews/state/` | 세 저장소 `handover` 브랜치 생성·커밋(`c8826001`, `ab74bad6`, `cf9afbfa`) [확인됨: git log]. 머지 실행 예: dart-wrapper #20 `ef02eb7e`, quality-updates #153 `85b66aa4` [추정: queue.md 2026-11-20 줄] | 요청자(해당 없음) |
+| Mr. Vegetable · 조율 담당 | 조율만. 결정 대기함, 브리핑, 봇 지시, 독립 검토 띄우기, 머지 실행(윤석님 결정 후) | `/workspace/decision-inbox/queue.md`, `/workspace/proposals/`, `/workspace/prompts/`, `/workspace/reviews/state/` | 세 저장소 `handover` 브랜치 생성·커밋(`c8826001`, `ab74bad6`, `cf9afbfa`) [확인됨: git log]. 11/24 HANDOVER(#187·#21·#14)와 QU DECISIONS(#188) squash 머지, DECISIONS 3절 구조 PR #189·#22·#15 열림 [확인됨 11/25: `gh pr view`]. 머지 실행 예: dart-wrapper #20 `ef02eb7e`, quality-updates #153 `85b66aa4` [추정: queue.md 2026-11-20 줄] | 요청자(해당 없음) |
 | Mr. Cabbage · Quality Update 담당 | `quality-updates` 구현·수집·draft PR. 비DART 원천(FSC·FSS·KASB 등) 수집·가공 | `scripts/crawl.py`, `scripts/crawler/`, `scripts/attach_sanction_minutes.py`, `scripts/lint_public_body.py`, `docs/quality-updates/`, `data/` | 최근 머지 #173~#186 [확인됨: `gh pr list --state merged`]. 2013→2000 연도 백필 중 #177(2013)·#183(2012) 머지, #184(2011)·#185(2010) draft. 루틴 `qu`, `qu-2`, `fss-b0000291` [추정: 보고서] | 수신 `Cabbage.md` |
 | Mr. Mint · 품질관리감리 담당 | 품질관리감리·제재 의결 분류와 원문 대조. **코드 구현 안 함** | `/workspace/handoff/qu-bf-<연도>/`, `/workspace/fss-review/`, `/workspace/f004/review-pr*` | 2013→2000 분류 r2 완료, F004 관련 #145~#150 머지, 주간 감리 점검(2026-11-23 신규 0) [추정: `Mint.md` §2~3] | 수신 `Mint.md` |
 | Mr. Seaweed · 데이터 추출 담당 | DART 1층 원천 수집(`dart_catalog.db` `disclosures`/`entries`/`corps`/`slice_progress`, `dart_sections.db`), DB 파일·백업 실행 | DW `packages/web-api`(수집), 랩탑 `run.ps1`·`backup.py` | D3-2015(F002 2015 365/365 complete), 공시 누계 483,710(11/20)→488,539(11/21), 여행 전 수동 백업 [추정: `Seaweed.md` §3] | 수신 `Seaweed.md` |
@@ -132,43 +171,53 @@ cd packages/entry-extractor && npm test             # node --test tests/test_*.j
 | Mr. Kale · Second-Brain 담당 | `ypspy/obsidian-vault`에만 쓰기. raw 반입·위키 합성 | 볼트 `raw/`, `wiki/`, `.cursorrules` | 볼트 PR #16~#20 머지: #18 회계기준위 566회(`b247e2bf`), #19 금융위·증선위 969회차(`67752242`), #20 허브 날짜(`e54d2aa9`) [확인됨: `gh pr list -R ypspy/obsidian-vault --state merged`]. 루틴 D12(`/workspace/synth-runner/run_weekly.py`, 잔액 하한 가드로 11/23 skip) [추정: `Kale.md` §6] | 수신 `Kale.md` |
 | Mr. Rice · 드라이브 문서 담당 | Google Drive 개인 문서 정리(Second-Brain 제외). DART DB는 다루지 않고 백업 위치만 | `/workspace/full_scan/`, `/workspace/drive_cleanup_*`, `/workspace/step3_rename_candidates/` | Drive 전수 목록 r79–r84 누계 63,340항목·쓰기 0 [확인됨: `/workspace/full_scan/report_r79-r84.md`], Step 3 이름 변경 1,823행, 중복 정리 Step 1 이동 7,119·잔여 1,768, `DART_DB_백업` 폴더 생성 [추정: `Rice.md` §2~3]. 루틴: 전수 조사(`automation-1794885772459`), 중복 정리 야간(`automation-1793420638471`), Inbox 분류(`drive-inbox`) | 수신 `Rice.md` |
 
+**11/25 갱신 메모(봇 상태)**
+- Zucchini: ARF C2 마지막 잡 `925d62064e424e5b925850f4aea2e4e7`을 랩탑 `dart_catalog.db` `extraction_jobs`에서 읽기 전용으로 확인 — 상태 `partial`, extractor `audit_opinion`, mode `resume`, `finished_at` 2026-11-19 04:35:22(DB 기록값, 시간대 표기 없음). running/pending 잡 0, :8010 LISTEN 없음 [확인됨 11/25]. 11/18 밤 이후 미점검으로 남아 있던 '잡 925d6206·uvicorn :8010' 확인은 이것으로 끝났다. C2와 uvicorn :8010은 W1 캡처가 끝날 때까지 시작하지 않는다 [추정: queue.md 2026-11-24 8:09 AM CT 줄, `Zucchini.md` §3]. ARF 루틴 3개(`arf-07-50-ct`, `arf-09-22-ct`, `arf-23-00-ct`) 일시정지 여부는 윤석님 답 대기 [추정: queue.md 2026-11-23 7:36 PM CT 줄].
+- Seaweed: 예약 작업 3개가 Ready 상태이고 랩탑이 켜져 있어 다음 실행이 잡혀 있다(`DartNightlyCatalog` 2026-11-25 14:00, `DartDbBackup` 11-25 21:30, `DartF004Weekly` 11-28 21:00 KST). `DartF004Weekly`는 11/21에 `loader_missing`으로 실패했다 [확인됨 11/25: 2.2절]. 여행 중 catch-up 금지 방침 [추정: `Seaweed.md` §1]에 비춰 이 실행을 둘지는 이번에 바꾸지 않았다.
+- Rice: Drive 전수 조사 r91–r96 누계 65,140항목·쓰기 0, 대기열 1,466 [추정: queue.md 2026-11-24 3:15 AM CT 줄].
+- Gold Desk(:8765)는 꺼져 있다. 다시 켜는 것은 윤석님 결정 사항 [확인됨 11/25: 프로세스·포트 목록].
+
 PR·커밋 봇 식별 규칙(앞방향만): 라벨 `bot:<봇이름>`(클라우드 에이전트면 `bot:cloud-agent` 추가), 커밋 끝 `Bot: <봇이름>` + `Made-with: cursor-agent`. [추정] `/workspace/proposals/team-ops-5-actions-20261122.md` §1 (실행안, 라벨 저장소 생성은 별도 승인), `Cabbage.md` §5. 2026-10-25~11-22 PR 216건 중 213건 작성자가 `ypspy`라 과거 PR은 봇을 구분할 수 없다. [추정: 같은 문서 배경]
 
 ## 5. 결정 기록
 
-별도 DECISIONS.md에서 관리 예정
+- `DECISIONS.md`(3절 구조: 1. 이 프로젝트 결정 19, 2. 공통 결정 92, 3. 미분류 64)는 PR #22(head `handover` `48762aab`)로 열려 있고 `master`에는 아직 없다. 머지는 윤석님 결정 대기 [확인됨 11/25: `gh pr list`, 항목 수 직접 셈].
+- 공통 결정 모음 `COMMON_DECISIONS.md`(156항목)는 quality-updates PR #189에 있다. 3절 미분류는 확정 전에는 규칙으로 쓰지 않는다.
 
 ## 6. 진행 중 작업
 
 ### 6.1 열린 PR·이슈
-- 열린 PR 0건, 열린 이슈 0건 [확인됨: `gh pr list`·`gh issue list`, 2026-11-24 CET].
-- 최근 머지: #20 `ef02eb7e`(PR #17 경미 3건), #19 `5d442c7e`(CI 추가), #17 `d15f058d`(period_raw), #16 `38bd9dfe`(FS6-SUB), #15 `492138c5`(단일 기간 감사시간), #14 `2c288048`(interim_review.v1 추출기), #13 `0bdc0e2b`, #12 `d8e92e12` [확인됨].
+- 열린 PR 1건: #22 프로젝트별 DECISIONS.md(3절 구조) 추가, head `handover` `48762aab`, base `master`, 머지 금지·윤석님 검토 대기 [확인됨 11/25]. 열린 이슈 0건 [확인됨, 11/24].
+- 최근 머지: #21 `1f199e0a`(HANDOVER.md, 2026-11-24), #20 `ef02eb7e`(PR #17 경미 3건), #19 `5d442c7e`(CI 추가), #17 `d15f058d`(period_raw), #16 `38bd9dfe`(FS6-SUB), #15 `492138c5`(단일 기간 감사시간), #14 `2c288048`(interim_review.v1 추출기), #13 `0bdc0e2b`, #12 `d8e92e12` [확인됨].
 
 ### 6.2 미완료 작업
-- ARF C2 추출: 마지막 잡 `925d62064e424e5b925850f4aea2e4e7` partial, 14,288/17,455 처리, 남은 3,167건(2017-04-07–2017-12-31, F001/F002/A001) [추정: `Zucchini.md` §1.3].
+- ARF C2 추출: 마지막 잡 `925d62064e424e5b925850f4aea2e4e7` partial, 14,288/17,455 처리, 남은 3,167건(2017-04-07–2017-12-31, F001/F002/A001) [추정: `Zucchini.md` §1.3]. 11/25 랩탑 `extraction_jobs` 읽기: 상태 `partial`, mode `resume`, running/pending 잡 0, :8010 LISTEN 없음 [확인됨 11/25].
 - #15/#16/#17 머지 후 큐 재생성·재추출·실DB 쓰기는 별도 승인 [추정: `Zucchini.md` §3-7]. #14 추출기 실행·테이블 생성도 별도 승인 [추정: PR #14 제목 "(draft, 실행·테이블 생성 별도 승인)" 확인됨].
-- 미완료 슬라이스(A002/A003/F004) 11/21 기준 75개 pending. 현재 수는 [확인 불가] [추정: `Seaweed.md` §4].
-- 백업 미포함 DB: DE `gold.db`, `f004_research.db` [추정: `Seaweed.md` §2.7].
+- 미완료 슬라이스(A002/A003/F004) 11/21 기준 75개 pending [추정: `Seaweed.md` §4]. 11/25 랩탑 읽기에서도 `slice_progress` pending 75, complete 19,504 [확인됨 11/25].
+- 백업 미포함 DB: DE `gold.db`, `f004_research.db` [추정: `Seaweed.md` §2.7 / 확인됨 11/25: 랩탑 `backup.py` L18–L20].
 - 클라우드 이전(야간 수집·F004)은 계획서만 있음: `/workspace/proposals/cloud-migration/plan.md`(여행 기간 이전 안 함 권고) [확인됨: 파일].
 
 ### 6.3 막힌 지점
-- LAPTOP-YS 오프라인(11/21–11/30): 야간 수집·F004·백업 미실행, catch-up 금지 [추정: `Seaweed.md` §1].
-- C2 재개는 W1 캡처(12월 복귀 후) 완료 + 윤석님 날짜 결정 대기. ARF 루틴 3개(`arf-07-50-ct`, `arf-09-22-ct`, `arf-23-00-ct`) 일시정지 제안이 윤석님 답 대기 [추정: `Zucchini.md` §3·§4].
+- LAPTOP-YS: 11/21–11/24 오프라인이었고 야간 수집·F004·백업은 미실행, catch-up 금지 방침 [추정: `Seaweed.md` §1]. 11/25 05:27 KST에 응답했고 예약 작업 3개는 Ready 상태라 다음 실행이 잡혀 있다: `DartNightlyCatalog` 11/25 14:00, `DartDbBackup` 11/25 21:30, `DartF004Weekly` 11/28 21:00 KST [확인됨 11/25]. 이 실행을 그대로 둘지는 윤석님·Seaweed 결정 사항이며 이번에 바꾸지 않았다.
+- C2 재개는 W1 캡처(12월 복귀 후) 완료 + 윤석님 날짜 결정 대기. ARF 루틴 3개(`arf-07-50-ct`, `arf-09-22-ct`, `arf-23-00-ct`) 일시정지 제안이 윤석님 답 대기 [추정: `Zucchini.md` §3·§4]. C2·uvicorn :8010은 W1 끝날 때까지 시작하지 않는다 [추정: queue.md 2026-11-24 8:09 AM CT 줄].
 - 박스에서 OpenDART 키 인증·한도·차단은 미확인 [추정: `Seaweed.md` §4].
 
 ## 7. 알려진 문제와 기술 부채
 1. 핵심 데이터·스케줄러·백업이 Windows 랩탑 한 대에 묶여 있음(PowerShell `run.ps1`, `mklink /J`, Restart Manager 잠금 검사) [추정: `Seaweed.md` §7].
-2. 백업 대상이 `dart_catalog.db`, `dart_sections.db`, DW `gold.db` 3개뿐 — DE `gold.db`, `f004_research.db` 누락 [추정: `Seaweed.md` §2.7].
-3. 랩탑 트리가 `feat/gold-review`(`2f0bf964`)에 고정되어 `master`와 다름 [추정: `Seaweed.md` §1].
+2. 백업 대상이 `dart_catalog.db`, `dart_sections.db`, DW `gold.db` 3개뿐 — DE `gold.db`, `f004_research.db` 누락 [확인됨 11/25: 랩탑 `backup.py` L18–L20].
+3. 랩탑 트리가 `feat/gold-review`(`2f0bf964`)에 고정되어 `master`보다 42 커밋 뒤 [확인됨 11/25].
 4. 스케줄 트리거는 KST 고정, 가드는 America/Chicago — 서머타임 전환 시 1시간 어긋날 수 있음 [추정: `Seaweed.md` §7].
 5. pytest-asyncio `asyncio_default_fixture_loop_scope` 미설정 경고 [확인됨: 박스 실행 로그].
 6. 원격 브랜치 21개 중 머지 후 남은 `cursor/*` 등 [확인됨: 개수].
 7. `HANDOFF.md`(2026-10-31)는 이후 결정(골드 검증 대상을 DE로 변경, 2026-11-01)과 다름 — DE `HANDOFF.md` 머리말 참고 [확인됨: 두 파일].
-8. 저장소 PUBLIC [확인됨].
+8. 저장소 PUBLIC [확인됨 11/25].
+9. F004 주간 래퍼 경로 불일치: `C:\dev\dart-f004\run.ps1`(L13)은 `C:\dev\dw-f004`를 쓰는데 그 폴더가 없고 worktree는 `C:\dev\dw-f004-d8e92e1`이다. 11/21 22:00 KST 실행이 `loader_missing`으로 실패(작업 결과 1) [확인됨 11/25: 랩탑 로그·스크립트].
+10. `C:\dev\dart-wrapper\.worktrees\admin-viewer-skeleton\` 폴더가 남아 있으나 `git worktree list`에 없다 [확인됨 11/25].
+11. 랩탑 트리에 untracked `data/`, `packages/web-api/dart_sections.db-shm`·`-wal`이 있다 [확인됨 11/25].
 
 ## 8. 환경변수(이름만)·외부 서비스·의존성
 - `packages/web-api/.env.example`(27개, `handover` 커밋) [확인됨]: `DATABASE_URL`, `NODE_EXECUTABLE`, `ENTRY_COLLECTOR_SCRIPT`, `COLLECTOR_TIMEOUT_SECONDS`, `DART_FETCH_CONCURRENCY`, `DART_FETCH_TIMEOUT_SECONDS`, `DART_FETCH_MAX_RETRIES`, `DART_FETCH_MIN_INTERVAL_SECONDS`, `ADMIN_TOKEN`, `DISCLOSURE_MAX_RETRIES`, `BLOCK_STREAK_THRESHOLD`, `BLOCK_WAIT_SECONDS`, `HEATMAP_REPORT_TYPES`, `DATE_RESOLVER_API_KEY`, `DATE_RESOLVER_MODEL`, `DATE_RESOLVER_PROMPT_VERSION`, `OPENDART_API_KEY`, `OPENDART_API_KEY_2`, `OPENDART_CONCURRENCY`, `OPENDART_TIMEOUT_SECONDS`, `OPENDART_MAX_RETRIES`, `OPENDART_MAX_PER_MINUTE`, `RESEARCH_ALLOW_CATALOG_WRITES`, `GOLD_DB_PATH`, `GOLD_CACHE_ROOT`, `GOLD_RUN_ID`, `DART_LLM_ENABLED`.
-- 실제 값은 랩탑 `C:\dev\dart-wrapper\packages\web-api\.env`에 있음 [추정: `Seaweed.md` §2] / 내용 [접근 불가, 열람하지 않음].
+- 실제 값은 랩탑 `C:\dev\dart-wrapper\packages\web-api\.env`에 있음 [추정: `Seaweed.md` §2] / 11/25 랩탑이 켜졌으나 비밀값이라 열지 않음.
 - 외부 서비스: DART 웹(dart.fss.or.kr 상세검색·상세페이지, 최소 간격 기본 1초) [확인됨: README], OpenDART 기업개황 API(업종 보강만) [확인됨: `AGENTS.md`], PostgreSQL(공개 앱, `postgresql+asyncpg://`) [확인됨: README], Google Drive `80_개발_AI/DART_DB_백업`(백업) [확인됨: 폴더 존재]. 유료 LLM·AWS·Gemini 금지, `DART_LLM_ENABLED` 끔 유지 [확인됨: `HANDOFF.md` 최우선 규칙].
 - 의존성: web-api `fastapi`, `uvicorn[standard]`, `pydantic`, `pydantic-settings`, `httpx`, `jinja2`, `python-multipart`, `beautifulsoup4`, `lxml`, `SQLAlchemy`, `aiosqlite`, `greenlet`, `tzdata`; extras `postgres=[asyncpg]`, `transform=[pandas]`, `dev=[pytest, pytest-asyncio, black, flake8]`; research → `dart-wrapper-web-api`; Node `axios ^1.7.7`, `cheerio ^1.0.0`. Python ≥3.11, CI 3.12 [확인됨].
 
@@ -196,7 +245,7 @@ PR·커밋 봇 식별 규칙(앞방향만): 라벨 `bot:<봇이름>`(클라우�
 | 단계 | 목표 | 완료 기준(명령으로 확인) |
 |---|---|---|
 | M0 이관 기반 | Cursor에서 테스트가 그대로 돈다 | `cd packages/web-api && python -m pytest -q` 298 passed 이상, `cd packages/research && PYTHONPATH=.:../web-api python -m pytest -q` 842 passed 이상, `cd packages/entry-extractor && npm test` rc 0 |
-| M1 랩탑 복귀 후 상태 확정 | 수집·백업 재가동과 현재 수치 기록 | 읽기 전용 `sqlite3 "file:dart_catalog.db?mode=ro" "select count(*) from disclosures"` 값 기록, `PRAGMA integrity_check` = ok, 다음 `DartDbBackup` `backup.py exit=0` |
+| M1 랩탑 복귀 후 상태 확정 | 수집·백업 재가동과 현재 수치 기록(11/25 건수 488,539·pending 75는 기록됨, `integrity_check`·재가동은 아직) | 읽기 전용 `sqlite3 "file:dart_catalog.db?mode=ro" "select count(*) from disclosures"` 값 기록, `PRAGMA integrity_check` = ok, 다음 `DartDbBackup` `backup.py exit=0` |
 | M2 백업 보강(승인 시) | DE `gold.db`, `f004_research.db`를 백업 대상에 추가 | `backup.py` `SOURCES`에 두 경로 포함, 백업 zip 목록에 두 파일 존재(`unzip -l`) |
 | M3 C2 완료(W1 후, 승인 시) | ARF C2 남은 3,167건 처리 | 잡 상태 complete, 처리 17,455/17,455, `audit_report_facts` 건수 기록 |
 | M4 이전 결정 | 야간 수집 상시 이전 여부 결정(`cloud-migration/plan.md`) | 대상 호스트에서 OpenDART 첫 페이지 응답 확인 후 1회 수집 `exit=0`, 단일 쓰기 원칙 점검 4종 기록 |
@@ -209,16 +258,16 @@ PR·커밋 봇 식별 규칙(앞방향만): 라벨 `bot:<봇이름>`(클라우�
 - Vegetable: 머지 후 남은 원격 브랜치 목록 작성(삭제는 승인 후) — 근거 7절 6.
 
 ## 12. 다음에 바로 할 일 5개
-1. 윤석님이 `HANDOVER.md` 초안을 검토하고 `handover` 브랜치에 커밋.
-2. Cursor에서 3.3절 테스트 3종 실행(M0).
-3. 랩탑 복귀 직후 읽기 전용으로 DB 건수·무결성·미완료 슬라이스 수 기록(M1).
-4. ARF 루틴 3개 일시정지 제안과 C2 재개 날짜를 윤석님이 결정.
-5. 백업 대상 보강(M2) 승인 여부 결정.
+1. 윤석님이 이 갱신 PR과 열린 PR #22(DECISIONS.md)를 검토하고 머지 여부를 결정.
+2. 오늘(11/25) 14:00 `DartNightlyCatalog`, 21:30 `DartDbBackup` 예약 실행을 그대로 둘지 결정(6.3).
+3. `DartF004Weekly`의 `C:\dev\dw-f004` 경로 불일치 처리 방법 결정(7절 9, 11/28 21:00 KST 다음 실행 전).
+4. Cursor에서 3.3절 테스트 3종 실행(M0), 랩탑에서 `PRAGMA integrity_check` 읽기 전용 실행(M1).
+5. ARF 루틴 3개 일시정지 제안과 C2 재개 날짜, 백업 대상 보강(M2)을 윤석님이 결정.
 
 ## 이 문서만으로 이어받기 어려운 부분
-- `dart_catalog.db`, `dart_sections.db`, `gold.db`, `f004_research.db` 실물과 랩탑 `.env`, 작업 스케줄러 정의(XML), `run.ps1` 실본 — [접근 불가].
+- `dart_catalog.db`, `dart_sections.db`, `gold.db`, `f004_research.db` 실물과 랩탑 `.env`, `run.ps1` 실본은 랩탑에만 있다. 11/25 크기·건수·예약 작업 동작은 2.2절에 적었으나 `.env` 내용, 작업 스케줄러 XML 원문, `PRAGMA integrity_check`는 확인하지 않았다.
 - 공개 Viewer API의 실제 배포처·DB — [확인 불가].
-- 야간 수집 회차별 로그(`C:\dev\dart-nightly\logs`) — [접근 불가].
+- 야간 수집 회차별 로그는 랩탑 `C:\dev\dart-nightly\logs`에만 있다(11/25 최신 11/21분 요약만 읽음).
 - 추출기 버전·골드 판정 이력은 봇 보고서와 `/workspace/proposals/gold-ingest/`에만 있다.
 
 ## 내게 확인이 필요한 질문
@@ -227,3 +276,5 @@ PR·커밋 봇 식별 규칙(앞방향만): 라벨 `bot:<봇이름>`(클라우�
 3. 랩탑 트리를 `feat/gold-review` 고정으로 계속 둘지 `master`로 맞출지?
 4. 공개 Viewer API(`app.public`)를 실제로 배포한 적이 있는지, 있다면 어디인지?
 5. ARF 루틴 3개를 W1 전까지 일시정지할지?
+6. `DartF004Weekly`가 찾는 `C:\dev\dw-f004`를 어떻게 맞출지(스크립트 경로 수정 또는 worktree 이름 정리)?
+7. 여행 기간(11/30까지) 랩탑이 켜져 있는 동안 예약 수집·백업을 그대로 돌릴지?
